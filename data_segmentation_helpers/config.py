@@ -29,10 +29,6 @@ STFT_NOVERLAP = 128     # Overlap between windows (50%)
 # Artifact removal
 ARTIFACT_THRESHOLD_STD = 4    # Standard deviations for artifact detection
 
-# Bad channel detection  
-BAD_CHANNEL_STD_THRESHOLD = 3   # Z-score threshold for bad channels
-BAD_CHANNEL_FLAT_PERCENTILE = 5 # Percentile threshold for flat channels
-
 # Power spectrogram settings
 LOG_TRANSFORM_EPSILON = 1e-12   # Small value to avoid log(0)
 APPLY_LOG_TRANSFORM = True      # Whether to apply log transform
@@ -44,3 +40,11 @@ TARGET_CHANNELS = [
 ]
 
 SKIP_CHANNEL_VALIDATION = True
+
+
+# Training configuration
+TRAINING_EPOCHS = 30
+BATCH_SIZE = 32
+LEARNING_RATE = 0.001
+NUM_WORKERS = 4  # DataLoader workers
+WEIGHT_DECAY = 1e-4  # L2 regularization

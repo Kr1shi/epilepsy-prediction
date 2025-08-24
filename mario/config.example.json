@@ -1,0 +1,21 @@
+{
+  "chb_root_dir": "/home/krishi/Projects/epilepsy-prediction/physionet.org/files/chbmit/1.0.0",
+  "out_root_dir": "/home/krishi/Projects/epilepsy-prediction/mario/DS",
+  "include_patients": [],
+  "exclude_patients": [],
+  "filter": {
+    "l_freq": 0.5,
+    "h_freq": 40.0,
+    "fir_design": "firwin"
+  },
+  "resample_hz": 256,
+  "window_size_sec": 30,
+  "stride_sec": 30,
+  "preictal_horizon_sec": 1800,
+  "chunk_size": 1000,
+  "standardize_channels": true,
+  "required_channels": [],
+  "num_workers": 1,
+  "log_level": "info",
+  "on_error": "fail"
+}

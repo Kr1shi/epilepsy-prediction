@@ -1,0 +1,97 @@
+You should have the directories like this:
+
+CHB-MIT root
+└─ chbXX/                                (patient folder)
+   ├─ chbXX_01.edf
+   ├─ chbXX_02.edf
+   ├─ ...
+   └─ chbXX-summary.txt                  (seizure times)
+
+This is how it works:
+
+[1] Read seizure summary
+    chbXX-summary.txt
+        ↓
+    seizure_dict : { "chbXX_01.edf": [(s1,e1), (s2,e2)], ... }
+
+[2] Discover EDF files
+    list .edf in edf_dir → ["chbXX_01.edf", "chbXX_02.edf", ...]
+
+
+[3] (Optional) Standardize channels
+    infer intersection of EEG channels across all EDFs (drop ECG/EMG/etc)
+        ↓
+    req_ch = ["FP1-F7", "FP2-F8", ...]         (consistent order)
+
+
+[4] For each EDF file:
+    read_raw_edf(preload=True)
+      ├─ reorder/pick req_ch (if standardize_channels)
+      ├─ filter(l_freq=0.5, h_freq=40, fir_design="firwin")   [if configured]
+      └─ resample(256 Hz)                                     [if configured]
+        ↓
+    raw (MNE Raw)
+
+
+[5] Window + label (segment_and_label_iter)
+    raw → sliding windows of length W sec, stride S sec
+      ├─ skip windows that overlap actual seizures
+      ├─ z-score per channel (window-wise)
+      └─ label = 1 if window_end ∈ [seizure_start - horizon, seizure_start], else 0
+        ↓
+    yields many (data, label)
+      data shape: (C, T)  C=channels, T=W*sfreq
+
+
+[6] Chunking and saving
+    accumulate windows in RAM:
+      buf_X: [ (C,T), (C,T), ... ]
+      buf_y: [ 0/1, 0/1, ... ]
+    when len(buf_y) == chunk_size:
+        X_chunk = stack(buf_X)  → shape (N, C, T)
+        y_chunk = array(buf_y)  → shape (N,)
+        save:
+          out_dir/
+            X_0.npy
+            y_0.npy
+        clear buffers and continue
+    after last EDF: flush remaining windows → X_k.npy, y_k.npy
+
+
+[7] Metadata
+    read X_0.npy (mmap) to get shapes if needed
+    build meta:
+      {
+        "n_chunks": k+1,
+        "total_windows": ...,
+        "preictal_windows": ...,
+        "interictal_windows": ...,
+        "channels": req_ch or channel_count,
+        "window_length_samples": T,
+        "window_size_sec": W,
+        "stride_sec": S,
+        "preictal_horizon_sec": H,
+        "sfreq": final sampling rate,
+        "filter": {...},
+        "resample_hz": ...,
+        "standardize_channels": true/false
+      }
+    write:
+      out_dir/metadata.json
+
+
+out_root/
+└─ chbXX/
+   ├─ X_0.npy                 (N0, C, T)
+   ├─ y_0.npy                 (N0,)
+   ├─ X_1.npy                 (N1, C, T)
+   ├─ y_1.npy                 (N1,)
+   ├─ ...
+   └─ metadata.json
+
+
+collect (patient, metadata.json) for each chbXX
+  └─ sum totals, attach per-patient entries
+      ↓
+out_root/global_metadata.json
+

@@ -13,6 +13,8 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 from scipy.signal import spectrogram
+from multiprocessing import Pool, cpu_count
+from functools import partial
 from data_segmentation_helpers.config import *
 
 # Suppress MNE warnings that don't affect processing
@@ -27,38 +29,49 @@ warnings.filterwarnings("ignore", message=".*file size.*", category=RuntimeWarni
 mne.set_log_level('ERROR')
 
 class EEGPreprocessor:
-    def __init__(self, input_json_path: str = 'all_patients_segments.json'):
+    def __init__(self, input_json_path: str = 'all_patients_sequences.json'):
         self.input_json_path = input_json_path
         self.output_dir = Path("preprocessing")
         self.data_dir = self.output_dir / "data"
         self.logs_dir = self.output_dir / "logs"
         self.checkpoint_dir = self.output_dir / "checkpoints"
         self.checkpoint_file = self.checkpoint_dir / "progress.json"
-        
+
         # Processing settings
         self.checkpoint_interval = 50
         self.train_ratio = 0.70
         self.val_ratio = 0.15
         self.test_ratio = 0.15
-        
+
         # Statistics tracking
         self.removed_segments = {
             'wrong_duration': 0,
             'beyond_file_bounds': 0,
             'processing_errors': 0
         }
-        
+
+        # Normalization statistics (computed from training data only)
+        self.norm_stats_file = self.checkpoint_dir / 'normalization_stats.json'
+        self.global_mean = None
+        self.global_std = None
+
         # Initialize logging and directories
         self.setup_logging_and_directories()
-        
+
         # Load checkpoint if exists
         self.checkpoint = self.load_checkpoint()
-        
+
         self.logger.info("EEG Preprocessor initialized")
         self.logger.info(f"Target channels: {TARGET_CHANNELS}")
         self.logger.info(f"Filter settings: {LOW_FREQ_HZ}-{HIGH_FREQ_HZ} Hz, notch: {NOTCH_FREQ_HZ} Hz")
         self.logger.info(f"Segment duration: {SEGMENT_DURATION} seconds")
-        self.logger.info(f"Skip channel validation: {SKIP_CHANNEL_VALIDATION}")
+        self.logger.info("Note: Channel validation performed during segmentation phase")
+
+        # Multiprocessing setup
+        available_cores = cpu_count()
+        self.n_workers = min(PREPROCESSING_WORKERS, available_cores)
+        self.logger.info(f"Multiprocessing: Using {self.n_workers}/{available_cores} CPU cores for parallel preprocessing")
+        self.logger.info(f"MNE parallel filtering: {MNE_N_JOBS} jobs per sequence")
     
     def setup_logging_and_directories(self):
         """Setup logging and create directory structure"""
@@ -132,130 +145,103 @@ class EEGPreprocessor:
         
         with open(self.checkpoint_file, 'w') as f:
             json.dump(checkpoint_copy, f, indent=2)
-        
-    def validate_segments(self, segments: List[Dict]) -> Tuple[List[Dict], Dict]:
-        """Validate segments have all required channels"""
-        self.logger.info("Validating segment channels...")
-        
-        valid_segments = []
-        validation_stats = {
-            'total_segments': len(segments),
-            'valid_segments': 0,
-            'invalid_segments': 0,
-            'patients_processed': set(),
-            'patients_with_no_valid': set(),
-            'missing_files': 0
-        }
-        
-        for segment in tqdm(segments, desc="Validating channels"):
-            try:
-                # Construct EDF path
-                edf_path = f"physionet.org/files/chbmit/1.0.0/{segment['patient_id']}/{segment['file']}"
-                
-                if not os.path.exists(edf_path):
-                    self.logger.warning(f"File not found: {edf_path}")
-                    validation_stats['missing_files'] += 1
-                    continue
-                
-                # Read EDF header only (fast)
-                raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
-                available_channels = set(raw.ch_names)
-                
-                # Check for all target channels (including duplicates)
-                missing_channels = []
-                for target_ch in TARGET_CHANNELS:
-                    if target_ch not in available_channels:
-                        # Check for renamed duplicates
-                        duplicate_matches = [ch for ch in available_channels 
-                                           if ch.startswith(target_ch + '-') and ch.split('-')[-1].isdigit()]
-                        if not duplicate_matches:
-                            missing_channels.append(target_ch)
-                
-                validation_stats['patients_processed'].add(segment['patient_id'])
-                
-                if missing_channels:
-                    self.logger.debug(f"Segment {segment['patient_id']}/{segment['file']} missing channels: {missing_channels}")
-                    validation_stats['invalid_segments'] += 1
-                else:
-                    valid_segments.append(segment)
-                    validation_stats['valid_segments'] += 1
-                    
-            except Exception as e:
-                self.logger.error(f"Error validating segment {segment.get('patient_id', 'unknown')}/{segment.get('file', 'unknown')}: {e}")
-                validation_stats['invalid_segments'] += 1
-        
-        # Check for patients with no valid segments
-        patient_valid_counts = {}
-        for segment in valid_segments:
-            patient_id = segment['patient_id']
-            patient_valid_counts[patient_id] = patient_valid_counts.get(patient_id, 0) + 1
-        
-        for patient_id in validation_stats['patients_processed']:
-            if patient_id not in patient_valid_counts:
-                validation_stats['patients_with_no_valid'].add(patient_id)
-                self.logger.warning(f"Patient {patient_id} has 0 valid segments")
-        
-        # Convert sets to lists for JSON serialization
-        validation_stats['patients_processed'] = list(validation_stats['patients_processed'])
-        validation_stats['patients_with_no_valid'] = list(validation_stats['patients_with_no_valid'])
-        
-        self.logger.info(f"Validation complete: {validation_stats['valid_segments']}/{validation_stats['total_segments']} segments valid")
-        self.logger.info(f"Patients with valid segments: {len(patient_valid_counts)}")
-        
-        return valid_segments, validation_stats
 
-    def balance_and_split_data(self, segments: List[Dict]) -> Dict[str, List[Dict]]:
-        """Balance classes globally and split into train/val/test"""
-        self.logger.info("Balancing and splitting data...")
-        
-        # Separate by class
-        preictal_segments = [s for s in segments if s['type'] == 'preictal']
-        interictal_segments = [s for s in segments if s['type'] == 'interictal']
-        
-        self.logger.info(f"Before balancing: {len(preictal_segments)} preictal, {len(interictal_segments)} interictal")
-        
-        # Balance to minimum class
-        min_count = min(len(preictal_segments), len(interictal_segments))
-        
-        # Randomly sample to balance (using RandomState for reproducibility)
-        rng = np.random.RandomState(42)
-        balanced_preictal = rng.choice(preictal_segments, size=min_count, replace=False).tolist()
-        balanced_interictal = rng.choice(interictal_segments, size=min_count, replace=False).tolist()
-        
-        # Combine and shuffle
-        balanced_segments = balanced_preictal + balanced_interictal
-        rng.shuffle(balanced_segments)
-        
-        self.logger.info(f"After balancing: {len(balanced_preictal)} preictal, {len(balanced_interictal)} interictal")
-        self.logger.info(f"Total balanced segments: {len(balanced_segments)}")
-        
-        # Split into train/val/test
-        train_segments, temp_segments = train_test_split(
-            balanced_segments, 
-            test_size=(self.val_ratio + self.test_ratio),
-            stratify=[s['type'] for s in balanced_segments],
-            random_state=42
-        )
-        
-        val_segments, test_segments = train_test_split(
-            temp_segments,
-            test_size=self.test_ratio / (self.val_ratio + self.test_ratio),
-            stratify=[s['type'] for s in temp_segments],
-            random_state=42
-        )
-        
-        splits = {
-            'train': train_segments,
-            'val': val_segments, 
-            'test': test_segments
+    def compute_normalization_stats(self, train_spectrograms):
+        """Compute global mean and std from training spectrograms
+
+        Args:
+            train_spectrograms: List of spectrogram arrays from training data
+        """
+        self.logger.info("Computing normalization statistics from training data...")
+
+        # Stack all spectrograms
+        all_specs = np.concatenate(train_spectrograms, axis=0)
+
+        # Compute global statistics
+        self.global_mean = np.mean(all_specs)
+        self.global_std = np.std(all_specs)
+
+        # Save to file
+        stats = {
+            'global_mean': float(self.global_mean),
+            'global_std': float(self.global_std),
+            'n_samples': len(train_spectrograms),
+            'total_values': all_specs.size
         }
-        
+
+        with open(self.norm_stats_file, 'w') as f:
+            json.dump(stats, f, indent=2)
+
+        self.logger.info(f"Normalization stats computed:")
+        self.logger.info(f"  Mean: {self.global_mean:.6f}")
+        self.logger.info(f"  Std: {self.global_std:.6f}")
+        self.logger.info(f"  Saved to: {self.norm_stats_file}")
+
+    def load_normalization_stats(self):
+        """Load normalization statistics from file"""
+        if self.norm_stats_file.exists():
+            with open(self.norm_stats_file, 'r') as f:
+                stats = json.load(f)
+
+            self.global_mean = stats['global_mean']
+            self.global_std = stats['global_std']
+
+            self.logger.info("Loaded normalization statistics:")
+            self.logger.info(f"  Mean: {self.global_mean:.6f}")
+            self.logger.info(f"  Std: {self.global_std:.6f}")
+            return True
+        else:
+            self.logger.warning("No normalization statistics file found")
+            return False
+
+    # Channel validation has been moved to data_segmentation.py
+    # This ensures we fail fast and only create sequences for files with valid channels
+    # The input JSON file already contains only validated sequences
+
+    def balance_and_split_data(self, sequences: List[Dict]) -> Dict[str, List[Dict]]:
+        """Patient-level split for sequences (no balancing to preserve patient distribution)"""
+        self.logger.info("Performing patient-level split for sequences...")
+
+        # Separate by class
+        preictal_sequences = [s for s in sequences if s['type'] == 'preictal']
+        interictal_sequences = [s for s in sequences if s['type'] == 'interictal']
+
+        self.logger.info(f"Total sequences: {len(preictal_sequences)} preictal, {len(interictal_sequences)} interictal")
+
+        # Get unique patients
+        all_patients = sorted(set([s['patient_id'] for s in sequences]))
+        self.logger.info(f"Total patients: {len(all_patients)}")
+
+        # Split patients (not sequences) into train/val/test
+        rng = np.random.RandomState(42)
+        rng.shuffle(all_patients)
+
+        n_train = int(len(all_patients) * self.train_ratio)
+        n_val = int(len(all_patients) * self.val_ratio)
+
+        train_patients = set(all_patients[:n_train])
+        val_patients = set(all_patients[n_train:n_train+n_val])
+        test_patients = set(all_patients[n_train+n_val:])
+
+        self.logger.info(f"Patient split: {len(train_patients)} train, {len(val_patients)} val, {len(test_patients)} test")
+        self.logger.info(f"Train patients: {sorted(train_patients)}")
+        self.logger.info(f"Val patients: {sorted(val_patients)}")
+        self.logger.info(f"Test patients: {sorted(test_patients)}")
+
+        # Assign sequences to splits based on patient
+        splits = {
+            'train': [s for s in sequences if s['patient_id'] in train_patients],
+            'val': [s for s in sequences if s['patient_id'] in val_patients],
+            'test': [s for s in sequences if s['patient_id'] in test_patients]
+        }
+
         # Log split statistics
-        for split_name, split_segments in splits.items():
-            preictal_count = sum(1 for s in split_segments if s['type'] == 'preictal')
-            interictal_count = len(split_segments) - preictal_count
-            self.logger.info(f"{split_name}: {len(split_segments)} segments ({preictal_count} preictal, {interictal_count} interictal)")
-        
+        for split_name, split_seqs in splits.items():
+            preictal_count = sum(1 for s in split_seqs if s['type'] == 'preictal')
+            interictal_count = len(split_seqs) - preictal_count
+            patients = set([s['patient_id'] for s in split_seqs])
+            self.logger.info(f"{split_name}: {len(split_seqs)} sequences ({preictal_count} preictal, {interictal_count} interictal) from {len(patients)} patients")
+
         return splits
 
     def select_target_channels(self, raw, target_channels=TARGET_CHANNELS):
@@ -277,29 +263,6 @@ class EEGPreprocessor:
         
         raw_filtered = raw.copy().pick(available_channels)
         return raw_filtered, clean_channel_names
-
-    def detect_bad_channels(self, raw):
-        """Detect bad channels using statistical methods"""
-        data = raw.get_data()
-        bad_channels = []
-        
-        channel_stds = np.std(data, axis=1)
-        median_std = np.median(channel_stds)
-        mad_std = np.median(np.abs(channel_stds - median_std))
-        
-        for i, std_val in enumerate(channel_stds):
-            z_score = np.abs((std_val - median_std) / (mad_std * 1.4826))
-            if z_score > BAD_CHANNEL_STD_THRESHOLD:
-                bad_channels.append(raw.ch_names[i])
-        
-        # Check for flat channels
-        flat_threshold = np.percentile(channel_stds, BAD_CHANNEL_FLAT_PERCENTILE)
-        for i, std_val in enumerate(channel_stds):
-            if std_val < flat_threshold * 0.1:
-                if raw.ch_names[i] not in bad_channels:
-                    bad_channels.append(raw.ch_names[i])
-        
-        return bad_channels
 
     def remove_amplitude_artifacts(self, raw):
         """Remove extreme amplitude artifacts"""
@@ -363,115 +326,109 @@ class EEGPreprocessor:
         
         return stft_spectrograms, frequencies
 
-    def preprocess_segment(self, segment: Dict) -> Optional[Dict]:
-        """Preprocess a single segment"""
+    def preprocess_sequence(self, sequence: Dict) -> Optional[Dict]:
+        """Preprocess an entire sequence (multiple consecutive segments)"""
         try:
-            # Construct EDF path
-            edf_path = f"physionet.org/files/chbmit/1.0.0/{segment['patient_id']}/{segment['file']}"
-            
-            # Read EDF file
+            # Process each segment in the sequence
+            sequence_spectrograms = []
+            edf_path = f"physionet.org/files/chbmit/1.0.0/{sequence['patient_id']}/{sequence['file']}"
+
+            # Read EDF file once for the whole sequence
             raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
             sampling_rate = raw.info['sfreq']
-            file_duration = raw.times[-1]  # Get actual file duration
-            
-            # Check if segment is exactly SEGMENT_DURATION seconds and within file bounds
-            expected_duration = segment['end_sec'] - segment['start_sec']
-            if expected_duration != SEGMENT_DURATION:
-                self.logger.debug(f"Segment duration not {SEGMENT_DURATION}s ({expected_duration}s), skipping: {segment['patient_id']}/{segment['file']} at {segment['start_sec']}s")
-                self.removed_segments['wrong_duration'] += 1
-                return None
-                
-            if segment['end_sec'] > file_duration:
-                self.logger.debug(f"Segment extends beyond file duration ({segment['end_sec']}s > {file_duration:.1f}s), skipping: {segment['patient_id']}/{segment['file']} at {segment['start_sec']}s")
-                self.removed_segments['beyond_file_bounds'] += 1
-                return None
-            
+
             # Select target channels
             raw_selected, clean_channel_names = self.select_target_channels(raw)
-            
-            # Extract segment (we know it's valid SEGMENT_DURATION seconds now)
-            raw_segment = raw_selected.copy().crop(tmin=segment['start_sec'], tmax=segment['end_sec'])
-            
-            # Bad channel detection and interpolation
-            bad_channels = self.detect_bad_channels(raw_segment)
-            if bad_channels:
-                raw_segment.info['bads'] = bad_channels
-                # Only interpolate if digitization info is available
-                if raw_segment.info.get('dig') is not None:
-                    raw_segment.interpolate_bads(reset_bads=True, verbose=False)
-                    self.logger.debug(f"Interpolated bad channels: {bad_channels}")
-                else:
-                    self.logger.debug(f"Skipping interpolation for bad channels {bad_channels} - no digitization info")
-                    # Reset bad channels list since we can't interpolate
-                    raw_segment.info['bads'] = []
-            
-            # Artifact removal
-            artifact_counts = self.remove_amplitude_artifacts(raw_segment)
-            
-            # Filtering
-            raw_filtered = raw_segment.copy()
-            raw_filtered.filter(l_freq=LOW_FREQ_HZ, h_freq=HIGH_FREQ_HZ, fir_design='firwin', verbose=False)
-            raw_filtered.notch_filter(freqs=NOTCH_FREQ_HZ, verbose=False)
-            
-            # Normalization
-            filtered_data = raw_filtered.get_data()
-            normalized_data = self.robust_normalize(filtered_data)
-            
-            # STFT
-            stft_coeffs, frequencies = self.apply_stft(normalized_data, sampling_rate)
-            
-            # Convert to power spectrograms
-            power_spectrograms = np.abs(stft_coeffs) ** 2
-            if APPLY_LOG_TRANSFORM:
-                power_spectrograms = np.log10(power_spectrograms + LOG_TRANSFORM_EPSILON)
-            
-            # Create segment identifier
-            segment_id = f"{segment['patient_id']}_{segment['type']}_{segment['start_sec']}"
-            
+
+            # ✅ OPTIMIZATION 1: Crop to sequence range BEFORE filtering
+            # Only filter the portion of the file we actually need
+            min_time = min(sequence['segment_starts'])
+            max_time = max(sequence['segment_starts']) + SEGMENT_DURATION
+
+            # Add padding for filter edge effects (5 seconds on each side)
+            padding = 5.0
+            crop_tmin = max(0, min_time - padding)
+            crop_tmax = min(raw_selected.times[-1], max_time + padding)
+
+            # Crop to the sequence range (with padding)
+            raw_cropped = raw_selected.copy().crop(tmin=crop_tmin, tmax=crop_tmax)
+
+            # ✅ OPTIMIZATION 2: Filter ONCE (not per segment!) and only the cropped range
+            raw_filtered = raw_cropped.copy()
+            raw_filtered.filter(l_freq=LOW_FREQ_HZ, h_freq=HIGH_FREQ_HZ, fir_design='firwin',
+                              n_jobs=MNE_N_JOBS, verbose=False)
+            raw_filtered.notch_filter(freqs=NOTCH_FREQ_HZ, n_jobs=MNE_N_JOBS, verbose=False)
+
+            # Now extract segments from the pre-filtered data
+            for segment_start in sequence['segment_starts']:
+                segment_end = segment_start + SEGMENT_DURATION
+
+                # Extract segment from ALREADY FILTERED data
+                raw_segment = raw_filtered.copy().crop(tmin=segment_start, tmax=segment_end)
+
+                # Artifact removal (light operation, ok to do per-segment)
+                artifact_counts = self.remove_amplitude_artifacts(raw_segment)
+
+                # Get filtered data (DO NOT normalize time-domain signal before STFT!)
+                filtered_data = raw_segment.get_data()
+
+                # STFT - apply directly to filtered (but NOT normalized) time-domain signal
+                stft_coeffs, frequencies = self.apply_stft(filtered_data, sampling_rate)
+
+                # Convert to power spectrograms
+                power_spectrogram = np.abs(stft_coeffs) ** 2
+                if APPLY_LOG_TRANSFORM:
+                    power_spectrogram = np.log10(power_spectrogram + LOG_TRANSFORM_EPSILON)
+
+                # Apply normalization (using training statistics)
+                if self.global_mean is not None and self.global_std is not None:
+                    power_spectrogram = (power_spectrogram - self.global_mean) / (self.global_std + 1e-8)
+
+                sequence_spectrograms.append(power_spectrogram)
+
+            # Stack into sequence: (seq_len, n_channels, n_freqs, n_times)
+            sequence_array = np.stack(sequence_spectrograms, axis=0)
+
             return {
-                'segment_id': segment_id,
-                'spectrogram': power_spectrograms.astype(np.float32),
-                'label': 1 if segment['type'] == 'preictal' else 0,
-                'patient_id': segment['patient_id'],
-                'start_sec': segment['start_sec'],
-                'end_sec': segment['end_sec'],  # Always SEGMENT_DURATION seconds now
-                'file_name': segment['file'],
-                'time_to_seizure': segment.get('time_to_seizure', -1),
+                'spectrogram': sequence_array,
+                'label': 1 if sequence['type'] == 'preictal' else 0,
+                'patient_id': sequence['patient_id'],
+                'sequence_start_sec': sequence['sequence_start_sec'],
+                'sequence_end_sec': sequence['sequence_end_sec'],
+                'file_name': sequence['file'],
+                'time_to_seizure': sequence.get('time_to_seizure', -1),
                 'channel_names': clean_channel_names,
-                'frequencies': frequencies,
-                'sampling_rate': sampling_rate,
-                'bad_channels': bad_channels,
-                'artifact_count': np.sum(artifact_counts)
+                'frequencies': frequencies
             }
-            
+
         except Exception as e:
-            self.logger.error(f"Failed to process segment {segment['patient_id']}/{segment['file']} at {segment['start_sec']}s: {e}")
+            self.logger.error(f"Failed to process sequence {sequence['patient_id']}/{sequence['file']} at {sequence['sequence_start_sec']}s: {e}")
             self.removed_segments['processing_errors'] += 1
             return None
 
-    def append_to_hdf5(self, split_name: str, batch_segments: List[Dict]):
-        """Append a batch of processed segments to an HDF5 file.
+    def append_to_hdf5(self, split_name: str, batch_sequences: List[Dict]):
+        """Append a batch of processed sequences to an HDF5 file.
         Creates the file and datasets if they don't exist.
         """
-        if not batch_segments:
+        if not batch_sequences:
             return
 
         output_file = self.data_dir / f"{split_name}_dataset.h5"
-        self.logger.debug(f"Appending {len(batch_segments)} segments to {output_file}")
+        self.logger.debug(f"Appending {len(batch_sequences)} sequences to {output_file}")
 
-        # Get dimensions from first segment
-        first_spec = batch_segments[0]['spectrogram']
-        n_channels, n_freqs, n_times = first_spec.shape
-        
+        # Get dimensions from first sequence
+        first_spec = batch_sequences[0]['spectrogram']
+        n_seq_len, n_channels, n_freqs, n_times = first_spec.shape
+
         try:
             with h5py.File(output_file, 'a') as f:
                 # Create datasets if they don't exist
                 if 'spectrograms' not in f:
                     self.logger.info(f"Creating new HDF5 file or datasets in: {output_file}")
-                    f.create_dataset('spectrograms', 
-                                     (0, n_channels, n_freqs, n_times), 
-                                     maxshape=(None, n_channels, n_freqs, n_times),
-                                     dtype=np.float32, chunks=True)
+                    f.create_dataset('spectrograms',
+                                     (0, n_seq_len, n_channels, n_freqs, n_times),
+                                     maxshape=(None, n_seq_len, n_channels, n_freqs, n_times),
+                                     dtype=np.float32, chunks=True, compression='gzip')
                     f.create_dataset('labels', (0,), maxshape=(None,), dtype=np.int32, chunks=True)
                     f.create_dataset('patient_ids', (0,), maxshape=(None,), dtype='S10', chunks=True)
                     
@@ -483,10 +440,11 @@ class EEGPreprocessor:
                     seg_info.create_dataset('segment_ids', (0,), maxshape=(None,), dtype='S50', chunks=True)
 
                     metadata = f.create_group('metadata')
-                    metadata.attrs['target_channels'] = [ch.encode('utf-8') for ch in batch_segments[0]['channel_names']]
-                    metadata.attrs['frequencies'] = batch_segments[0]['frequencies']
+                    metadata.attrs['target_channels'] = [ch.encode('utf-8') for ch in batch_sequences[0]['channel_names']]
+                    metadata.attrs['frequencies'] = batch_sequences[0]['frequencies']
                     metadata.attrs['frequency_range'] = [LOW_FREQ_HZ, HIGH_FREQ_HZ]
-                    metadata.attrs['sampling_rate'] = batch_segments[0]['sampling_rate']
+                    metadata.attrs['sequence_length'] = SEQUENCE_LENGTH
+                    metadata.attrs['segment_duration'] = SEGMENT_DURATION
                     metadata.attrs['stft_params'] = f"nperseg={STFT_NPERSEG}, noverlap={STFT_NOVERLAP}"
                     metadata.attrs['preprocessing_config'] = json.dumps({
                         'low_freq_hz': LOW_FREQ_HZ,
@@ -495,11 +453,17 @@ class EEGPreprocessor:
                         'artifact_threshold_std': ARTIFACT_THRESHOLD_STD,
                         'log_transform': APPLY_LOG_TRANSFORM
                     })
+                    metadata.attrs['normalization'] = json.dumps({
+                        'method': 'z-score',
+                        'global_mean': float(self.global_mean) if self.global_mean is not None else None,
+                        'global_std': float(self.global_std) if self.global_std is not None else None,
+                        'computed_from': 'training_data'
+                    })
                     metadata.attrs['creation_timestamp'] = datetime.now().isoformat()
 
                 # Append data
                 n_existing = f['spectrograms'].shape[0]
-                n_new = len(batch_segments)
+                n_new = len(batch_sequences)
                 new_total = n_existing + n_new
 
                 # Resize datasets
@@ -511,24 +475,25 @@ class EEGPreprocessor:
                     seg_info[key].resize(new_total, axis=0)
 
                 # Fill new data
-                for i, seg in enumerate(batch_segments):
+                for i, seq in enumerate(batch_sequences):
                     idx = n_existing + i
-                    f['spectrograms'][idx] = seg['spectrogram']
-                    f['labels'][idx] = seg['label']
-                    f['patient_ids'][idx] = seg['patient_id'].encode('utf-8')
-                    seg_info['start_times'][idx] = seg['start_sec']
-                    seg_info['end_times'][idx] = seg['end_sec']
-                    seg_info['file_names'][idx] = seg['file_name'].encode('utf-8')
-                    seg_info['time_to_seizure'][idx] = seg['time_to_seizure']
-                    seg_info['segment_ids'][idx] = seg['segment_id'].encode('utf-8')
+                    f['spectrograms'][idx] = seq['spectrogram']
+                    f['labels'][idx] = seq['label']
+                    f['patient_ids'][idx] = seq['patient_id'].encode('utf-8')
+                    seg_info['start_times'][idx] = seq['sequence_start_sec']
+                    seg_info['end_times'][idx] = seq['sequence_end_sec']
+                    seg_info['file_names'][idx] = seq['file_name'].encode('utf-8')
+                    seg_info['time_to_seizure'][idx] = seq['time_to_seizure']
+                    sequence_id = f"{seq['patient_id']}_{seq['sequence_start_sec']}"
+                    seg_info['segment_ids'][idx] = sequence_id.encode('utf-8')
 
                 # Update metadata
-                f['metadata'].attrs['n_segments'] = new_total
+                f['metadata'].attrs['n_sequences'] = new_total
                 n_preictal = np.sum(f['labels'][:] == 1)
                 n_interictal = new_total - n_preictal
                 f['metadata'].attrs['class_distribution'] = f"preictal: {n_preictal}, interictal: {n_interictal}"
 
-            self.logger.debug(f"Successfully appended batch. New total segments for {split_name}: {new_total}")
+            self.logger.debug(f"Successfully appended batch. New total sequences for {split_name}: {new_total}")
         except Exception as e:
             self.logger.error(f"Error appending to HDF5 file {output_file}: {e}")
             raise
@@ -569,62 +534,60 @@ class EEGPreprocessor:
             self.logger.info(f"Loading segments from {self.input_json_path}")
             with open(self.input_json_path, 'r') as f:
                 data = json.load(f)
-            
-            all_segments = data['preictal_segments'] + data['interictal_segments']
-            self.logger.info(f"Loaded {len(all_segments)} total segments")
-            
-            # Check if we need to validate segments
-            if SKIP_CHANNEL_VALIDATION:
-                if ('valid_segments' in self.checkpoint and 
-                    'segments' in self.checkpoint.get('valid_segments', {}) and
-                    self.checkpoint['valid_segments'].get('segments')):
-                    
-                    self.logger.info("Skipping channel validation (SKIP_CHANNEL_VALIDATION=True) - using cache")
-                    valid_segments = self.checkpoint['valid_segments']['segments']
-                    self.logger.info(f"Using cached {len(valid_segments)} valid segments")
-                else:
-                    self.logger.info("Skipping channel validation (SKIP_CHANNEL_VALIDATION=True) - using all segments")
-                    valid_segments = all_segments
-                    # Cache the decision to skip validation
-                    self.checkpoint['valid_segments'] = {
-                        'segments': valid_segments,
-                        'stats': {
-                            'total_segments': len(all_segments),
-                            'valid_segments': len(all_segments),
-                            'invalid_segments': 0,
-                            'validation_skipped': True
-                        }
-                    }
-                    self.save_checkpoint()
-                    
-            elif ('valid_segments' not in self.checkpoint or 
-                'segments' not in self.checkpoint.get('valid_segments', {}) or
-                not self.checkpoint['valid_segments'].get('segments')):
-                
-                self.logger.info("Performing channel validation...")
-                # Validate segments
-                valid_segments, validation_stats = self.validate_segments(all_segments)
-                self.checkpoint['valid_segments'] = {
-                    'segments': valid_segments,
-                    'stats': validation_stats
-                }
-                self.save_checkpoint()
-            else:
-                self.logger.info("Using cached segment validation")
-                valid_segments = self.checkpoint['valid_segments']['segments']
-                self.logger.info(f"Loaded {len(valid_segments)} valid segments from cache")
-            
-            # Balance and split data
+
+            all_sequences = data['sequences']
+            self.logger.info(f"Loaded {len(all_sequences)} total sequences")
+
+            # Log validation info from segmentation phase
+            if 'validation_info' in data:
+                val_info = data['validation_info']
+                self.logger.info(f"Channel validation (from segmentation): {val_info.get('files_with_valid_channels', 'N/A')}/{val_info.get('total_files_checked', 'N/A')} files valid")
+                if val_info.get('files_with_invalid_channels', 0) > 0:
+                    self.logger.info(f"Files skipped due to missing channels: {val_info['files_with_invalid_channels']}")
+
+            # All sequences in the JSON file are already validated during segmentation
+            # No need to re-validate here
+            valid_sequences = all_sequences
+            self.logger.info("Using all sequences (channel validation performed during segmentation)")
+
+            # Patient-level split
             if not self.checkpoint.get('splits_created', False):
-                splits = self.balance_and_split_data(valid_segments)
+                splits = self.balance_and_split_data(valid_sequences)
                 self.checkpoint['splits'] = splits
                 self.checkpoint['splits_created'] = True
-                self.checkpoint['total_segments'] = sum(len(split_segments) for split_segments in splits.values())
+                self.checkpoint['total_sequences'] = sum(len(split_seqs) for split_seqs in splits.values())
                 self.save_checkpoint()
             else:
                 self.logger.info("Using cached data splits")
                 splits = self.checkpoint['splits']
-            
+
+            # Compute normalization statistics from training data if not already done
+            if not self.checkpoint.get('normalization_stats_computed', False):
+                self.logger.info("="*60)
+                self.logger.info("COMPUTING NORMALIZATION STATISTICS FROM TRAINING DATA")
+                self.logger.info("="*60)
+
+                train_sequences = splits['train'][:50]  # Use first 50 training sequences
+                train_spectrograms = []
+
+                self.logger.info(f"Processing {len(train_sequences)} training samples to compute normalization stats...")
+
+                for sequence in tqdm(train_sequences, desc="Computing normalization stats"):
+                    processed = self.preprocess_sequence(sequence)
+                    if processed:
+                        train_spectrograms.append(processed['spectrogram'])
+
+                if train_spectrograms:
+                    self.compute_normalization_stats(train_spectrograms)
+                    self.checkpoint['normalization_stats_computed'] = True
+                    self.save_checkpoint()
+                else:
+                    raise ValueError("Failed to process any training sequences for normalization stats!")
+
+            # Load normalization statistics before processing
+            if not self.load_normalization_stats():
+                raise ValueError("Failed to load normalization statistics! Cannot proceed.")
+
             # Process each split
             for split_name in ['train', 'val', 'test']:
                 if split_name in self.checkpoint.get('splits_completed', []):
@@ -632,70 +595,70 @@ class EEGPreprocessor:
                     continue
                 
                 self.logger.info(f"Processing {split_name} split...")
-                split_segments = splits[split_name]
-                
+                split_sequences = splits[split_name]
+
                 # Check if HDF5 file already exists and load existing data
                 output_file = self.data_dir / f"{split_name}_dataset.h5"
-                existing_segment_ids = set()
+                existing_sequence_ids = set()
                 if output_file.exists():
                     try:
                         with h5py.File(output_file, 'r') as f:
                             if 'segment_info' in f and 'segment_ids' in f['segment_info']:
                                 existing_ids = f['segment_info']['segment_ids'][:]
-                                existing_segment_ids = {sid.decode('utf-8') for sid in existing_ids}
-                        self.logger.info(f"Found existing {split_name} file with {len(existing_segment_ids)} segments")
+                                existing_sequence_ids = {sid.decode('utf-8') for sid in existing_ids}
+                        self.logger.info(f"Found existing {split_name} file with {len(existing_sequence_ids)} sequences")
                     except Exception as e:
                         self.logger.warning(f"Could not read existing {split_name} file: {e}")
-                
-                batch_segments = []
-                segments_to_process = []
 
-                # Determine which segments need processing
-                for segment in split_segments:
-                    segment_id = f"{segment['patient_id']}_{segment['type']}_{segment['start_sec']}"
-                    if segment_id not in existing_segment_ids:
-                        segments_to_process.append(segment)
+                batch_sequences = []
+                sequences_to_process = []
 
-                self.logger.info(f"Need to process {len(segments_to_process)}/{len(split_segments)} segments for {split_name}")
+                # Determine which sequences need processing
+                for sequence in split_sequences:
+                    sequence_id = f"{sequence['patient_id']}_{sequence['sequence_start_sec']}"
+                    if sequence_id not in existing_sequence_ids:
+                        sequences_to_process.append(sequence)
 
-                # Process remaining segments
-                if segments_to_process:
-                    with tqdm(total=len(segments_to_process), desc=f"Processing {split_name}") as pbar:
-                        for segment in segments_to_process:
-                            segment_id = f"{segment['patient_id']}_{segment['type']}_{segment['start_sec']}"
-                            
-                            # Process segment
-                            processed_segment = self.preprocess_segment(segment)
-                            
-                            if processed_segment:
-                                batch_segments.append(processed_segment)
-                                self.checkpoint['processed_segments'].add(segment_id)
+                self.logger.info(f"Need to process {len(sequences_to_process)}/{len(split_sequences)} sequences for {split_name}")
+
+                # Process remaining sequences
+                if sequences_to_process:
+                    with tqdm(total=len(sequences_to_process), desc=f"Processing {split_name}") as pbar:
+                        for sequence in sequences_to_process:
+                            sequence_id = f"{sequence['patient_id']}_{sequence['sequence_start_sec']}"
+
+                            # Process sequence
+                            processed_sequence = self.preprocess_sequence(sequence)
+
+                            if processed_sequence:
+                                batch_sequences.append(processed_sequence)
+                                self.checkpoint['processed_segments'].add(sequence_id)
                                 self.checkpoint['processed_count'] += 1
-                            
+
                             pbar.update(1)
-                            
-                            # Save batch to HDF5 and checkpoint periodically
-                            if len(batch_segments) >= self.checkpoint_interval:
-                                self.append_to_hdf5(split_name, batch_segments)
+
+                            # Save batch to HDF5 and checkpoint periodically (smaller batches for sequences)
+                            if len(batch_sequences) >= 10:  # Reduced from 50 since sequences are larger
+                                self.append_to_hdf5(split_name, batch_sequences)
                                 self.save_checkpoint()
-                                batch_segments = [] # Reset batch
-                                
+                                batch_sequences = [] # Reset batch
+
                                 # Log progress
                                 elapsed = time.time() - start_time
                                 rate = self.checkpoint['processed_count'] / elapsed if elapsed > 0 else 0
-                                remaining_total = (self.checkpoint['total_segments'] - self.checkpoint['processed_count'])
+                                remaining_total = (self.checkpoint['total_sequences'] - self.checkpoint['processed_count'])
                                 eta = remaining_total / rate if rate > 0 else 0
-                                self.logger.info(f"Progress: {self.checkpoint['processed_count']}/{self.checkpoint['total_segments']} "
-                                               f"({self.checkpoint['processed_count']/self.checkpoint['total_segments']*100:.1f}%) "
+                                self.logger.info(f"Progress: {self.checkpoint['processed_count']}/{self.checkpoint['total_sequences']} "
+                                               f"({self.checkpoint['processed_count']/self.checkpoint['total_sequences']*100:.1f}%) "
                                                f"- ETA: {eta/60:.1f} minutes")
 
-                    # Save any remaining segments in the last batch
-                    if batch_segments:
-                        self.append_to_hdf5(split_name, batch_segments)
+                    # Save any remaining sequences in the last batch
+                    if batch_sequences:
+                        self.append_to_hdf5(split_name, batch_sequences)
                         self.save_checkpoint()
 
-                if not segments_to_process and not existing_segment_ids:
-                     self.logger.warning(f"No segments processed for {split_name} and no existing file found")
+                if not sequences_to_process and not existing_sequence_ids:
+                     self.logger.warning(f"No sequences processed for {split_name} and no existing file found")
                 
                 # Log removal statistics for this split
                 total_removed = sum(self.removed_segments.values())

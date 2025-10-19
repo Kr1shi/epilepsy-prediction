@@ -72,7 +72,26 @@ class EEGPreprocessor:
         self.n_workers = min(PREPROCESSING_WORKERS, available_cores)
         self.logger.info(f"Multiprocessing: Using {self.n_workers}/{available_cores} CPU cores for parallel preprocessing")
         self.logger.info(f"MNE parallel filtering: {MNE_N_JOBS} jobs per sequence")
-    
+
+    @staticmethod
+    def group_sequences_by_file(sequences: List[Dict]) -> Dict[Tuple[str, str], List[Dict]]:
+        """Group sequences by (patient_id, filename) for efficient batch processing.
+
+        Args:
+            sequences: List of sequence dictionaries
+
+        Returns:
+            Dictionary mapping (patient_id, filename) to list of sequences from that file
+        """
+        from collections import defaultdict
+        file_groups = defaultdict(list)
+
+        for sequence in sequences:
+            key = (sequence['patient_id'], sequence['file'])
+            file_groups[key].append(sequence)
+
+        return dict(file_groups)
+
     def setup_logging_and_directories(self):
         """Setup logging and create directory structure"""
         # Create directories
@@ -326,6 +345,120 @@ class EEGPreprocessor:
         
         return stft_spectrograms, frequencies
 
+    def preprocess_sequences_from_file(self, patient_id: str, filename: str, sequences: List[Dict]) -> List[Optional[Dict]]:
+        """Process multiple sequences from the same EDF file efficiently.
+
+        This method reads and filters the file ONCE, then extracts all sequences.
+        Major optimization: reduces redundant file I/O and filtering operations.
+
+        Args:
+            patient_id: Patient identifier
+            filename: EDF filename
+            sequences: List of sequence dictionaries from this file
+
+        Returns:
+            List of processed sequence dictionaries (or None for failed sequences)
+        """
+        try:
+            edf_path = f"physionet.org/files/chbmit/1.0.0/{patient_id}/{filename}"
+
+            # Read EDF file ONCE for all sequences
+            raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
+            sampling_rate = raw.info['sfreq']
+
+            # Select target channels
+            raw_selected, clean_channel_names = self.select_target_channels(raw)
+
+            # Find global min/max time range across ALL sequences from this file
+            all_segment_starts = []
+            for seq in sequences:
+                all_segment_starts.extend(seq['segment_starts'])
+
+            min_time = min(all_segment_starts)
+            max_time = max(all_segment_starts) + SEGMENT_DURATION
+
+            # Add padding for filter edge effects
+            padding = 5.0
+            crop_tmin = max(0, min_time - padding)
+            crop_tmax = min(raw_selected.times[-1], max_time + padding)
+
+            # Crop to the range needed by ALL sequences (with padding)
+            raw_cropped = raw_selected.copy().crop(tmin=crop_tmin, tmax=crop_tmax)
+
+            # Filter ONCE for all sequences from this file
+            raw_filtered = raw_cropped.copy()
+            raw_filtered.filter(l_freq=LOW_FREQ_HZ, h_freq=HIGH_FREQ_HZ, fir_design='firwin',
+                              n_jobs=MNE_N_JOBS, verbose=False)
+            raw_filtered.notch_filter(freqs=NOTCH_FREQ_HZ, n_jobs=MNE_N_JOBS, verbose=False)
+
+            # Now extract all sequences from the pre-filtered data
+            processed_sequences = []
+
+            for sequence in sequences:
+                try:
+                    sequence_spectrograms = []
+
+                    # Extract each segment in this sequence
+                    for segment_start in sequence['segment_starts']:
+                        # Adjust segment time to be relative to crop start
+                        adjusted_start = segment_start - crop_tmin
+                        adjusted_end = adjusted_start + SEGMENT_DURATION
+
+                        # Extract segment from ALREADY FILTERED data
+                        raw_segment = raw_filtered.copy().crop(tmin=adjusted_start, tmax=adjusted_end)
+
+                        # Artifact removal
+                        artifact_counts = self.remove_amplitude_artifacts(raw_segment)
+
+                        # Get filtered data (DO NOT normalize time-domain signal before STFT!)
+                        filtered_data = raw_segment.get_data()
+
+                        # ✅ CRITICAL FIX: Convert from Volts to microvolts before STFT
+                        # MNE reads EEG in Volts (~0.0002V), but |STFT|² on such small values
+                        # produces numerical zeros. Scaling to μV (~200μV) prevents this.
+                        filtered_data_uv = filtered_data * 1e6
+
+                        # STFT - apply to microvolts (NOT volts!)
+                        stft_coeffs, frequencies = self.apply_stft(filtered_data_uv, sampling_rate)
+
+                        # Convert to power spectrograms
+                        power_spectrogram = np.abs(stft_coeffs) ** 2
+                        if APPLY_LOG_TRANSFORM:
+                            power_spectrogram = np.log10(power_spectrogram + LOG_TRANSFORM_EPSILON)
+
+                        # Apply normalization (using training statistics)
+                        if self.global_mean is not None and self.global_std is not None:
+                            power_spectrogram = (power_spectrogram - self.global_mean) / (self.global_std + 1e-8)
+
+                        sequence_spectrograms.append(power_spectrogram)
+
+                    # Stack into sequence: (seq_len, n_channels, n_freqs, n_times)
+                    sequence_array = np.stack(sequence_spectrograms, axis=0)
+
+                    processed_sequences.append({
+                        'spectrogram': sequence_array,
+                        'label': 1 if sequence['type'] == 'preictal' else 0,
+                        'patient_id': sequence['patient_id'],
+                        'sequence_start_sec': sequence['sequence_start_sec'],
+                        'sequence_end_sec': sequence['sequence_end_sec'],
+                        'file_name': sequence['file'],
+                        'time_to_seizure': sequence.get('time_to_seizure', -1),
+                        'channel_names': clean_channel_names,
+                        'frequencies': frequencies
+                    })
+
+                except Exception as e:
+                    self.logger.error(f"Failed to process sequence from {patient_id}/{filename} at {sequence['sequence_start_sec']}s: {e}")
+                    self.removed_segments['processing_errors'] += 1
+                    processed_sequences.append(None)
+
+            return processed_sequences
+
+        except Exception as e:
+            self.logger.error(f"Failed to process file {patient_id}/{filename}: {e}")
+            # Return None for all sequences if file processing fails
+            return [None] * len(sequences)
+
     def preprocess_sequence(self, sequence: Dict) -> Optional[Dict]:
         """Preprocess an entire sequence (multiple consecutive segments)"""
         try:
@@ -361,10 +494,14 @@ class EEGPreprocessor:
 
             # Now extract segments from the pre-filtered data
             for segment_start in sequence['segment_starts']:
-                segment_end = segment_start + SEGMENT_DURATION
+                # Adjust segment times to be relative to crop start (which includes padding)
+                # Example: if segment_start=1950s and crop_tmin=1945s (1950-5 padding),
+                # then adjusted_start=5s in the cropped data
+                adjusted_start = segment_start - crop_tmin
+                adjusted_end = adjusted_start + SEGMENT_DURATION
 
-                # Extract segment from ALREADY FILTERED data
-                raw_segment = raw_filtered.copy().crop(tmin=segment_start, tmax=segment_end)
+                # Extract segment from ALREADY FILTERED data (using adjusted times)
+                raw_segment = raw_filtered.copy().crop(tmin=adjusted_start, tmax=adjusted_end)
 
                 # Artifact removal (light operation, ok to do per-segment)
                 artifact_counts = self.remove_amplitude_artifacts(raw_segment)
@@ -372,8 +509,13 @@ class EEGPreprocessor:
                 # Get filtered data (DO NOT normalize time-domain signal before STFT!)
                 filtered_data = raw_segment.get_data()
 
-                # STFT - apply directly to filtered (but NOT normalized) time-domain signal
-                stft_coeffs, frequencies = self.apply_stft(filtered_data, sampling_rate)
+                # ✅ CRITICAL FIX: Convert from Volts to microvolts before STFT
+                # MNE reads EEG in Volts (~0.0002V), but |STFT|² on such small values
+                # produces numerical zeros. Scaling to μV (~200μV) prevents this.
+                filtered_data_uv = filtered_data * 1e6
+
+                # STFT - apply to microvolts (NOT volts!)
+                stft_coeffs, frequencies = self.apply_stft(filtered_data_uv, sampling_rate)
 
                 # Convert to power spectrograms
                 power_spectrogram = np.abs(stft_coeffs) ** 2
@@ -425,10 +567,11 @@ class EEGPreprocessor:
                 # Create datasets if they don't exist
                 if 'spectrograms' not in f:
                     self.logger.info(f"Creating new HDF5 file or datasets in: {output_file}")
+                    # No compression for faster development (can re-enable for production)
                     f.create_dataset('spectrograms',
                                      (0, n_seq_len, n_channels, n_freqs, n_times),
                                      maxshape=(None, n_seq_len, n_channels, n_freqs, n_times),
-                                     dtype=np.float32, chunks=True, compression='gzip')
+                                     dtype=np.float32, chunks=True)
                     f.create_dataset('labels', (0,), maxshape=(None,), dtype=np.int32, chunks=True)
                     f.create_dataset('patient_ids', (0,), maxshape=(None,), dtype='S10', chunks=True)
                     
@@ -621,27 +764,39 @@ class EEGPreprocessor:
 
                 self.logger.info(f"Need to process {len(sequences_to_process)}/{len(split_sequences)} sequences for {split_name}")
 
-                # Process remaining sequences
+                # Process remaining sequences (OPTIMIZED: group by file)
                 if sequences_to_process:
+                    # Group sequences by file for efficient batch processing
+                    file_groups = self.group_sequences_by_file(sequences_to_process)
+                    total_files = len(file_groups)
+
+                    self.logger.info(f"Processing {len(sequences_to_process)} sequences from {total_files} unique files")
+                    self.logger.info(f"Average {len(sequences_to_process)/total_files:.1f} sequences per file")
+
                     with tqdm(total=len(sequences_to_process), desc=f"Processing {split_name}") as pbar:
-                        for sequence in sequences_to_process:
-                            sequence_id = f"{sequence['patient_id']}_{sequence['sequence_start_sec']}"
+                        # Iterate over file groups (MAJOR OPTIMIZATION: read/filter each file only ONCE)
+                        for (patient_id, filename), file_sequences in file_groups.items():
+                            # Process ALL sequences from this file in one pass
+                            processed_file_sequences = self.preprocess_sequences_from_file(
+                                patient_id, filename, file_sequences
+                            )
 
-                            # Process sequence
-                            processed_sequence = self.preprocess_sequence(sequence)
+                            # Add successfully processed sequences to batch
+                            for sequence, processed_sequence in zip(file_sequences, processed_file_sequences):
+                                sequence_id = f"{sequence['patient_id']}_{sequence['sequence_start_sec']}"
 
-                            if processed_sequence:
-                                batch_sequences.append(processed_sequence)
-                                self.checkpoint['processed_segments'].add(sequence_id)
-                                self.checkpoint['processed_count'] += 1
+                                if processed_sequence:
+                                    batch_sequences.append(processed_sequence)
+                                    self.checkpoint['processed_segments'].add(sequence_id)
+                                    self.checkpoint['processed_count'] += 1
 
-                            pbar.update(1)
+                                pbar.update(1)
 
-                            # Save batch to HDF5 and checkpoint periodically (smaller batches for sequences)
-                            if len(batch_sequences) >= 10:  # Reduced from 50 since sequences are larger
+                            # Save batch to HDF5 and checkpoint periodically
+                            if len(batch_sequences) >= 10:
                                 self.append_to_hdf5(split_name, batch_sequences)
                                 self.save_checkpoint()
-                                batch_sequences = [] # Reset batch
+                                batch_sequences = []  # Reset batch
 
                                 # Log progress
                                 elapsed = time.time() - start_time

@@ -33,18 +33,25 @@ class EEGDataset(Dataset):
         
         # Load all data into memory for fastest training
         with h5py.File(h5_file_path, 'r') as f:
+            # Data is already normalized during preprocessing (z-score normalization)
             self.spectrograms = torch.FloatTensor(f['spectrograms'][:])
             self.labels = torch.LongTensor(f['labels'][:])
             self.patient_ids = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
-            
+
             # Load metadata
             if 'metadata' in f:
                 self.metadata = dict(f['metadata'].attrs)
+                # Check if normalization info is available
+                if 'normalization' in self.metadata:
+                    norm_info = json.loads(self.metadata['normalization'])
+                    print(f"  - Normalization: {norm_info['method']}, "
+                          f"mean={norm_info['global_mean']:.4f}, std={norm_info['global_std']:.4f}")
             else:
                 self.metadata = {}
-        
+
         print(f"Loaded {self.split} dataset: {len(self.spectrograms)} samples")
         print(f"  - Spectrogram shape: {self.spectrograms.shape}")
+        print(f"  - Value range: [{torch.min(self.spectrograms):.4f}, {torch.max(self.spectrograms):.4f}]")
         print(f"  - Class distribution: {torch.bincount(self.labels)}")
         
     def __len__(self):
@@ -53,22 +60,66 @@ class EEGDataset(Dataset):
     def __getitem__(self, idx):
         """
         Returns:
-            spectrogram: (n_channels, n_frequencies, n_time_windows)
+            spectrogram: (sequence_length, n_channels, n_frequencies, n_time_windows)
             label: int (0=interictal, 1=preictal)
         """
         return self.spectrograms[idx], self.labels[idx]
 
-class Modified_ResNet18(nn.Module):
-    """ResNet18 modified for EEG spectrograms with 18 input channels"""
-    
-    def __init__(self, num_input_channels=18, num_classes=2):
-        super(Modified_ResNet18, self).__init__()
-        
-        # Load ResNet18 architecture (without pretrained weights)
-        self.resnet = models.resnet18(pretrained=False)
-        
-        # Modify first convolutional layer for 18-channel input
-        self.resnet.conv1 = nn.Conv2d(
+class CNN_LSTM_Hybrid(nn.Module):
+    """CNN-LSTM Hybrid model for seizure prediction
+
+    Architecture:
+    1. ResNet18 backbone as CNN feature extractor (per segment)
+    2. LSTM for temporal modeling across sequence
+    3. Fully connected classification head
+    """
+
+    def __init__(self,
+                 num_input_channels=18,
+                 num_classes=2,
+                 sequence_length=SEQUENCE_LENGTH,
+                 cnn_feature_dim=512,
+                 lstm_hidden_dim=LSTM_HIDDEN_DIM,
+                 lstm_num_layers=LSTM_NUM_LAYERS,
+                 dropout=LSTM_DROPOUT):
+        super(CNN_LSTM_Hybrid, self).__init__()
+
+        self.sequence_length = sequence_length
+        self.cnn_feature_dim = cnn_feature_dim
+
+        # CNN Feature Extractor (ResNet18 backbone without final FC layer)
+        self.feature_extractor = self._build_resnet_backbone(num_input_channels)
+
+        # LSTM for temporal modeling
+        self.lstm = nn.LSTM(
+            input_size=cnn_feature_dim,
+            hidden_size=lstm_hidden_dim,
+            num_layers=lstm_num_layers,
+            batch_first=True,
+            dropout=dropout if lstm_num_layers > 1 else 0,
+            bidirectional=False
+        )
+
+        # Classification head
+        self.fc = nn.Sequential(
+            nn.Linear(lstm_hidden_dim, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, num_classes)
+        )
+
+        # Initialize classification head
+        for layer in self.fc:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
+                nn.init.zeros_(layer.bias)
+
+    def _build_resnet_backbone(self, num_input_channels):
+        """Build ResNet18 backbone without final FC layer"""
+        resnet = models.resnet18(pretrained=False)
+
+        # Modify first conv layer for EEG channels
+        resnet.conv1 = nn.Conv2d(
             in_channels=num_input_channels,
             out_channels=64,
             kernel_size=7,
@@ -76,17 +127,42 @@ class Modified_ResNet18(nn.Module):
             padding=3,
             bias=False
         )
-        
-        # Modify final layer for binary classification
-        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, num_classes)
-        
-        # Initialize new layers with proper weights
-        nn.init.kaiming_normal_(self.resnet.conv1.weight, mode='fan_out', nonlinearity='relu')
-        nn.init.xavier_uniform_(self.resnet.fc.weight)
-        nn.init.zeros_(self.resnet.fc.bias)
-        
+        nn.init.kaiming_normal_(resnet.conv1.weight, mode='fan_out', nonlinearity='relu')
+
+        # Remove final FC layer (we'll add our own)
+        resnet.fc = nn.Identity()
+
+        return resnet
+
     def forward(self, x):
-        return self.resnet(x)
+        """
+        Args:
+            x: (batch, sequence_length, channels, freq, time)
+        Returns:
+            output: (batch, num_classes)
+        """
+        batch_size, seq_len, c, h, w = x.shape
+
+        # Process each segment through CNN
+        # Reshape: (batch * seq_len, channels, freq, time)
+        x = x.view(batch_size * seq_len, c, h, w)
+
+        # Extract CNN features: (batch * seq_len, cnn_feature_dim)
+        features = self.feature_extractor(x)
+
+        # Reshape back to sequence: (batch, seq_len, cnn_feature_dim)
+        features = features.view(batch_size, seq_len, -1)
+
+        # LSTM: (batch, seq_len, lstm_hidden_dim)
+        lstm_out, _ = self.lstm(features)
+
+        # Use last hidden state: (batch, lstm_hidden_dim)
+        last_hidden = lstm_out[:, -1, :]
+
+        # Classification: (batch, num_classes)
+        output = self.fc(last_hidden)
+
+        return output
 
 class MetricsTracker:
     """Track and compute comprehensive metrics"""
@@ -142,8 +218,15 @@ class EEGCNNTrainer:
         self.train_loader = self._create_dataloader('train')
         self.val_loader = self._create_dataloader('val')
         
-        # Initialize model
-        self.model = Modified_ResNet18(num_input_channels=18, num_classes=2)
+        # Initialize CNN-LSTM model
+        self.model = CNN_LSTM_Hybrid(
+            num_input_channels=18,
+            num_classes=2,
+            sequence_length=SEQUENCE_LENGTH,
+            lstm_hidden_dim=LSTM_HIDDEN_DIM,
+            lstm_num_layers=LSTM_NUM_LAYERS,
+            dropout=LSTM_DROPOUT
+        )
         self.model.to(self.device)
         
         # Loss and optimizer
@@ -154,12 +237,19 @@ class EEGCNNTrainer:
             weight_decay=WEIGHT_DECAY
         )
         
-        # Learning rate scheduler
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, 
-            mode='min', 
-            factor=0.5, 
-            patience=5
+        # Learning rate scheduler - OneCycleLR for better convergence
+        # Calculate total steps
+        steps_per_epoch = len(self.train_loader)
+        total_steps = TRAINING_EPOCHS * steps_per_epoch
+
+        self.scheduler = optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=LEARNING_RATE * 10,  # Peak LR is 10x base LR
+            total_steps=total_steps,
+            pct_start=0.3,  # 30% of training is warmup
+            anneal_strategy='cos',
+            div_factor=25.0,  # Initial LR = max_lr / 25
+            final_div_factor=10000.0  # Final LR = initial_lr / 10000
         )
         
         # Metrics tracking
@@ -219,7 +309,7 @@ class EEGCNNTrainer:
         
         dataloader = DataLoader(
             dataset,
-            batch_size=BATCH_SIZE,
+            batch_size=SEQUENCE_BATCH_SIZE,
             shuffle=shuffle,
             num_workers=NUM_WORKERS,
             pin_memory=True if self.device.type == 'cuda' else False  # Only CUDA supports pin_memory
@@ -247,8 +337,13 @@ class EEGCNNTrainer:
             
             # Backward pass
             loss.backward()
+
+            # Gradient clipping to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=GRADIENT_CLIP_NORM)
+
             self.optimizer.step()
-            
+            self.scheduler.step()  # Update LR after each batch for OneCycleLR
+
             # Track metrics
             total_loss += loss.item()
             num_batches += 1
@@ -259,8 +354,21 @@ class EEGCNNTrainer:
             
             train_metrics.update(predictions, labels, probabilities)
             
-            # Update progress bar
-            pbar.set_postfix({'loss': loss.item()})
+            # Calculate gradient norm for monitoring
+            total_norm = 0.0
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+
+            # Update progress bar with loss and gradient norm
+            current_lr = self.scheduler.get_last_lr()[0]
+            pbar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'grad_norm': f'{total_norm:.3f}',
+                'lr': f'{current_lr:.6f}'
+            })
         
         # Compute epoch metrics
         avg_loss = total_loss / num_batches
@@ -429,15 +537,9 @@ class EEGCNNTrainer:
             # Store metrics
             self.train_metrics_history.append(train_metrics)
             self.val_metrics_history.append(val_metrics)
-            
-            # Update learning rate scheduler
-            old_lr = self.optimizer.param_groups[0]['lr']
-            self.scheduler.step(val_metrics['loss'])
-            new_lr = self.optimizer.param_groups[0]['lr']
-            
-            # Log learning rate changes
-            if new_lr != old_lr:
-                print(f"📉 Learning rate reduced: {old_lr:.6f} → {new_lr:.6f}")
+
+            # Note: OneCycleLR scheduler is updated per-batch, not per-epoch
+            # No need to call scheduler.step() here
             
             # Save model checkpoint
             self.save_model(epoch, train_metrics, val_metrics)
@@ -446,11 +548,13 @@ class EEGCNNTrainer:
             epoch_time = time.time() - epoch_start_time
             
             # Print epoch summary
-            current_lr = self.optimizer.param_groups[0]['lr']
+            current_lr = self.scheduler.get_last_lr()[0]
             print(f"\nEpoch {epoch+1}/{TRAINING_EPOCHS} Complete ({epoch_time:.1f}s) [LR: {current_lr:.6f}]")
             print(f"Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['accuracy']:.4f}, "
+                  f"Precision: {train_metrics['precision']:.4f}, Recall: {train_metrics['recall']:.4f}, "
                   f"F1: {train_metrics['f1']:.4f}, AUC: {train_metrics['auc_roc']:.4f}")
             print(f"Val   - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['accuracy']:.4f}, "
+                  f"Precision: {val_metrics['precision']:.4f}, Recall: {val_metrics['recall']:.4f}, "
                   f"F1: {val_metrics['f1']:.4f}, AUC: {val_metrics['auc_roc']:.4f}")
             print("-" * 60)
         

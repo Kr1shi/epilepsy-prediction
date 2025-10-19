@@ -1,384 +1,407 @@
-import mne
-import numpy as np
+"""Visualization script for CNN-LSTM sequence-based preprocessed data
+
+This script validates preprocessed HDF5 data by visualizing:
+1. Individual sequence spectrograms (temporal progression across 10 segments)
+2. Class distribution and balance
+3. Spectrogram shape validation
+4. Sample preictal vs interictal sequences
+"""
+
 import h5py
-import json
-import os
-import logging
-import warnings
-from datetime import datetime
-from typing import List, Dict, Tuple, Optional
-from pathlib import Path
-import time
-from tqdm import tqdm
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import RobustScaler
-from scipy.signal import spectrogram
-from data_segmentation_helpers.config import *
+import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+from pathlib import Path
 import random
+import logging
+from data_segmentation_helpers.config import *
 
-# Suppress MNE warnings that don't affect processing
-warnings.filterwarnings("ignore", message="Channel names are not unique")
-warnings.filterwarnings("ignore", message=".*duplicates.*", category=RuntimeWarning)
-warnings.filterwarnings("ignore", message="Scaling factor is not defined")
-warnings.filterwarnings("ignore", message=".*scaling factor.*", category=RuntimeWarning)
-warnings.filterwarnings("ignore", message="Number of records from the header does not match")
-warnings.filterwarnings("ignore", message=".*file size.*", category=RuntimeWarning)
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Set MNE log level early
-mne.set_log_level('ERROR')
+class SequenceVisualizer:
+    """Visualize preprocessed CNN-LSTM sequence data from HDF5 files"""
 
-class EEGPreprocessor:
-    def __init__(self, input_json_path: str = 'all_patients_segments.json'):
-        self.input_json_path = input_json_path
-        self.output_dir = Path("preprocessing")
-        self.data_dir = self.output_dir / "data"
-        self.logs_dir = self.output_dir / "logs"
-        self.checkpoint_dir = self.output_dir / "checkpoints"
-        self.checkpoint_file = self.checkpoint_dir / "progress.json"
-        
-        # Processing settings
-        self.checkpoint_interval = 50
-        self.train_ratio = 0.70
-        self.val_ratio = 0.15
-        self.test_ratio = 0.15
-        
-        # Statistics tracking
-        self.removed_segments = {
-            'wrong_duration': 0,
-            'beyond_file_bounds': 0,
-            'processing_errors': 0
-        }
-        
-        # Initialize logging and directories
-        self.setup_logging_and_directories()
-        
-        # Load checkpoint if exists
-        self.checkpoint = self.load_checkpoint()
-        
-        self.logger.info("EEG Preprocessor initialized")
-        self.logger.info(f"Target channels: {TARGET_CHANNELS}")
-        self.logger.info(f"Filter settings: {LOW_FREQ_HZ}-{HIGH_FREQ_HZ} Hz, notch: {NOTCH_FREQ_HZ} Hz")
-        self.logger.info(f"Segment duration: {SEGMENT_DURATION} seconds")
-        self.logger.info(f"Skip channel validation: {SKIP_CHANNEL_VALIDATION}")
-    
-    def setup_logging_and_directories(self):
-        """Setup logging and create directory structure"""
-        # Create directories
-        for dir_path in [self.data_dir, self.logs_dir, self.checkpoint_dir]:
-            dir_path.mkdir(parents=True, exist_ok=True)
-        
-        # Setup logging
-        log_file = self.logs_dir / "visualization.log"
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file, mode='a'),
-                logging.StreamHandler()
-            ]
-        )
-        self.logger = logging.getLogger(__name__)
-        self.logger.info("="*60)
-        self.logger.info("EEG VISUALIZATION SCRIPT STARTED")
-        self.logger.info("="*60)
+    def __init__(self, data_dir='preprocessing/data'):
+        self.data_dir = Path(data_dir)
+        self.output_dir = Path('preprocessing/visualizations')
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def load_checkpoint(self) -> Dict:
-        """Load checkpoint if exists, handle corrupted files"""
-        if self.checkpoint_file.exists():
-            try:
-                with open(self.checkpoint_file, 'r') as f:
-                    checkpoint = json.load(f)
-                
-                if isinstance(checkpoint.get('processed_segments'), list):
-                    checkpoint['processed_segments'] = set(checkpoint['processed_segments'])
-                
-                self.logger.info(f"Loaded checkpoint: {len(checkpoint.get('processed_segments', []))} segments processed")
-                return checkpoint
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                self.logger.warning(f"Corrupted checkpoint file detected: {e}")
-                self.logger.warning("Starting fresh - deleting corrupted checkpoint")
-                backup_path = self.checkpoint_file.with_suffix('.json.corrupted')
-                self.checkpoint_file.rename(backup_path)
-                self.logger.info(f"Corrupted checkpoint backed up to: {backup_path}")
-        
-        return {
-            "processed_segments": set(),
-            "current_split": None,
-            "splits_completed": [],
-            "total_segments": 0,
-            "processed_count": 0,
-            "start_time": datetime.now().isoformat(),
-            "valid_segments": {}
-        }
+        logger.info("="*60)
+        logger.info("CNN-LSTM SEQUENCE VISUALIZATION")
+        logger.info("="*60)
+        logger.info(f"Data directory: {self.data_dir}")
+        logger.info(f"Output directory: {self.output_dir}")
 
-    def save_checkpoint(self):
-        """Save current progress, handling non-JSON serializable objects"""
-        checkpoint_copy = self.checkpoint.copy()
-        
-        if isinstance(checkpoint_copy.get('processed_segments'), set):
-            checkpoint_copy['processed_segments'] = list(checkpoint_copy['processed_segments'])
-        
-        if 'valid_segments' in checkpoint_copy and 'stats' in checkpoint_copy['valid_segments']:
-            stats = checkpoint_copy['valid_segments']['stats']
-            if 'patients_processed' in stats and isinstance(stats['patients_processed'], set):
-                stats['patients_processed'] = list(stats['patients_processed'])
-            if 'patients_with_no_valid' in stats and isinstance(stats['patients_with_no_valid'], set):
-                stats['patients_with_no_valid'] = list(stats['patients_with_no_valid'])
-        
-        with open(self.checkpoint_file, 'w') as f:
-            json.dump(checkpoint_copy, f, indent=2)
-        
-    def select_target_channels(self, raw, target_channels=TARGET_CHANNELS):
-        """Select target channels, handling duplicates"""
-        available_channels = []
-        clean_channel_names = []
-        
-        for ch in target_channels:
-            if ch in raw.ch_names:
-                available_channels.append(ch)
-                clean_channel_names.append(ch)
-            else:
-                duplicate_matches = [name for name in raw.ch_names 
-                                   if name.startswith(ch + '-') and name.split('-')[-1].isdigit()]
-                if duplicate_matches:
-                    available_channels.append(duplicate_matches[0])
-                    clean_channel_names.append(ch)
-        
-        raw_filtered = raw.copy().pick(available_channels)
-        return raw_filtered, clean_channel_names
+    def load_dataset_info(self, split='train'):
+        """Load dataset metadata and sample data"""
+        h5_file = self.data_dir / f"{split}_dataset.h5"
 
-    def detect_bad_channels(self, raw):
-        """Detect bad channels using statistical methods"""
-        data = raw.get_data()
-        bad_channels = []
-        
-        channel_stds = np.std(data, axis=1)
-        median_std = np.median(channel_stds)
-        mad_std = np.median(np.abs(channel_stds - median_std))
-        
-        for i, std_val in enumerate(channel_stds):
-            z_score = np.abs((std_val - median_std) / (mad_std * 1.4826))
-            if z_score > BAD_CHANNEL_STD_THRESHOLD:
-                bad_channels.append(raw.ch_names[i])
-        
-        flat_threshold = np.percentile(channel_stds, BAD_CHANNEL_FLAT_PERCENTILE)
-        for i, std_val in enumerate(channel_stds):
-            if std_val < flat_threshold * 0.1:
-                if raw.ch_names[i] not in bad_channels:
-                    bad_channels.append(raw.ch_names[i])
-        
-        return bad_channels
+        if not h5_file.exists():
+            raise FileNotFoundError(f"Dataset not found: {h5_file}")
 
-    def remove_amplitude_artifacts(self, raw):
-        """Remove extreme amplitude artifacts"""
-        data = raw.get_data()
-        artifact_mask = np.zeros_like(data, dtype=bool)
-        
-        for ch in range(data.shape[0]):
-            channel_data = data[ch, :]
-            median_val = np.median(channel_data)
-            mad = np.median(np.abs(channel_data - median_val))
-            threshold = ARTIFACT_THRESHOLD_STD * mad * 1.4826
-            
-            artifact_mask[ch, :] = np.abs(channel_data - median_val) > threshold
-        
-        for ch in range(data.shape[0]):
-            if np.any(artifact_mask[ch, :]):
-                artifact_indices = np.where(artifact_mask[ch, :])[0]
-                clean_indices = np.where(~artifact_mask[ch, :])[0]
-                
-                if len(clean_indices) > 10:
-                    data[ch, artifact_indices] = np.interp(
-                        artifact_indices, clean_indices, data[ch, clean_indices]
-                    )
-        
-        raw._data = data
-        return np.sum(artifact_mask, axis=1)
-
-    def robust_normalize(self, data):
-        """Apply robust normalization"""
-        normalized_data = np.zeros_like(data)
-        scaler = RobustScaler()
-        
-        for ch in range(data.shape[0]):
-            normalized_data[ch, :] = scaler.fit_transform(
-                data[ch, :].reshape(-1, 1)
-            ).flatten()
-        
-        return normalized_data
-
-    def apply_stft(self, data, sampling_rate):
-        """Apply STFT to create spectrograms"""
-        spectrograms = []
-        
-        for ch in range(data.shape[0]):
-            f, t, Zxx = spectrogram(
-                data[ch, :], 
-                fs=sampling_rate, 
-                nperseg=STFT_NPERSEG, 
-                noverlap=STFT_NOVERLAP,
-                window='hann'
-            )
-            
-            freq_mask = (f >= LOW_FREQ_HZ) & (f <= HIGH_FREQ_HZ)
-            filtered_spec = Zxx[freq_mask, :]
-            spectrograms.append(filtered_spec)
-        
-        stft_spectrograms = np.array(spectrograms)
-        frequencies = f[freq_mask]
-        
-        return stft_spectrograms, frequencies
-
-    def preprocess_segment(self, segment: Dict) -> Optional[Dict]:
-        """Preprocess a single segment"""
-        try:
-            edf_path = f"physionet.org/files/chbmit/1.0.0/{segment['patient_id']}/{segment['file']}"
-            
-            raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
-            sampling_rate = raw.info['sfreq']
-            file_duration = raw.times[-1]
-            
-            expected_duration = segment['end_sec'] - segment['start_sec']
-            if expected_duration != SEGMENT_DURATION:
-                self.logger.debug(f"Segment duration not {SEGMENT_DURATION}s, skipping.")
-                return None
-                
-            if segment['end_sec'] > file_duration:
-                self.logger.debug(f"Segment extends beyond file duration, skipping.")
-                return None
-            
-            raw_selected, clean_channel_names = self.select_target_channels(raw)
-            raw_segment = raw_selected.copy().crop(tmin=segment['start_sec'], tmax=segment['end_sec'])
-            
-            bad_channels = self.detect_bad_channels(raw_segment)
-            if bad_channels:
-                raw_segment.info['bads'] = bad_channels
-                if raw_segment.info.get('dig') is not None:
-                    raw_segment.interpolate_bads(reset_bads=True, verbose=False)
-                else:
-                    raw_segment.info['bads'] = []
-            
-            artifact_counts = self.remove_amplitude_artifacts(raw_segment)
-            
-            raw_filtered = raw_segment.copy()
-            raw_filtered.filter(l_freq=LOW_FREQ_HZ, h_freq=HIGH_FREQ_HZ, fir_design='firwin', verbose=False)
-            raw_filtered.notch_filter(freqs=NOTCH_FREQ_HZ, verbose=False)
-            
-            filtered_data = raw_filtered.get_data()
-            normalized_data = self.robust_normalize(filtered_data)
-            
-            stft_coeffs, frequencies = self.apply_stft(normalized_data, sampling_rate)
-            
-            power_spectrograms = np.abs(stft_coeffs) ** 2
-            if APPLY_LOG_TRANSFORM:
-                power_spectrograms = np.log10(power_spectrograms + LOG_TRANSFORM_EPSILON)
-            
-            segment_id = f"{segment['patient_id']}_{segment['type']}_{segment['start_sec']}"
-            
-            return {
-                'segment_id': segment_id,
-                'spectrogram': power_spectrograms.astype(np.float32),
-                'label': 1 if segment['type'] == 'preictal' else 0,
-                'patient_id': segment['patient_id'],
-                'start_sec': segment['start_sec'],
-                'end_sec': segment['end_sec'],
-                'file_name': segment['file'],
-                'time_to_seizure': segment.get('time_to_seizure', -1),
-                'channel_names': clean_channel_names,
-                'frequencies': frequencies,
-                'sampling_rate': sampling_rate,
-                'bad_channels': bad_channels,
-                'artifact_count': np.sum(artifact_counts)
+        with h5py.File(h5_file, 'r') as f:
+            # Get shapes and metadata
+            info = {
+                'n_sequences': f['spectrograms'].shape[0],
+                'sequence_length': f['spectrograms'].shape[1],
+                'n_channels': f['spectrograms'].shape[2],
+                'n_frequencies': f['spectrograms'].shape[3],
+                'n_time_bins': f['spectrograms'].shape[4],
+                'labels': f['labels'][:],
+                'patient_ids': [pid.decode('utf-8') for pid in f['patient_ids'][:]],
             }
-            
-        except Exception as e:
-            self.logger.error(f"Failed to process segment {segment['patient_id']}/{segment['file']}: {e}")
-            return None
 
-class EEGVisualizer(EEGPreprocessor):
-    def __init__(self, input_json_path: str = 'all_patients_segments.json'):
-        super().__init__(input_json_path)
-        self.visualization_dir = self.output_dir / "visualizations"
-        self.visualization_dir.mkdir(parents=True, exist_ok=True)
-        self.logger.info(f"Visualizations will be saved to: {self.visualization_dir}")
+            # Get metadata if available
+            if 'metadata' in f:
+                metadata = dict(f['metadata'].attrs)
+                # Handle both bytes and strings for channel names
+                channels_raw = metadata.get('target_channels', [])
+                info['target_channels'] = [
+                    ch.decode('utf-8') if isinstance(ch, bytes) else ch
+                    for ch in channels_raw
+                ]
+                info['frequencies'] = metadata.get('frequencies', [])
+                info['frequency_range'] = metadata.get('frequency_range', [])
+                info['sequence_length_config'] = metadata.get('sequence_length', SEQUENCE_LENGTH)
+                info['segment_duration'] = metadata.get('segment_duration', SEGMENT_DURATION)
 
-    def plot_spectrogram(self, processed_segment: Dict):
-        """Plots and saves the spectrogram for a single processed segment."""
-        if not processed_segment:
-            self.logger.warning("Cannot plot an empty segment.")
-            return
+        logger.info(f"\n{split.upper()} Dataset Info:")
+        logger.info(f"  Total sequences: {info['n_sequences']}")
+        logger.info(f"  Sequence shape: ({info['sequence_length']}, {info['n_channels']}, {info['n_frequencies']}, {info['n_time_bins']})")
+        logger.info(f"  Sequence length: {info['sequence_length']} segments")
+        logger.info(f"  Channels: {info['n_channels']}")
+        logger.info(f"  Frequencies: {info['n_frequencies']} bins")
+        logger.info(f"  Time bins per segment: {info['n_time_bins']}")
+        logger.info(f"  Class 0 (interictal): {np.sum(info['labels'] == 0)}")
+        logger.info(f"  Class 1 (preictal): {np.sum(info['labels'] == 1)}")
 
-        spec_data = processed_segment['spectrogram']
-        patient_id = processed_segment['patient_id']
-        segment_type = "preictal" if processed_segment['label'] == 1 else "interictal"
-        start_sec = processed_segment['start_sec']
-        channel_names = processed_segment['channel_names']
-        frequencies = processed_segment['frequencies']
-        
-        n_channels = spec_data.shape[0]
-        
-        fig, axes = plt.subplots(n_channels, 1, figsize=(12, n_channels * 2.5), sharex=True, sharey=True)
-        if n_channels == 1:
+        return info
+
+    def plot_class_distribution(self, splits=['train', 'val', 'test']):
+        """Plot class distribution across all splits"""
+        fig, axes = plt.subplots(1, len(splits), figsize=(5*len(splits), 4))
+        if len(splits) == 1:
             axes = [axes]
 
-        fig.suptitle(f'Spectrogram for {patient_id} - {segment_type} segment @ {start_sec}s', fontsize=16)
+        fig.suptitle('Class Distribution Across Splits', fontsize=16, fontweight='bold')
 
-        time_bins = spec_data.shape[2]
-        extent = [0, SEGMENT_DURATION, frequencies[0], frequencies[-1]]
+        for idx, split in enumerate(splits):
+            h5_file = self.data_dir / f"{split}_dataset.h5"
+            if not h5_file.exists():
+                logger.warning(f"Skipping {split} - file not found")
+                continue
 
-        for i in range(n_channels):
-            ax = axes[i]
-            im = ax.imshow(spec_data[i, :, :], aspect='auto', origin='lower', extent=extent, cmap='viridis')
-            ax.set_ylabel(f"{channel_names[i]}\nFreq (Hz)")
-            
-        axes[-1].set_xlabel("Time (s)")
-        
-        fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.5, label='Log Power')
+            with h5py.File(h5_file, 'r') as f:
+                labels = f['labels'][:]
 
-        plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-        
-        output_filename = self.visualization_dir / f"{patient_id}_{segment_type}_{start_sec}s.png"
-        plt.savefig(output_filename)
-        self.logger.info(f"Saved plot to {output_filename}")
-        plt.close(fig)
+            # Count classes
+            unique, counts = np.unique(labels, return_counts=True)
 
-    def run_visualization(self, num_examples: int = 2):
-        """Process and visualize a few random example segments."""
-        self.logger.info(f"Starting visualization process for {num_examples} preictal and {num_examples} interictal examples.")
-        
-        try:
-            self.logger.info(f"Loading segments from {self.input_json_path}")
-            with open(self.input_json_path, 'r') as f:
-                data = json.load(f)
-            
-            preictal_segments = data['preictal_segments']
-            interictal_segments = data['interictal_segments']
-            
-            random_preictal = random.sample(preictal_segments, min(num_examples, len(preictal_segments)))
-            random_interictal = random.sample(interictal_segments, min(num_examples, len(interictal_segments)))
-            
-            segments_to_visualize = random_preictal + random_interictal
-            
-            self.logger.info(f"Selected {len(segments_to_visualize)} segments to visualize.")
+            # Plot
+            ax = axes[idx]
+            bars = ax.bar(['Interictal (0)', 'Preictal (1)'], counts, color=['#2ecc71', '#e74c3c'])
+            ax.set_ylabel('Number of Sequences')
+            ax.set_title(f'{split.upper()} Split')
+            ax.set_ylim(0, max(counts) * 1.2)
 
-            for segment in tqdm(segments_to_visualize, desc="Processing and Visualizing Segments"):
-                self.logger.info(f"Processing segment: {segment['patient_id']}/{segment['file']} at {segment['start_sec']}s")
-                processed_data = self.preprocess_segment(segment)
-                
-                if processed_data:
-                    self.plot_spectrogram(processed_data)
+            # Add count labels on bars
+            for bar, count in zip(bars, counts):
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{int(count)}\n({count/sum(counts)*100:.1f}%)',
+                       ha='center', va='bottom', fontweight='bold')
+
+        plt.tight_layout()
+        output_file = self.output_dir / 'class_distribution.png'
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        logger.info(f"Saved class distribution plot to {output_file}")
+        plt.close()
+
+    def plot_sequence_spectrograms(self, split='train', n_examples=2):
+        """Plot full sequences showing temporal progression"""
+        h5_file = self.data_dir / f"{split}_dataset.h5"
+
+        with h5py.File(h5_file, 'r') as f:
+            labels = f['labels'][:]
+            spectrograms = f['spectrograms']
+            patient_ids = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
+
+            # Get metadata
+            if 'metadata' in f:
+                metadata = dict(f['metadata'].attrs)
+                # Handle both bytes and strings for channel names
+                channels_raw = metadata.get('target_channels', [])
+                channels = [ch.decode('utf-8') if isinstance(ch, bytes) else ch for ch in channels_raw]
+            else:
+                channels = [f'Ch{i}' for i in range(spectrograms.shape[2])]
+
+            # Sample sequences from each class
+            preictal_indices = np.where(labels == 1)[0]
+            interictal_indices = np.where(labels == 0)[0]
+
+            # Randomly sample
+            sample_preictal = random.sample(list(preictal_indices), min(n_examples, len(preictal_indices)))
+            sample_interictal = random.sample(list(interictal_indices), min(n_examples, len(interictal_indices)))
+
+            # Plot preictal sequences
+            for idx in sample_preictal:
+                self._plot_single_sequence(spectrograms[idx], patient_ids[idx],
+                                          'preictal', idx, channels)
+
+            # Plot interictal sequences
+            for idx in sample_interictal:
+                self._plot_single_sequence(spectrograms[idx], patient_ids[idx],
+                                          'interictal', idx, channels)
+
+    def _plot_single_sequence(self, sequence, patient_id, label, seq_idx, channels):
+        """Plot a single sequence (all segments and channels)"""
+        seq_len, n_channels, n_freqs, n_time_bins = sequence.shape
+
+        # Create a large figure showing temporal progression
+        # Rows = channels, Columns = segments (time progression)
+        fig, axes = plt.subplots(n_channels, seq_len,
+                                figsize=(seq_len * 2, n_channels * 1.5),
+                                sharex=True, sharey=True)
+
+        fig.suptitle(f'Sequence #{seq_idx} - {patient_id} - {label.upper()}\n'
+                    f'Temporal Progression: {seq_len} × {SEGMENT_DURATION}s segments = {seq_len * SEGMENT_DURATION}s total',
+                    fontsize=14, fontweight='bold')
+
+        # Plot each channel × segment combination
+        for ch_idx in range(n_channels):
+            for seg_idx in range(seq_len):
+                ax = axes[ch_idx, seg_idx] if n_channels > 1 else axes[seg_idx]
+
+                # Get spectrogram for this segment and channel
+                spec = sequence[seg_idx, ch_idx, :, :]  # (n_freqs, n_time_bins)
+
+                # Plot
+                im = ax.imshow(spec, aspect='auto', origin='lower',
+                             cmap='viridis', interpolation='nearest')
+
+                # Labels
+                if seg_idx == 0:
+                    ax.set_ylabel(f'{channels[ch_idx] if ch_idx < len(channels) else f"Ch{ch_idx}"}\nFreq',
+                                fontsize=8)
+                if ch_idx == 0:
+                    ax.set_title(f'Seg {seg_idx+1}\n({seg_idx*SEGMENT_DURATION}-{(seg_idx+1)*SEGMENT_DURATION}s)',
+                               fontsize=8)
+                if ch_idx == n_channels - 1:
+                    ax.set_xlabel('Time', fontsize=7)
+
+                # Remove ticks for cleaner look
+                ax.set_xticks([])
+                ax.set_yticks([])
+
+        # Add colorbar
+        fig.colorbar(im, ax=axes.ravel().tolist() if n_channels > 1 else axes,
+                    label='Log Power', shrink=0.8)
+
+        plt.tight_layout()
+
+        output_file = self.output_dir / f'sequence_{label}_{patient_id}_{seq_idx}.png'
+        plt.savefig(output_file, dpi=150, bbox_inches='tight')
+        logger.info(f"Saved sequence plot to {output_file}")
+        plt.close()
+
+    def plot_channel_comparison(self, split='train', n_examples=1):
+        """Plot all channels side-by-side for a single segment"""
+        h5_file = self.data_dir / f"{split}_dataset.h5"
+
+        with h5py.File(h5_file, 'r') as f:
+            labels = f['labels'][:]
+            spectrograms = f['spectrograms']
+            patient_ids = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
+
+            # Get metadata
+            if 'metadata' in f:
+                metadata = dict(f['metadata'].attrs)
+                # Handle both bytes and strings for channel names
+                channels_raw = metadata.get('target_channels', [])
+                channels = [ch.decode('utf-8') if isinstance(ch, bytes) else ch for ch in channels_raw]
+                frequencies = metadata.get('frequencies', [])
+            else:
+                channels = [f'Ch{i}' for i in range(spectrograms.shape[2])]
+                frequencies = None
+
+            # Sample one from each class
+            preictal_idx = random.choice(np.where(labels == 1)[0])
+            interictal_idx = random.choice(np.where(labels == 0)[0])
+
+            for idx, label in [(preictal_idx, 'preictal'), (interictal_idx, 'interictal')]:
+                sequence = spectrograms[idx]  # (seq_len, n_channels, n_freqs, n_time_bins)
+
+                # Plot first segment, all channels
+                first_segment = sequence[0]  # (n_channels, n_freqs, n_time_bins)
+
+                n_channels = first_segment.shape[0]
+                n_cols = 3
+                n_rows = (n_channels + n_cols - 1) // n_cols
+
+                fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, n_rows * 3))
+                axes = axes.flatten() if n_channels > 1 else [axes]
+
+                fig.suptitle(f'All Channels - {patient_ids[idx]} - {label.upper()} (First Segment)',
+                           fontsize=14, fontweight='bold')
+
+                for ch_idx in range(n_channels):
+                    ax = axes[ch_idx]
+                    spec = first_segment[ch_idx, :, :]
+
+                    extent = [0, SEGMENT_DURATION,
+                            frequencies[0] if frequencies is not None else 0,
+                            frequencies[-1] if frequencies is not None else spec.shape[0]]
+
+                    im = ax.imshow(spec, aspect='auto', origin='lower',
+                                 extent=extent, cmap='viridis')
+                    ax.set_title(channels[ch_idx] if ch_idx < len(channels) else f'Channel {ch_idx}')
+                    ax.set_xlabel('Time (s)')
+                    ax.set_ylabel('Frequency (Hz)')
+                    plt.colorbar(im, ax=ax, label='Log Power')
+
+                # Hide extra subplots
+                for ax_idx in range(n_channels, len(axes)):
+                    axes[ax_idx].axis('off')
+
+                plt.tight_layout()
+
+                output_file = self.output_dir / f'channels_comparison_{label}_{patient_ids[idx]}.png'
+                plt.savefig(output_file, dpi=150, bbox_inches='tight')
+                logger.info(f"Saved channel comparison to {output_file}")
+                plt.close()
+
+    def validate_data_shapes(self, splits=['train', 'val', 'test']):
+        """Validate that data shapes match model expectations"""
+        logger.info("\n" + "="*60)
+        logger.info("DATA SHAPE VALIDATION")
+        logger.info("="*60)
+
+        expected_seq_len = SEQUENCE_LENGTH
+        expected_channels = len(TARGET_CHANNELS)
+
+        issues = []
+
+        for split in splits:
+            h5_file = self.data_dir / f"{split}_dataset.h5"
+            if not h5_file.exists():
+                logger.warning(f"Skipping {split} - file not found")
+                continue
+
+            with h5py.File(h5_file, 'r') as f:
+                spec_shape = f['spectrograms'].shape
+                label_shape = f['labels'].shape
+
+                logger.info(f"\n{split.upper()} Split:")
+                logger.info(f"  Spectrograms shape: {spec_shape}")
+                logger.info(f"  Labels shape: {label_shape}")
+                logger.info(f"  Expected: (N, {expected_seq_len}, {expected_channels}, freq, time)")
+
+                # Validate
+                if spec_shape[1] != expected_seq_len:
+                    issue = f"{split}: Sequence length mismatch - got {spec_shape[1]}, expected {expected_seq_len}"
+                    issues.append(issue)
+                    logger.error(f"  ❌ {issue}")
                 else:
-                    self.logger.warning(f"Skipping visualization for segment due to processing failure.")
+                    logger.info(f"  ✓ Sequence length correct: {spec_shape[1]}")
 
-            self.logger.info("="*60)
-            self.logger.info("VISUALIZATION COMPLETED SUCCESSFULLY")
-            self.logger.info("="*60)
+                if spec_shape[2] != expected_channels:
+                    issue = f"{split}: Channel count mismatch - got {spec_shape[2]}, expected {expected_channels}"
+                    issues.append(issue)
+                    logger.error(f"  ❌ {issue}")
+                else:
+                    logger.info(f"  ✓ Channel count correct: {spec_shape[2]}")
 
-        except Exception as e:
-            self.logger.error(f"Visualization process failed: {e}")
-            raise
+                if spec_shape[0] != label_shape[0]:
+                    issue = f"{split}: Mismatch between spectrograms and labels - {spec_shape[0]} vs {label_shape[0]}"
+                    issues.append(issue)
+                    logger.error(f"  ❌ {issue}")
+                else:
+                    logger.info(f"  ✓ Spectrograms and labels aligned: {spec_shape[0]} sequences")
+
+                # Check for NaN or Inf
+                sample = f['spectrograms'][0]
+                if np.any(np.isnan(sample)):
+                    issue = f"{split}: Found NaN values in spectrograms!"
+                    issues.append(issue)
+                    logger.error(f"  ❌ {issue}")
+                else:
+                    logger.info(f"  ✓ No NaN values detected")
+
+                if np.any(np.isinf(sample)):
+                    issue = f"{split}: Found Inf values in spectrograms!"
+                    issues.append(issue)
+                    logger.error(f"  ❌ {issue}")
+                else:
+                    logger.info(f"  ✓ No Inf values detected")
+
+                # Value range check
+                min_val = np.min(sample)
+                max_val = np.max(sample)
+                logger.info(f"  Value range: [{min_val:.4f}, {max_val:.4f}]")
+
+        if issues:
+            logger.error("\n" + "="*60)
+            logger.error(f"VALIDATION FAILED - {len(issues)} issues found:")
+            for issue in issues:
+                logger.error(f"  - {issue}")
+            logger.error("="*60)
+        else:
+            logger.info("\n" + "="*60)
+            logger.info("✅ ALL VALIDATIONS PASSED")
+            logger.info("="*60)
+
+        return len(issues) == 0
+
+    def run_full_validation(self, splits=['train', 'val', 'test'], n_examples=2):
+        """Run complete validation and visualization suite"""
+        logger.info("Starting full validation and visualization...")
+
+        # 1. Validate shapes
+        shapes_valid = self.validate_data_shapes(splits)
+
+        # 2. Load and display info
+        for split in splits:
+            try:
+                self.load_dataset_info(split)
+            except FileNotFoundError as e:
+                logger.warning(f"Skipping {split}: {e}")
+
+        # 3. Plot class distribution
+        logger.info("\nGenerating class distribution plots...")
+        self.plot_class_distribution(splits)
+
+        # 4. Plot example sequences
+        logger.info(f"\nGenerating {n_examples} example sequence plots per class...")
+        self.plot_sequence_spectrograms('train', n_examples)
+
+        # 5. Plot channel comparisons
+        logger.info("\nGenerating channel comparison plots...")
+        self.plot_channel_comparison('train', n_examples=1)
+
+        logger.info("\n" + "="*60)
+        logger.info("VISUALIZATION COMPLETE")
+        logger.info(f"All plots saved to: {self.output_dir}")
+        logger.info("="*60)
+
+        return shapes_valid
+
 
 if __name__ == "__main__":
-    visualizer = EEGVisualizer()
-    visualizer.run_visualization(num_examples=3)
+    visualizer = SequenceVisualizer()
+
+    # Run full validation
+    valid = visualizer.run_full_validation(
+        splits=['train', 'val', 'test'],
+        n_examples=2
+    )
+
+    if not valid:
+        logger.error("\n⚠️  DATA VALIDATION FAILED - Check logs above for details")
+        logger.error("⚠️  Model will not train correctly with invalid data!")
+    else:
+        logger.info("\n✅ Data validation passed - Ready for training")

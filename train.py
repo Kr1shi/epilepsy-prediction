@@ -70,12 +70,13 @@ class EEG_CNN(nn.Module):
     """Deep VGG-16 style CNN designed for EEG spectrograms
 
     Architecture: 5 blocks, 16 convolutional layers with progressive widening
-    - Input: (channels, 50, 59)
-    - Block1: → (128, 25, 29)   [3 conv, 2x downsampling]
-    - Block2: → (256, 12, 14)   [3 conv, 2x downsampling]
-    - Block3: → (512, 6, 7)     [3 conv, 2x downsampling]
-    - Block4: → (512, 3, 3)     [4 conv, 2x downsampling]
-    - Block5: → (512, 3, 3)     [3 conv, no downsampling]
+    Adapted for 5-second segments (50×9 spectrograms)
+    - Input: (channels, 50, 9)
+    - Block1: → (128, 25, 4)    [3 conv, 2x downsampling]
+    - Block2: → (256, 12, 2)    [3 conv, 2x downsampling]
+    - Block3: → (512, 6, 1)     [3 conv, 2x downsampling]
+    - Block4: → (512, 6, 1)     [4 conv, no downsampling]
+    - Block5: → (512, 6, 1)     [3 conv, no downsampling]
     - GAP:    → (512, 1, 1)
     - Output: 512 features
 
@@ -128,7 +129,7 @@ class EEG_CNN(nn.Module):
             nn.MaxPool2d(kernel_size=2, stride=2)  # 12×14 → 6×7
         )
 
-        # Block 4: Deep high-level features
+        # Block 4: Deep high-level features (no pooling - maintain spatial dimensions)
         self.block4 = nn.Sequential(
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(512),
@@ -141,8 +142,8 @@ class EEG_CNN(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2)  # 6×7 → 3×3
+            nn.ReLU(inplace=True)
+            # No pooling - maintain 6×1 spatial dimensions for small input size
         )
 
         # Block 5: Very deep feature refinement
@@ -179,15 +180,15 @@ class EEG_CNN(nn.Module):
     def forward(self, x):
         """
         Args:
-            x: (batch, channels, height, width) = (batch, 18, 50, 59)
+            x: (batch, channels, height, width) = (batch, 18, 50, 9)
         Returns:
             features: (batch, 512)
         """
-        x = self.block1(x)  # (batch, 128, 25, 29)
-        x = self.block2(x)  # (batch, 256, 12, 14)
-        x = self.block3(x)  # (batch, 512, 6, 7)
-        x = self.block4(x)  # (batch, 512, 3, 3)
-        x = self.block5(x)  # (batch, 512, 3, 3)
+        x = self.block1(x)  # (batch, 128, 25, 4)
+        x = self.block2(x)  # (batch, 256, 12, 2)
+        x = self.block3(x)  # (batch, 512, 6, 1)
+        x = self.block4(x)  # (batch, 512, 6, 1)
+        x = self.block5(x)  # (batch, 512, 6, 1)
         x = self.gap(x)     # (batch, 512, 1, 1)
         x = x.view(x.size(0), -1)  # (batch, 512)
         return x

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torchvision.models as models
@@ -153,7 +154,12 @@ class CNN_LSTM_Hybrid(nn.Module):
     Architecture:
     1. Custom EEG-CNN as feature extractor (per segment)
     2. LSTM for temporal modeling across sequence
-    3. Fully connected classification head
+    3. Attention mechanism for adaptive temporal pooling
+    4. Fully connected classification head
+
+    The attention mechanism learns which timesteps in the sequence are most
+    important for classification, replacing simple "last hidden state" pooling
+    with a weighted combination of all timesteps.
 
     Supports two task modes:
     - Prediction: Classify preictal vs interictal (predict before seizure)
@@ -184,6 +190,13 @@ class CNN_LSTM_Hybrid(nn.Module):
             batch_first=True,
             dropout=dropout if lstm_num_layers > 1 else 0,
             bidirectional=False
+        )
+
+        # Attention mechanism - learns which timesteps are most important
+        self.attention = nn.Sequential(
+            nn.Linear(lstm_hidden_dim, 128),
+            nn.Tanh(),
+            nn.Linear(128, 1, bias=False)
         )
 
         # Classification head
@@ -226,11 +239,13 @@ class CNN_LSTM_Hybrid(nn.Module):
         # LSTM: (batch, seq_len, lstm_hidden_dim)
         lstm_out, _ = self.lstm(features)
 
-        # Use last hidden state: (batch, lstm_hidden_dim)
-        last_hidden = lstm_out[:, -1, :]
+        # Attention pooling - learn which timesteps matter most
+        attn_weights = self.attention(lstm_out)        # (batch, seq_len, 1)
+        attn_weights = F.softmax(attn_weights, dim=1)  # softmax over timesteps
+        context = torch.sum(attn_weights * lstm_out, dim=1)  # (batch, lstm_hidden_dim)
 
         # Classification: (batch, num_classes)
-        output = self.fc(last_hidden)
+        output = self.fc(context)
 
         return output
 
@@ -311,7 +326,7 @@ class EEGCNNTrainer:
         # Learning rate scheduler - StepLR reduces LR every N epochs
         self.scheduler = optim.lr_scheduler.StepLR(
             self.optimizer,
-            step_size=10,      # Reduce LR every 10 epochs
+            step_size=5,      # Reduce LR every 10 epochs
             gamma=0.5          # Multiply LR by 0.5
         )
         

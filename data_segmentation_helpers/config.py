@@ -3,9 +3,12 @@
 # Segment configuration
 SEGMENT_DURATION = 30  # seconds
 
+# Task mode configuration
+TASK_MODE = 'detection'  # Options: 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
+
 # Seizure prediction parameters
-PREICTAL_WINDOW = 30 * 60  # 30 minutes in seconds
-SAFE_BUFFER = 30 * 60      # 30 minutes buffer
+PREICTAL_WINDOW = 10 * 60       # 10 minutes in seconds - sequences within this window before seizure are preictal
+INTERICTAL_BUFFER = 120 * 60     # 60 minutes (1 hour) - interictal sequences must be at least this far from any seizure
 
 # File assumptions
 ESTIMATED_FILE_DURATION = 3600  # 1 hour
@@ -42,8 +45,8 @@ TARGET_CHANNELS = [
 SKIP_CHANNEL_VALIDATION = False
 
 # Sequence configuration for CNN-LSTM
-SEQUENCE_LENGTH = 10       # Number of 30-second segments per sequence (5 minutes total)
-SEQUENCE_STRIDE = 5        # Stride for sliding window (50% overlap)
+SEQUENCE_LENGTH = 5        # Number of 30-second segments per sequence (2.5 minutes total)
+SEQUENCE_STRIDE = 1        # Stride for sliding window (80% overlap: (5-1)/5 = 0.8)
 
 # LSTM configuration
 LSTM_HIDDEN_DIM = 256      # LSTM hidden state dimension
@@ -51,13 +54,12 @@ LSTM_NUM_LAYERS = 2        # Number of stacked LSTM layers
 LSTM_DROPOUT = 0.3         # Dropout between LSTM layers
 
 # Training configuration
-TRAINING_EPOCHS = 30
+TRAINING_EPOCHS = 15
 BATCH_SIZE = 32
 SEQUENCE_BATCH_SIZE = 4  # Small batch size for sequences (reduced from 12 to improve gradient estimates)
 LEARNING_RATE = 0.0001  # Reduced from 0.001 to prevent divergence
 NUM_WORKERS = 4  # DataLoader workers
 WEIGHT_DECAY = 1e-4  # L2 regularization
-GRADIENT_CLIP_NORM = 1.0  # Gradient clipping to prevent exploding gradients
 
 # Preprocessing performance (M4 optimization)
 PREPROCESSING_WORKERS = 8  # Number of parallel workers for preprocessing (adjust based on your CPU cores)

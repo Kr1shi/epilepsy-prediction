@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project-specific folders
+research/
+testing/
+preprocessing/
+aaron/
+mario/
+physionet.org/
+
+# Data files
+*.json
+*.csv

@@ -213,6 +213,7 @@ preprocessing/
 aaron/
 mario/
 physionet.org/
+model/
 
 # Data files
 *.json

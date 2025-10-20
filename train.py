@@ -67,58 +67,100 @@ class EEGDataset(Dataset):
         return self.spectrograms[idx], self.labels[idx]
 
 class EEG_CNN(nn.Module):
-    """Lightweight CNN designed specifically for EEG spectrograms
+    """Deep VGG-16 style CNN designed for EEG spectrograms
 
-    Architecture preserves spatial information better than ResNet18:
+    Architecture: 5 blocks, 16 convolutional layers with progressive widening
     - Input: (channels, 50, 59)
-    - Block1: → (64, 25, 29)   [2x downsampling]
-    - Block2: → (128, 12, 14)  [2x downsampling]
-    - Block3: → (256, 6, 7)    [2x downsampling]
-    - GAP:    → (256, 1, 1)
-    - Output: 256 features
+    - Block1: → (128, 25, 29)   [3 conv, 2x downsampling]
+    - Block2: → (256, 12, 14)   [3 conv, 2x downsampling]
+    - Block3: → (512, 6, 7)     [3 conv, 2x downsampling]
+    - Block4: → (512, 3, 3)     [4 conv, 2x downsampling]
+    - Block5: → (512, 3, 3)     [3 conv, no downsampling]
+    - GAP:    → (512, 1, 1)
+    - Output: 512 features
 
-    Total downsampling: 8x (vs ResNet18's 32x with 50×59 input)
-    Final spatial size: 6×7 = 42 locations (vs ResNet18's 1×2 = 2 locations)
+    Total: 16 conv layers, ~9.5M parameters (vs previous 6 layers, ~420K parameters)
+    Provides significantly more capacity for learning complex EEG patterns
     """
 
     def __init__(self, in_channels=18):
         super(EEG_CNN, self).__init__()
 
-        # Block 1: Extract low-level frequency-time patterns
+        # Block 1: Low-level frequency-time pattern extraction
         self.block1 = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(in_channels, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2)  # 50×59 → 25×29
         )
 
         # Block 2: Mid-level feature learning
         self.block2 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2)  # 25×29 → 12×14
-        )
-
-        # Block 3: High-level feature learning
-        self.block3 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2)  # 25×29 → 12×14
+        )
+
+        # Block 3: High-level feature learning
+        self.block3 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2)  # 12×14 → 6×7
         )
 
+        # Block 4: Deep high-level features
+        self.block4 = nn.Sequential(
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2)  # 6×7 → 3×3
+        )
+
+        # Block 5: Very deep feature refinement
+        self.block5 = nn.Sequential(
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True)
+            # No pooling - maintain 3×3 spatial dimensions
+        )
+
         # Global Average Pooling
-        self.gap = nn.AdaptiveAvgPool2d(1)  # 6×7 → 1×1
+        self.gap = nn.AdaptiveAvgPool2d(1)  # 3×3 → 1×1
 
         # Initialize weights
         self._initialize_weights()
@@ -139,27 +181,35 @@ class EEG_CNN(nn.Module):
         Args:
             x: (batch, channels, height, width) = (batch, 18, 50, 59)
         Returns:
-            features: (batch, 256)
+            features: (batch, 512)
         """
-        x = self.block1(x)  # (batch, 64, 25, 29)
-        x = self.block2(x)  # (batch, 128, 12, 14)
-        x = self.block3(x)  # (batch, 256, 6, 7)
-        x = self.gap(x)     # (batch, 256, 1, 1)
-        x = x.view(x.size(0), -1)  # (batch, 256)
+        x = self.block1(x)  # (batch, 128, 25, 29)
+        x = self.block2(x)  # (batch, 256, 12, 14)
+        x = self.block3(x)  # (batch, 512, 6, 7)
+        x = self.block4(x)  # (batch, 512, 3, 3)
+        x = self.block5(x)  # (batch, 512, 3, 3)
+        x = self.gap(x)     # (batch, 512, 1, 1)
+        x = x.view(x.size(0), -1)  # (batch, 512)
         return x
 
 class CNN_LSTM_Hybrid(nn.Module):
-    """CNN-LSTM Hybrid model for seizure prediction/detection
+    """Deep CNN-LSTM Hybrid model for seizure prediction/detection
 
     Architecture:
-    1. Custom EEG-CNN as feature extractor (per segment)
+    1. Deep EEG-CNN (VGG-16 style) as feature extractor (per segment)
+       - 5 blocks, 16 convolutional layers
+       - Channel progression: 128 → 256 → 512 → 512 → 512
+       - Outputs 512-dimensional feature vector per segment
+       - ~9.5M parameters for rich feature learning
     2. LSTM for temporal modeling across sequence
     3. Attention mechanism for adaptive temporal pooling
     4. Fully connected classification head
 
-    The attention mechanism learns which timesteps in the sequence are most
-    important for classification, replacing simple "last hidden state" pooling
-    with a weighted combination of all timesteps.
+    The deep CNN provides significantly more capacity (~23x more parameters)
+    for learning complex spectro-temporal patterns in EEG data. The attention
+    mechanism learns which timesteps in the sequence are most important for
+    classification, replacing simple "last hidden state" pooling with a
+    weighted combination of all timesteps.
 
     Supports two task modes:
     - Prediction: Classify preictal vs interictal (predict before seizure)
@@ -170,7 +220,7 @@ class CNN_LSTM_Hybrid(nn.Module):
                  num_input_channels=18,
                  num_classes=2,
                  sequence_length=SEQUENCE_LENGTH,
-                 cnn_feature_dim=256,
+                 cnn_feature_dim=512,
                  lstm_hidden_dim=LSTM_HIDDEN_DIM,
                  lstm_num_layers=LSTM_NUM_LAYERS,
                  dropout=LSTM_DROPOUT):
@@ -303,12 +353,12 @@ class EEGCNNTrainer:
         self.train_loader = self._create_dataloader('train')
         self.val_loader = self._create_dataloader('val')
         
-        # Initialize CNN-LSTM model with custom EEG-CNN backbone
+        # Initialize CNN-LSTM model with deep EEG-CNN backbone
         self.model = CNN_LSTM_Hybrid(
             num_input_channels=18,
             num_classes=2,
             sequence_length=SEQUENCE_LENGTH,
-            cnn_feature_dim=256,  # EEG-CNN outputs 256 features (vs ResNet18's 512)
+            cnn_feature_dim=512,  # Deep EEG-CNN outputs 512 features (16 conv layers)
             lstm_hidden_dim=LSTM_HIDDEN_DIM,
             lstm_num_layers=LSTM_NUM_LAYERS,
             dropout=LSTM_DROPOUT

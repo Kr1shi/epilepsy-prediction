@@ -8,7 +8,7 @@ TASK_MODE = 'detection'  # Options: 'prediction' (preictal vs interictal) or 'de
 
 # Seizure prediction parameters
 PREICTAL_WINDOW = 10 * 60       # 10 minutes in seconds - sequences within this window before seizure are preictal
-INTERICTAL_BUFFER = 120 * 60     # 60 minutes (1 hour) - interictal sequences must be at least this far from any seizure
+INTERICTAL_BUFFER = 120 * 60     # 120 minutes (2 hours) - interictal sequences must be at least this far from any seizure
 
 # File assumptions
 ESTIMATED_FILE_DURATION = 3600  # 1 hour

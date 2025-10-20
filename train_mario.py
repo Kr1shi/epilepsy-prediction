@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torchvision.models as models
@@ -99,9 +100,9 @@ class CNN_LSTM_Attention_STFT(nn.Module):
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(),
-            nn.AdaptiveAvgPool2d((4, 4))
+            nn.AdaptiveAvgPool2d((1, 1))  # Global Average Pooling (MPS compatible)
         )
-        cnn_feature_dim = 256 * 4 * 4  # 4096
+        cnn_feature_dim = 256  # Global pooling reduces to 256 features
 
         # --- LSTM ---
         self.lstm = nn.LSTM(
@@ -147,8 +148,8 @@ class CNN_LSTM_Attention_STFT(nn.Module):
         x = x.view(batch_size * seq_len, c, h, w)
 
         # --- CNN feature extraction ---
-        features = self.feature_extractor(x)           # (batch*seq, 256, 4, 4)
-        features = features.view(batch_size, seq_len, -1)  # (batch, seq, 4096)
+        features = self.feature_extractor(x)           # (batch*seq, 256, 1, 1)
+        features = features.view(batch_size, seq_len, -1)  # (batch, seq, 256)
 
         # --- LSTM temporal modeling ---
         lstm_out, _ = self.lstm(features)              # (batch, seq, hidden_dim)
@@ -216,8 +217,8 @@ class EEGCNNTrainer:
         self.train_loader = self._create_dataloader('train')
         self.val_loader = self._create_dataloader('val')
         
-        # Initialize CNN-LSTM model
-        self.model = CNN_LSTM_Hybrid(
+        # Initialize CNN-LSTM model with attention
+        self.model = CNN_LSTM_Attention_STFT(
             num_input_channels=18,
             num_classes=2,
             sequence_length=SEQUENCE_LENGTH,

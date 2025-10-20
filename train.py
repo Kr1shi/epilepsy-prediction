@@ -61,24 +61,110 @@ class EEGDataset(Dataset):
         """
         Returns:
             spectrogram: (sequence_length, n_channels, n_frequencies, n_time_windows)
-            label: int (0=interictal, 1=preictal)
+            label: int (0=interictal, 1=preictal/ictal depending on task_mode)
         """
         return self.spectrograms[idx], self.labels[idx]
 
+class EEG_CNN(nn.Module):
+    """Lightweight CNN designed specifically for EEG spectrograms
+
+    Architecture preserves spatial information better than ResNet18:
+    - Input: (channels, 50, 59)
+    - Block1: → (64, 25, 29)   [2x downsampling]
+    - Block2: → (128, 12, 14)  [2x downsampling]
+    - Block3: → (256, 6, 7)    [2x downsampling]
+    - GAP:    → (256, 1, 1)
+    - Output: 256 features
+
+    Total downsampling: 8x (vs ResNet18's 32x with 50×59 input)
+    Final spatial size: 6×7 = 42 locations (vs ResNet18's 1×2 = 2 locations)
+    """
+
+    def __init__(self, in_channels=18):
+        super(EEG_CNN, self).__init__()
+
+        # Block 1: Extract low-level frequency-time patterns
+        self.block1 = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2)  # 50×59 → 25×29
+        )
+
+        # Block 2: Mid-level feature learning
+        self.block2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2)  # 25×29 → 12×14
+        )
+
+        # Block 3: High-level feature learning
+        self.block3 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2)  # 12×14 → 6×7
+        )
+
+        # Global Average Pooling
+        self.gap = nn.AdaptiveAvgPool2d(1)  # 6×7 → 1×1
+
+        # Initialize weights
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        """Initialize weights using He initialization"""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (batch, channels, height, width) = (batch, 18, 50, 59)
+        Returns:
+            features: (batch, 256)
+        """
+        x = self.block1(x)  # (batch, 64, 25, 29)
+        x = self.block2(x)  # (batch, 128, 12, 14)
+        x = self.block3(x)  # (batch, 256, 6, 7)
+        x = self.gap(x)     # (batch, 256, 1, 1)
+        x = x.view(x.size(0), -1)  # (batch, 256)
+        return x
+
 class CNN_LSTM_Hybrid(nn.Module):
-    """CNN-LSTM Hybrid model for seizure prediction
+    """CNN-LSTM Hybrid model for seizure prediction/detection
 
     Architecture:
-    1. ResNet18 backbone as CNN feature extractor (per segment)
+    1. Custom EEG-CNN as feature extractor (per segment)
     2. LSTM for temporal modeling across sequence
     3. Fully connected classification head
+
+    Supports two task modes:
+    - Prediction: Classify preictal vs interictal (predict before seizure)
+    - Detection: Classify ictal vs interictal (detect during seizure)
     """
 
     def __init__(self,
                  num_input_channels=18,
                  num_classes=2,
                  sequence_length=SEQUENCE_LENGTH,
-                 cnn_feature_dim=512,
+                 cnn_feature_dim=256,
                  lstm_hidden_dim=LSTM_HIDDEN_DIM,
                  lstm_num_layers=LSTM_NUM_LAYERS,
                  dropout=LSTM_DROPOUT):
@@ -87,8 +173,8 @@ class CNN_LSTM_Hybrid(nn.Module):
         self.sequence_length = sequence_length
         self.cnn_feature_dim = cnn_feature_dim
 
-        # CNN Feature Extractor (ResNet18 backbone without final FC layer)
-        self.feature_extractor = self._build_resnet_backbone(num_input_channels)
+        # CNN Feature Extractor (Custom EEG-CNN)
+        self.feature_extractor = self._build_eeg_cnn_backbone(num_input_channels)
 
         # LSTM for temporal modeling
         self.lstm = nn.LSTM(
@@ -114,25 +200,9 @@ class CNN_LSTM_Hybrid(nn.Module):
                 nn.init.xavier_uniform_(layer.weight)
                 nn.init.zeros_(layer.bias)
 
-    def _build_resnet_backbone(self, num_input_channels):
-        """Build ResNet18 backbone without final FC layer"""
-        resnet = models.resnet18(pretrained=False)
-
-        # Modify first conv layer for EEG channels
-        resnet.conv1 = nn.Conv2d(
-            in_channels=num_input_channels,
-            out_channels=64,
-            kernel_size=7,
-            stride=2,
-            padding=3,
-            bias=False
-        )
-        nn.init.kaiming_normal_(resnet.conv1.weight, mode='fan_out', nonlinearity='relu')
-
-        # Remove final FC layer (we'll add our own)
-        resnet.fc = nn.Identity()
-
-        return resnet
+    def _build_eeg_cnn_backbone(self, num_input_channels):
+        """Build custom EEG-CNN backbone"""
+        return EEG_CNN(in_channels=num_input_channels)
 
     def forward(self, x):
         """
@@ -218,11 +288,12 @@ class EEGCNNTrainer:
         self.train_loader = self._create_dataloader('train')
         self.val_loader = self._create_dataloader('val')
         
-        # Initialize CNN-LSTM model
+        # Initialize CNN-LSTM model with custom EEG-CNN backbone
         self.model = CNN_LSTM_Hybrid(
             num_input_channels=18,
             num_classes=2,
             sequence_length=SEQUENCE_LENGTH,
+            cnn_feature_dim=256,  # EEG-CNN outputs 256 features (vs ResNet18's 512)
             lstm_hidden_dim=LSTM_HIDDEN_DIM,
             lstm_num_layers=LSTM_NUM_LAYERS,
             dropout=LSTM_DROPOUT
@@ -237,19 +308,11 @@ class EEGCNNTrainer:
             weight_decay=WEIGHT_DECAY
         )
         
-        # Learning rate scheduler - OneCycleLR for better convergence
-        # Calculate total steps
-        steps_per_epoch = len(self.train_loader)
-        total_steps = TRAINING_EPOCHS * steps_per_epoch
-
-        self.scheduler = optim.lr_scheduler.OneCycleLR(
+        # Learning rate scheduler - StepLR reduces LR every N epochs
+        self.scheduler = optim.lr_scheduler.StepLR(
             self.optimizer,
-            max_lr=LEARNING_RATE * 10,  # Peak LR is 10x base LR
-            total_steps=total_steps,
-            pct_start=0.3,  # 30% of training is warmup
-            anneal_strategy='cos',
-            div_factor=25.0,  # Initial LR = max_lr / 25
-            final_div_factor=10000.0  # Final LR = initial_lr / 10000
+            step_size=10,      # Reduce LR every 10 epochs
+            gamma=0.5          # Multiply LR by 0.5
         )
         
         # Metrics tracking
@@ -257,7 +320,12 @@ class EEGCNNTrainer:
         self.val_metrics_history = []
         
         print(f"Model initialized with {sum(p.numel() for p in self.model.parameters())} parameters")
-    
+
+    @property
+    def positive_label(self):
+        """Get positive class label based on task mode"""
+        return 'preictal' if TASK_MODE == 'prediction' else 'ictal'
+
     def _get_device_name(self):
         """Get descriptive device name"""
         if self.device.type == 'cuda':
@@ -338,11 +406,8 @@ class EEGCNNTrainer:
             # Backward pass
             loss.backward()
 
-            # Gradient clipping to prevent exploding gradients
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=GRADIENT_CLIP_NORM)
-
             self.optimizer.step()
-            self.scheduler.step()  # Update LR after each batch for OneCycleLR
+            # Note: scheduler.step() is now called per-epoch, not per-batch
 
             # Track metrics
             total_loss += loss.item()
@@ -425,6 +490,9 @@ class EEGCNNTrainer:
             'train_metrics': train_metrics,
             'val_metrics': val_metrics,
             'config': {
+                'task_mode': TASK_MODE,
+                'positive_class': self.positive_label,
+                'negative_class': 'interictal',
                 'batch_size': BATCH_SIZE,
                 'learning_rate': LEARNING_RATE,
                 'weight_decay': WEIGHT_DECAY
@@ -440,6 +508,9 @@ class EEGCNNTrainer:
             'train_metrics': self.train_metrics_history,
             'val_metrics': self.val_metrics_history,
             'config': {
+                'task_mode': TASK_MODE,
+                'positive_class': self.positive_label,
+                'negative_class': 'interictal',
                 'epochs': TRAINING_EPOCHS,
                 'batch_size': BATCH_SIZE,
                 'learning_rate': LEARNING_RATE,
@@ -462,7 +533,8 @@ class EEGCNNTrainer:
         # Set style
         plt.style.use('seaborn-v0_8')
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle('EEG Seizure Prediction - Training Progress', fontsize=16, fontweight='bold')
+        title = f'EEG Seizure {TASK_MODE.capitalize()} - Training Progress ({self.positive_label} vs interictal)'
+        fig.suptitle(title, fontsize=16, fontweight='bold')
         
         epochs = range(1, len(self.train_metrics_history) + 1)
         
@@ -513,8 +585,9 @@ class EEGCNNTrainer:
     def train(self):
         """Main training loop"""
         print("="*60)
-        print("STARTING EEG SEIZURE PREDICTION TRAINING")
+        print(f"STARTING EEG SEIZURE {TASK_MODE.upper()} TRAINING")
         print("="*60)
+        print(f"Task mode: {TASK_MODE.upper()} ({self.positive_label} vs interictal)")
         print(f"Training for {TRAINING_EPOCHS} epochs")
         print(f"Batch size: {BATCH_SIZE}")
         print(f"Learning rate: {LEARNING_RATE}")
@@ -538,9 +611,9 @@ class EEGCNNTrainer:
             self.train_metrics_history.append(train_metrics)
             self.val_metrics_history.append(val_metrics)
 
-            # Note: OneCycleLR scheduler is updated per-batch, not per-epoch
-            # No need to call scheduler.step() here
-            
+            # Update learning rate (StepLR updates per-epoch)
+            self.scheduler.step()
+
             # Save model checkpoint
             self.save_model(epoch, train_metrics, val_metrics)
             

@@ -29,7 +29,10 @@ warnings.filterwarnings("ignore", message=".*file size.*", category=RuntimeWarni
 mne.set_log_level('ERROR')
 
 class EEGPreprocessor:
-    def __init__(self, input_json_path: str = 'all_patients_sequences.json'):
+    def __init__(self, input_json_path: str = None):
+        # Auto-generate input filename based on task mode if not provided
+        if input_json_path is None:
+            input_json_path = f'all_patients_sequences_{TASK_MODE}.json'
         self.input_json_path = input_json_path
         self.output_dir = Path("preprocessing")
         self.data_dir = self.output_dir / "data"
@@ -72,6 +75,11 @@ class EEGPreprocessor:
         self.n_workers = min(PREPROCESSING_WORKERS, available_cores)
         self.logger.info(f"Multiprocessing: Using {self.n_workers}/{available_cores} CPU cores for parallel preprocessing")
         self.logger.info(f"MNE parallel filtering: {MNE_N_JOBS} jobs per sequence")
+
+    @property
+    def positive_label(self):
+        """Get positive class label based on task mode"""
+        return 'preictal' if TASK_MODE == 'prediction' else 'ictal'
 
     @staticmethod
     def group_sequences_by_file(sequences: List[Dict]) -> Dict[Tuple[str, str], List[Dict]]:
@@ -221,11 +229,11 @@ class EEGPreprocessor:
         """Patient-level split for sequences (no balancing to preserve patient distribution)"""
         self.logger.info("Performing patient-level split for sequences...")
 
-        # Separate by class
-        preictal_sequences = [s for s in sequences if s['type'] == 'preictal']
+        # Separate by class (using dynamic positive label)
+        positive_sequences = [s for s in sequences if s['type'] == self.positive_label]
         interictal_sequences = [s for s in sequences if s['type'] == 'interictal']
 
-        self.logger.info(f"Total sequences: {len(preictal_sequences)} preictal, {len(interictal_sequences)} interictal")
+        self.logger.info(f"Total sequences: {len(positive_sequences)} {self.positive_label}, {len(interictal_sequences)} interictal")
 
         # Get unique patients
         all_patients = sorted(set([s['patient_id'] for s in sequences]))
@@ -256,10 +264,10 @@ class EEGPreprocessor:
 
         # Log split statistics
         for split_name, split_seqs in splits.items():
-            preictal_count = sum(1 for s in split_seqs if s['type'] == 'preictal')
-            interictal_count = len(split_seqs) - preictal_count
+            positive_count = sum(1 for s in split_seqs if s['type'] == self.positive_label)
+            interictal_count = len(split_seqs) - positive_count
             patients = set([s['patient_id'] for s in split_seqs])
-            self.logger.info(f"{split_name}: {len(split_seqs)} sequences ({preictal_count} preictal, {interictal_count} interictal) from {len(patients)} patients")
+            self.logger.info(f"{split_name}: {len(split_seqs)} sequences ({positive_count} {self.positive_label}, {interictal_count} interictal) from {len(patients)} patients")
 
         return splits
 
@@ -437,7 +445,7 @@ class EEGPreprocessor:
 
                     processed_sequences.append({
                         'spectrogram': sequence_array,
-                        'label': 1 if sequence['type'] == 'preictal' else 0,
+                        'label': 1 if sequence['type'] == self.positive_label else 0,
                         'patient_id': sequence['patient_id'],
                         'sequence_start_sec': sequence['sequence_start_sec'],
                         'sequence_end_sec': sequence['sequence_end_sec'],
@@ -533,7 +541,7 @@ class EEGPreprocessor:
 
             return {
                 'spectrogram': sequence_array,
-                'label': 1 if sequence['type'] == 'preictal' else 0,
+                'label': 1 if sequence['type'] == self.positive_label else 0,
                 'patient_id': sequence['patient_id'],
                 'sequence_start_sec': sequence['sequence_start_sec'],
                 'sequence_end_sec': sequence['sequence_end_sec'],
@@ -583,6 +591,9 @@ class EEGPreprocessor:
                     seg_info.create_dataset('segment_ids', (0,), maxshape=(None,), dtype='S50', chunks=True)
 
                     metadata = f.create_group('metadata')
+                    metadata.attrs['task_mode'] = TASK_MODE
+                    metadata.attrs['positive_class'] = self.positive_label
+                    metadata.attrs['negative_class'] = 'interictal'
                     metadata.attrs['target_channels'] = [ch.encode('utf-8') for ch in batch_sequences[0]['channel_names']]
                     metadata.attrs['frequencies'] = batch_sequences[0]['frequencies']
                     metadata.attrs['frequency_range'] = [LOW_FREQ_HZ, HIGH_FREQ_HZ]
@@ -632,9 +643,9 @@ class EEGPreprocessor:
 
                 # Update metadata
                 f['metadata'].attrs['n_sequences'] = new_total
-                n_preictal = np.sum(f['labels'][:] == 1)
-                n_interictal = new_total - n_preictal
-                f['metadata'].attrs['class_distribution'] = f"preictal: {n_preictal}, interictal: {n_interictal}"
+                n_positive = np.sum(f['labels'][:] == 1)
+                n_interictal = new_total - n_positive
+                f['metadata'].attrs['class_distribution'] = f"{self.positive_label}: {n_positive}, interictal: {n_interictal}"
 
             self.logger.debug(f"Successfully appended batch. New total sequences for {split_name}: {new_total}")
         except Exception as e:
@@ -656,14 +667,14 @@ class EEGPreprocessor:
                 with h5py.File(dataset_file, 'r') as f:
                     n_segments = f['spectrograms'].shape[0]
                     spec_shape = f['spectrograms'].shape[1:]
-                    n_preictal = np.sum(f['labels'][:] == 1)
+                    n_positive = np.sum(f['labels'][:] == 1)
                     n_interictal = np.sum(f['labels'][:] == 0)
-                    
+
                     self.logger.info(f"{split_name} dataset validation:")
                     self.logger.info(f"  - Segments: {n_segments}")
                     self.logger.info(f"  - Spectrogram shape: {spec_shape}")
-                    self.logger.info(f"  - Classes: {n_preictal} preictal, {n_interictal} interictal")
-                    self.logger.info(f"  - Balance: {n_preictal/n_segments*100:.1f}% preictal")
+                    self.logger.info(f"  - Classes: {n_positive} {self.positive_label}, {n_interictal} interictal")
+                    self.logger.info(f"  - Balance: {n_positive/n_segments*100:.1f}% {self.positive_label}")
                     
             except Exception as e:
                 self.logger.error(f"Error validating {split_name} dataset: {e}")

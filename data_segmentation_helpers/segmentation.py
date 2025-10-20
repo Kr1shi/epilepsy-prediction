@@ -4,42 +4,60 @@ import os
 from data_segmentation_helpers.config import *
 
 def parse_summary_file(summary_path):
-    """Parse summary file to extract seizures and files"""
+    """Parse summary file to extract seizures, files, and file times
+
+    Returns:
+        seizures: List of seizure dictionaries
+        all_files: List of filenames
+        file_times: Dict mapping filename to {start_time_str, end_time_str}
+    """
     seizures = []
     all_files = []
-    
+    file_times = {}
+
     with open(summary_path, 'r') as f:
         lines = f.readlines()
-    
+
     current_file = None
     i = 0
-    
+
     while i < len(lines):
         line = lines[i].strip()
-        
+
         if line.startswith('File Name:'):
             current_file = line.split(':', 1)[1].strip()
             all_files.append(current_file)
-            
+            file_times[current_file] = {}
+
+        elif line.startswith('File Start Time:'):
+            time_str = line.split(':', 1)[1].strip()  # e.g., "14:40:47"
+            if current_file:
+                file_times[current_file]['start_time'] = time_str
+
+        elif line.startswith('File End Time:'):
+            time_str = line.split(':', 1)[1].strip()  # e.g., "18:41:13"
+            if current_file:
+                file_times[current_file]['end_time'] = time_str
+
         elif 'Number of Seizures in File:' in line:
             num_seizures = int(line.split(':')[-1].strip())
-            
+
             for j in range(num_seizures):
                 i += 1
                 start_time = int(lines[i].strip().split(':')[-1].strip().split(' ')[0])
                 i += 1
                 end_time = int(lines[i].strip().split(':')[-1].strip().split(' ')[0])
-                
+
                 seizures.append({
                     'file': current_file,
                     'start_sec': start_time,
                     'end_sec': end_time,
                     'duration_sec': end_time - start_time
                 })
-        
+
         i += 1
-    
-    return seizures, all_files
+
+    return seizures, all_files, file_times
 
 def create_preictal_segments(seizures):
     """Create ALL possible preictal segments from available time before seizures"""

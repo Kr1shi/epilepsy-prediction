@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
 Evaluate trained model on test dataset
+
+Usage:
+    python evaluate_test.py              # Evaluate final epoch (default)
+    python evaluate_test.py --epoch 10   # Evaluate specific epoch
 """
 import torch
 import torch.nn as nn
@@ -13,6 +17,7 @@ from sklearn.metrics import (
 )
 from tqdm import tqdm
 import json
+import argparse
 
 # Import from train.py
 from train import EEGDataset, CNN_LSTM_Hybrid, MetricsTracker
@@ -119,8 +124,18 @@ def evaluate_model(model_path, test_data_path, device):
 
 def main():
     """Main evaluation function"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Evaluate trained model on test dataset')
+    parser.add_argument(
+        '--epoch',
+        type=int,
+        default=TRAINING_EPOCHS,
+        help=f'Epoch number to evaluate (default: {TRAINING_EPOCHS}, the final epoch)'
+    )
+    args = parser.parse_args()
+
     # Setup
-    model_path = Path(f"model/epoch_0{TRAINING_EPOCHS}.pth")
+    model_path = Path(f"model/epoch_{args.epoch:03d}.pth")
     test_data_path = Path("preprocessing/data/test_dataset.h5")
 
     # Check if files exist
@@ -143,6 +158,7 @@ def main():
     # Evaluate
     print("="*60)
     print(f"TEST SET EVALUATION - {TASK_MODE.upper()} MODE")
+    print(f"Evaluating model from epoch {args.epoch}")
     print("="*60)
 
     metrics, cm, true_labels, predictions, probabilities, checkpoint_task_mode, positive_class = evaluate_model(

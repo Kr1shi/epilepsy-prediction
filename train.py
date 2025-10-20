@@ -193,7 +193,7 @@ class EEG_CNN(nn.Module):
         return x
 
 class CNN_LSTM_Hybrid(nn.Module):
-    """Deep CNN-LSTM Hybrid model for seizure prediction/detection
+    """Deep CNN-BiLSTM Hybrid model for seizure prediction/detection
 
     Architecture:
     1. Deep EEG-CNN (VGG-16 style) as feature extractor (per segment)
@@ -201,15 +201,22 @@ class CNN_LSTM_Hybrid(nn.Module):
        - Channel progression: 128 → 256 → 512 → 512 → 512
        - Outputs 512-dimensional feature vector per segment
        - ~9.5M parameters for rich feature learning
-    2. LSTM for temporal modeling across sequence
+    2. Bidirectional LSTM for temporal modeling across sequence
+       - 3 layers, 512 hidden units per direction (1024 total)
+       - Processes sequence in both forward and backward directions
+       - 50% dropout for regularization
+       - ~13M parameters
     3. Attention mechanism for adaptive temporal pooling
     4. Fully connected classification head
 
     The deep CNN provides significantly more capacity (~23x more parameters)
-    for learning complex spectro-temporal patterns in EEG data. The attention
-    mechanism learns which timesteps in the sequence are most important for
-    classification, replacing simple "last hidden state" pooling with a
-    weighted combination of all timesteps.
+    for learning complex spectro-temporal patterns in EEG data. The bidirectional
+    LSTM captures both past and future temporal context, improving prediction
+    accuracy. The attention mechanism learns which timesteps in the sequence are
+    most important for classification, replacing simple "last hidden state" pooling
+    with a weighted combination of all timesteps.
+
+    Total: ~22.5M parameters (9.5M CNN + 13M BiLSTM)
 
     Supports two task modes:
     - Prediction: Classify preictal vs interictal (predict before seizure)
@@ -232,26 +239,28 @@ class CNN_LSTM_Hybrid(nn.Module):
         # CNN Feature Extractor (Custom EEG-CNN)
         self.feature_extractor = self._build_eeg_cnn_backbone(num_input_channels)
 
-        # LSTM for temporal modeling
+        # Bidirectional LSTM for temporal modeling (processes sequence in both directions)
         self.lstm = nn.LSTM(
             input_size=cnn_feature_dim,
             hidden_size=lstm_hidden_dim,
             num_layers=lstm_num_layers,
             batch_first=True,
             dropout=dropout if lstm_num_layers > 1 else 0,
-            bidirectional=False
+            bidirectional=True
         )
 
         # Attention mechanism - learns which timesteps are most important
+        # Input: lstm_hidden_dim * 2 due to bidirectional LSTM (forward + backward)
         self.attention = nn.Sequential(
-            nn.Linear(lstm_hidden_dim, 128),
+            nn.Linear(lstm_hidden_dim * 2, 128),
             nn.Tanh(),
             nn.Linear(128, 1, bias=False)
         )
 
         # Classification head
+        # Input: lstm_hidden_dim * 2 due to bidirectional LSTM (forward + backward)
         self.fc = nn.Sequential(
-            nn.Linear(lstm_hidden_dim, 128),
+            nn.Linear(lstm_hidden_dim * 2, 128),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(128, num_classes)

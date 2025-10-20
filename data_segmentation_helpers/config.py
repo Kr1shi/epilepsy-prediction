@@ -1,7 +1,7 @@
 """Configuration for seizure prediction segmentation"""
 
 # Segment configuration
-SEGMENT_DURATION = 30  # seconds
+SEGMENT_DURATION = 5  # seconds
 
 # Task mode configuration
 TASK_MODE = 'detection'  # Options: 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
@@ -45,13 +45,13 @@ TARGET_CHANNELS = [
 SKIP_CHANNEL_VALIDATION = False
 
 # Sequence configuration for CNN-LSTM
-SEQUENCE_LENGTH = 5        # Number of 30-second segments per sequence (2.5 minutes total)
-SEQUENCE_STRIDE = 1        # Stride for sliding window (80% overlap: (5-1)/5 = 0.8)
+SEQUENCE_LENGTH = 30        
+SEQUENCE_STRIDE = 5        
 
 # LSTM configuration
-LSTM_HIDDEN_DIM = 256      # LSTM hidden state dimension
-LSTM_NUM_LAYERS = 2        # Number of stacked LSTM layers
-LSTM_DROPOUT = 0.3         # Dropout between LSTM layers
+LSTM_HIDDEN_DIM = 512      # LSTM hidden state dimension (increased for deeper CNN)
+LSTM_NUM_LAYERS = 3        # Number of stacked LSTM layers (increased depth)
+LSTM_DROPOUT = 0.5         # Dropout between LSTM layers (increased regularization)
 
 # Training configuration
 TRAINING_EPOCHS = 15

@@ -1,10 +1,14 @@
 """Visualization script for CNN-LSTM sequence-based preprocessed data
 
 This script validates preprocessed HDF5 data by visualizing:
-1. Individual sequence spectrograms (temporal progression across 10 segments)
+1. Individual sequence spectrograms (temporal progression across segments)
 2. Class distribution and balance
 3. Spectrogram shape validation
-4. Sample preictal vs interictal sequences
+4. Sample positive class (preictal/ictal) vs interictal sequences
+
+Supports both task modes:
+- Prediction: preictal vs interictal
+- Detection: ictal vs interictal
 """
 
 import h5py
@@ -15,6 +19,10 @@ from pathlib import Path
 import random
 import logging
 from data_segmentation_helpers.config import *
+
+def get_positive_label():
+    """Get positive class label based on task mode"""
+    return 'preictal' if TASK_MODE == 'prediction' else 'ictal'
 
 # Setup logging
 logging.basicConfig(
@@ -34,6 +42,7 @@ class SequenceVisualizer:
         logger.info("="*60)
         logger.info("CNN-LSTM SEQUENCE VISUALIZATION")
         logger.info("="*60)
+        logger.info(f"Task mode: {TASK_MODE.upper()} ({get_positive_label()} vs interictal)")
         logger.info(f"Data directory: {self.data_dir}")
         logger.info(f"Output directory: {self.output_dir}")
 
@@ -70,7 +79,10 @@ class SequenceVisualizer:
                 info['sequence_length_config'] = metadata.get('sequence_length', SEQUENCE_LENGTH)
                 info['segment_duration'] = metadata.get('segment_duration', SEGMENT_DURATION)
 
+        positive_label = get_positive_label()
+
         logger.info(f"\n{split.upper()} Dataset Info:")
+        logger.info(f"  Task mode: {TASK_MODE.upper()} ({positive_label} vs interictal)")
         logger.info(f"  Total sequences: {info['n_sequences']}")
         logger.info(f"  Sequence shape: ({info['sequence_length']}, {info['n_channels']}, {info['n_frequencies']}, {info['n_time_bins']})")
         logger.info(f"  Sequence length: {info['sequence_length']} segments")
@@ -78,17 +90,20 @@ class SequenceVisualizer:
         logger.info(f"  Frequencies: {info['n_frequencies']} bins")
         logger.info(f"  Time bins per segment: {info['n_time_bins']}")
         logger.info(f"  Class 0 (interictal): {np.sum(info['labels'] == 0)}")
-        logger.info(f"  Class 1 (preictal): {np.sum(info['labels'] == 1)}")
+        logger.info(f"  Class 1 ({positive_label}): {np.sum(info['labels'] == 1)}")
 
         return info
 
     def plot_class_distribution(self, splits=['train', 'val', 'test']):
         """Plot class distribution across all splits"""
+        positive_label = get_positive_label()
+
         fig, axes = plt.subplots(1, len(splits), figsize=(5*len(splits), 4))
         if len(splits) == 1:
             axes = [axes]
 
-        fig.suptitle('Class Distribution Across Splits', fontsize=16, fontweight='bold')
+        fig.suptitle(f'Class Distribution Across Splits\n({TASK_MODE.upper()}: {positive_label.capitalize()} vs Interictal)',
+                    fontsize=16, fontweight='bold')
 
         for idx, split in enumerate(splits):
             h5_file = self.data_dir / f"{split}_dataset.h5"
@@ -104,7 +119,7 @@ class SequenceVisualizer:
 
             # Plot
             ax = axes[idx]
-            bars = ax.bar(['Interictal (0)', 'Preictal (1)'], counts, color=['#2ecc71', '#e74c3c'])
+            bars = ax.bar(['Interictal (0)', f'{positive_label.capitalize()} (1)'], counts, color=['#2ecc71', '#e74c3c'])
             ax.set_ylabel('Number of Sequences')
             ax.set_title(f'{split.upper()} Split')
             ax.set_ylim(0, max(counts) * 1.2)
@@ -123,13 +138,19 @@ class SequenceVisualizer:
         plt.close()
 
     def plot_sequence_spectrograms(self, split='train', n_examples=2):
-        """Plot full sequences showing temporal progression"""
+        """Plot sequences from same patients (optimized with smart sampling)
+
+        Compares positive class (ictal/preictal) vs interictal from the SAME patient
+        for better visual comparison of seizure vs non-seizure activity.
+        """
+        positive_label = get_positive_label()
         h5_file = self.data_dir / f"{split}_dataset.h5"
 
         with h5py.File(h5_file, 'r') as f:
+            # Efficient indexing: only load labels to find indices
             labels = f['labels'][:]
+            patient_ids_raw = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
             spectrograms = f['spectrograms']
-            patient_ids = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
 
             # Get metadata
             if 'metadata' in f:
@@ -140,42 +161,96 @@ class SequenceVisualizer:
             else:
                 channels = [f'Ch{i}' for i in range(spectrograms.shape[2])]
 
-            # Sample sequences from each class
-            preictal_indices = np.where(labels == 1)[0]
+            # Find patients with BOTH positive and interictal sequences
+            positive_indices = np.where(labels == 1)[0]
             interictal_indices = np.where(labels == 0)[0]
 
-            # Randomly sample
-            sample_preictal = random.sample(list(preictal_indices), min(n_examples, len(preictal_indices)))
-            sample_interictal = random.sample(list(interictal_indices), min(n_examples, len(interictal_indices)))
+            # Group indices by patient
+            patient_positive = {}  # patient_id -> list of positive indices
+            patient_interictal = {}  # patient_id -> list of interictal indices
 
-            # Plot preictal sequences
-            for idx in sample_preictal:
-                self._plot_single_sequence(spectrograms[idx], patient_ids[idx],
-                                          'preictal', idx, channels)
+            for idx in positive_indices:
+                pid = patient_ids_raw[idx]
+                if pid not in patient_positive:
+                    patient_positive[pid] = []
+                patient_positive[pid].append(idx)
 
-            # Plot interictal sequences
-            for idx in sample_interictal:
-                self._plot_single_sequence(spectrograms[idx], patient_ids[idx],
-                                          'interictal', idx, channels)
+            for idx in interictal_indices:
+                pid = patient_ids_raw[idx]
+                if pid not in patient_interictal:
+                    patient_interictal[pid] = []
+                patient_interictal[pid].append(idx)
+
+            # Find patients with both classes
+            patients_with_both = set(patient_positive.keys()) & set(patient_interictal.keys())
+
+            if not patients_with_both:
+                logger.warning(f"No patients found with both {positive_label} and interictal sequences!")
+                return
+
+            # Sample patients
+            selected_patients = random.sample(list(patients_with_both), min(n_examples, len(patients_with_both)))
+
+            logger.info(f"\nPlotting {len(selected_patients)} patients with both {positive_label} and interictal sequences")
+
+            # For each patient, plot one positive and one interictal sequence
+            for patient_id in selected_patients:
+                # Sample one sequence from each class for this patient
+                pos_idx = random.choice(patient_positive[patient_id])
+                int_idx = random.choice(patient_interictal[patient_id])
+
+                logger.info(f"  Patient {patient_id}: {positive_label} seq #{pos_idx}, interictal seq #{int_idx}")
+
+                # Plot positive sequence
+                sequence = spectrograms[pos_idx]
+                self._plot_single_sequence(sequence, patient_id, positive_label, pos_idx, channels)
+
+                # Plot interictal sequence
+                sequence = spectrograms[int_idx]
+                self._plot_single_sequence(sequence, patient_id, 'interictal', int_idx, channels)
 
     def _plot_single_sequence(self, sequence, patient_id, label, seq_idx, channels):
-        """Plot a single sequence (all segments and channels)"""
+        """Plot a single sequence (selected segments and key channels for performance)"""
         seq_len, n_channels, n_freqs, n_time_bins = sequence.shape
 
-        # Create a large figure showing temporal progression
-        # Rows = channels, Columns = segments (time progression)
-        fig, axes = plt.subplots(n_channels, seq_len,
-                                figsize=(seq_len * 2, n_channels * 1.5),
+        # Select 6 representative segments: first 2, middle 2, last 2
+        segment_indices = [
+            0, 1,                              # Beginning
+            seq_len // 2 - 1, seq_len // 2,    # Middle
+            seq_len - 2, seq_len - 1           # End
+        ]
+        segment_labels = [
+            f'Seg 1\n(0-{SEGMENT_DURATION}s)',
+            f'Seg 2\n({SEGMENT_DURATION}-{SEGMENT_DURATION*2}s)',
+            f'Seg {seq_len//2}\n({(seq_len//2-1)*SEGMENT_DURATION}-{(seq_len//2)*SEGMENT_DURATION}s)',
+            f'Seg {seq_len//2+1}\n({(seq_len//2)*SEGMENT_DURATION}-{(seq_len//2+1)*SEGMENT_DURATION}s)',
+            f'Seg {seq_len-1}\n({(seq_len-2)*SEGMENT_DURATION}-{(seq_len-1)*SEGMENT_DURATION}s)',
+            f'Seg {seq_len}\n({(seq_len-1)*SEGMENT_DURATION}-{seq_len*SEGMENT_DURATION}s)'
+        ]
+
+        # Select 6 key channels representing different brain regions
+        KEY_CHANNELS = ['FP1-F7', 'FP2-F8', 'C3-P3', 'C4-P4', 'T7-P7', 'T8-P8']
+        channel_indices = [channels.index(ch) for ch in KEY_CHANNELS if ch in channels]
+
+        # Fallback: if key channels not found, use evenly spaced channels
+        if len(channel_indices) < 6:
+            step = n_channels // 6
+            channel_indices = list(range(0, n_channels, step))[:6]
+
+        # Create optimized figure: 6 channels × 6 segments = 36 subplots (vs 540 before)
+        fig, axes = plt.subplots(len(channel_indices), len(segment_indices),
+                                figsize=(len(segment_indices) * 2.5, len(channel_indices) * 1.5),
                                 sharex=True, sharey=True)
 
         fig.suptitle(f'Sequence #{seq_idx} - {patient_id} - {label.upper()}\n'
-                    f'Temporal Progression: {seq_len} × {SEGMENT_DURATION}s segments = {seq_len * SEGMENT_DURATION}s total',
+                    f'Showing 6 of {seq_len} segments (beginning, middle, end) × 6 key channels\n'
+                    f'Total sequence: {seq_len * SEGMENT_DURATION}s',
                     fontsize=14, fontweight='bold')
 
-        # Plot each channel × segment combination
-        for ch_idx in range(n_channels):
-            for seg_idx in range(seq_len):
-                ax = axes[ch_idx, seg_idx] if n_channels > 1 else axes[seg_idx]
+        # Plot each selected channel × segment combination
+        for ch_plot_idx, ch_idx in enumerate(channel_indices):
+            for seg_plot_idx, seg_idx in enumerate(segment_indices):
+                ax = axes[ch_plot_idx, seg_plot_idx] if len(channel_indices) > 1 else axes[seg_plot_idx]
 
                 # Get spectrogram for this segment and channel
                 spec = sequence[seg_idx, ch_idx, :, :]  # (n_freqs, n_time_bins)
@@ -185,13 +260,12 @@ class SequenceVisualizer:
                              cmap='viridis', interpolation='nearest')
 
                 # Labels
-                if seg_idx == 0:
+                if seg_plot_idx == 0:
                     ax.set_ylabel(f'{channels[ch_idx] if ch_idx < len(channels) else f"Ch{ch_idx}"}\nFreq',
                                 fontsize=8)
-                if ch_idx == 0:
-                    ax.set_title(f'Seg {seg_idx+1}\n({seg_idx*SEGMENT_DURATION}-{(seg_idx+1)*SEGMENT_DURATION}s)',
-                               fontsize=8)
-                if ch_idx == n_channels - 1:
+                if ch_plot_idx == 0:
+                    ax.set_title(segment_labels[seg_plot_idx], fontsize=8)
+                if ch_plot_idx == len(channel_indices) - 1:
                     ax.set_xlabel('Time', fontsize=7)
 
                 # Remove ticks for cleaner look
@@ -199,7 +273,7 @@ class SequenceVisualizer:
                 ax.set_yticks([])
 
         # Add colorbar
-        fig.colorbar(im, ax=axes.ravel().tolist() if n_channels > 1 else axes,
+        fig.colorbar(im, ax=axes.ravel().tolist() if len(channel_indices) > 1 else axes,
                     label='Log Power', shrink=0.8)
 
         plt.tight_layout()
@@ -210,13 +284,14 @@ class SequenceVisualizer:
         plt.close()
 
     def plot_channel_comparison(self, split='train', n_examples=1):
-        """Plot all channels side-by-side for a single segment"""
+        """Plot all channels side-by-side for a single segment (same patient comparison)"""
+        positive_label = get_positive_label()
         h5_file = self.data_dir / f"{split}_dataset.h5"
 
         with h5py.File(h5_file, 'r') as f:
             labels = f['labels'][:]
             spectrograms = f['spectrograms']
-            patient_ids = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
+            patient_ids_raw = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
 
             # Get metadata
             if 'metadata' in f:
@@ -229,11 +304,41 @@ class SequenceVisualizer:
                 channels = [f'Ch{i}' for i in range(spectrograms.shape[2])]
                 frequencies = None
 
-            # Sample one from each class
-            preictal_idx = random.choice(np.where(labels == 1)[0])
-            interictal_idx = random.choice(np.where(labels == 0)[0])
+            # Find patients with BOTH classes
+            positive_indices = np.where(labels == 1)[0]
+            interictal_indices = np.where(labels == 0)[0]
 
-            for idx, label in [(preictal_idx, 'preictal'), (interictal_idx, 'interictal')]:
+            # Group by patient
+            patient_positive = {}
+            patient_interictal = {}
+
+            for idx in positive_indices:
+                pid = patient_ids_raw[idx]
+                if pid not in patient_positive:
+                    patient_positive[pid] = []
+                patient_positive[pid].append(idx)
+
+            for idx in interictal_indices:
+                pid = patient_ids_raw[idx]
+                if pid not in patient_interictal:
+                    patient_interictal[pid] = []
+                patient_interictal[pid].append(idx)
+
+            # Find patients with both
+            patients_with_both = set(patient_positive.keys()) & set(patient_interictal.keys())
+
+            if not patients_with_both:
+                logger.warning(f"No patients with both classes for channel comparison")
+                return
+
+            # Pick one patient
+            patient_id = random.choice(list(patients_with_both))
+            positive_idx = random.choice(patient_positive[patient_id])
+            interictal_idx = random.choice(patient_interictal[patient_id])
+
+            logger.info(f"Channel comparison for patient {patient_id}: {positive_label} seq #{positive_idx}, interictal seq #{interictal_idx}")
+
+            for idx, label in [(positive_idx, positive_label), (interictal_idx, 'interictal')]:
                 sequence = spectrograms[idx]  # (seq_len, n_channels, n_freqs, n_time_bins)
 
                 # Plot first segment, all channels
@@ -246,7 +351,7 @@ class SequenceVisualizer:
                 fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, n_rows * 3))
                 axes = axes.flatten() if n_channels > 1 else [axes]
 
-                fig.suptitle(f'All Channels - {patient_ids[idx]} - {label.upper()} (First Segment)',
+                fig.suptitle(f'All Channels - {patient_id} - {label.upper()} (First Segment)',
                            fontsize=14, fontweight='bold')
 
                 for ch_idx in range(n_channels):
@@ -270,7 +375,7 @@ class SequenceVisualizer:
 
                 plt.tight_layout()
 
-                output_file = self.output_dir / f'channels_comparison_{label}_{patient_ids[idx]}.png'
+                output_file = self.output_dir / f'channels_comparison_{label}_{patient_id}.png'
                 plt.savefig(output_file, dpi=150, bbox_inches='tight')
                 logger.info(f"Saved channel comparison to {output_file}")
                 plt.close()

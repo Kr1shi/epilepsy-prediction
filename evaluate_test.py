@@ -50,12 +50,13 @@ def evaluate_model(model_path, test_data_path, device):
         pin_memory=True if device.type == 'cuda' else False
     )
 
-    # Initialize CNN-LSTM model
-    print(f"Initializing CNN-LSTM model...")
+    # Initialize Deep CNN-BiLSTM model
+    print(f"Initializing Deep CNN-BiLSTM model...")
     model = CNN_LSTM_Hybrid(
         num_input_channels=18,
         num_classes=2,
         sequence_length=SEQUENCE_LENGTH,
+        cnn_feature_dim=512,  # Deep EEG-CNN outputs 512 features (16 conv layers)
         lstm_hidden_dim=LSTM_HIDDEN_DIM,
         lstm_num_layers=LSTM_NUM_LAYERS,
         dropout=LSTM_DROPOUT
@@ -74,6 +75,8 @@ def evaluate_model(model_path, test_data_path, device):
 
     print(f"Model loaded from epoch {checkpoint['epoch']}")
     print(f"Task mode: {checkpoint_task_mode.upper()} ({positive_class} vs interictal)")
+    print(f"Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)")
+    print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Evaluate
     print("\nEvaluating on test set...")

@@ -331,33 +331,45 @@ class EEGPreprocessor:
         return normalized_data
 
     def apply_stft(self, data, sampling_rate):
-        """Apply STFT to create spectrograms"""
+        """Apply STFT to create spectrograms
+
+        Returns:
+            stft_spectrograms: Complex STFT coefficients (n_channels, n_freqs, n_times)
+            frequencies: Frequency values for each bin
+            time_array: Time values for each STFT bin (centers of windows)
+        """
         spectrograms = []
-        
+        time_array = None  # Same for all channels
+
         for ch in range(data.shape[0]):
             f, t, Zxx = spectrogram(
-                data[ch, :], 
-                fs=sampling_rate, 
-                nperseg=STFT_NPERSEG, 
+                data[ch, :],
+                fs=sampling_rate,
+                nperseg=STFT_NPERSEG,
                 noverlap=STFT_NOVERLAP,
                 window='hann'
             )
-            
+
+            # Store time array (same for all channels)
+            if time_array is None:
+                time_array = t
+
             # Filter to desired frequency range
             freq_mask = (f >= LOW_FREQ_HZ) & (f <= HIGH_FREQ_HZ)
             filtered_spec = Zxx[freq_mask, :]
             spectrograms.append(filtered_spec)
-        
+
         stft_spectrograms = np.array(spectrograms)
         frequencies = f[freq_mask]
-        
-        return stft_spectrograms, frequencies
+
+        return stft_spectrograms, frequencies, time_array
 
     def preprocess_sequences_from_file(self, patient_id: str, filename: str, sequences: List[Dict]) -> List[Optional[Dict]]:
         """Process multiple sequences from the same EDF file efficiently.
 
-        This method reads and filters the file ONCE, then extracts all sequences.
-        Major optimization: reduces redundant file I/O and filtering operations.
+        This method reads and filters the file ONCE, computes STFT ONCE on the entire range,
+        then extracts all sequences by slicing the pre-computed spectrogram.
+        Major optimization: reduces redundant file I/O, filtering, and STFT operations.
 
         Args:
             patient_id: Patient identifier
@@ -399,38 +411,42 @@ class EEGPreprocessor:
                               n_jobs=MNE_N_JOBS, verbose=False)
             raw_filtered.notch_filter(freqs=NOTCH_FREQ_HZ, n_jobs=MNE_N_JOBS, verbose=False)
 
-            # Now extract all sequences from the pre-filtered data
+            # ✅ OPTIMIZATION: Artifact removal on ENTIRE filtered range (more robust statistics)
+            self.remove_amplitude_artifacts(raw_filtered)
+
+            # ✅ OPTIMIZATION: Convert to microvolts ONCE
+            # MNE reads EEG in Volts (~0.0002V), but |STFT|² on such small values
+            # produces numerical zeros. Scaling to μV (~200μV) prevents this.
+            filtered_data_uv = raw_filtered.get_data() * 1e6
+
+            # ✅ OPTIMIZATION: Compute STFT ONCE on entire range
+            stft_coeffs, frequencies, time_array = self.apply_stft(filtered_data_uv, sampling_rate)
+
+            # ✅ OPTIMIZATION: Compute power spectrogram ONCE
+            full_power_spectrogram = np.abs(stft_coeffs) ** 2
+
+            # Now extract all sequences by slicing the pre-computed spectrogram
             processed_sequences = []
 
             for sequence in sequences:
                 try:
                     sequence_spectrograms = []
 
-                    # Extract each segment in this sequence
+                    # Extract each segment in this sequence by slicing the spectrogram
                     for segment_start in sequence['segment_starts']:
-                        # Adjust segment time to be relative to crop start
-                        adjusted_start = segment_start - crop_tmin
-                        adjusted_end = adjusted_start + SEGMENT_DURATION
+                        # Calculate segment boundaries relative to crop start
+                        segment_start_relative = segment_start - crop_tmin
+                        segment_end_relative = segment_start_relative + SEGMENT_DURATION
 
-                        # Extract segment from ALREADY FILTERED data
-                        raw_segment = raw_filtered.copy().crop(tmin=adjusted_start, tmax=adjusted_end)
+                        # Find STFT time bins within this segment
+                        # Segments start at integer multiples of 5s, STFT bins at 0.5s intervals
+                        # → perfect alignment, no approximation needed!
+                        bin_mask = (time_array >= segment_start_relative) & (time_array < segment_end_relative)
 
-                        # Artifact removal
-                        artifact_counts = self.remove_amplitude_artifacts(raw_segment)
+                        # Slice pre-computed power spectrogram (channels × freqs × time)
+                        power_spectrogram = full_power_spectrogram[:, :, bin_mask]
 
-                        # Get filtered data (DO NOT normalize time-domain signal before STFT!)
-                        filtered_data = raw_segment.get_data()
-
-                        # ✅ CRITICAL FIX: Convert from Volts to microvolts before STFT
-                        # MNE reads EEG in Volts (~0.0002V), but |STFT|² on such small values
-                        # produces numerical zeros. Scaling to μV (~200μV) prevents this.
-                        filtered_data_uv = filtered_data * 1e6
-
-                        # STFT - apply to microvolts (NOT volts!)
-                        stft_coeffs, frequencies = self.apply_stft(filtered_data_uv, sampling_rate)
-
-                        # Convert to power spectrograms
-                        power_spectrogram = np.abs(stft_coeffs) ** 2
+                        # Apply log transform
                         if APPLY_LOG_TRANSFORM:
                             power_spectrogram = np.log10(power_spectrogram + LOG_TRANSFORM_EPSILON)
 
@@ -523,7 +539,7 @@ class EEGPreprocessor:
                 filtered_data_uv = filtered_data * 1e6
 
                 # STFT - apply to microvolts (NOT volts!)
-                stft_coeffs, frequencies = self.apply_stft(filtered_data_uv, sampling_rate)
+                stft_coeffs, frequencies, _ = self.apply_stft(filtered_data_uv, sampling_rate)
 
                 # Convert to power spectrograms
                 power_spectrogram = np.abs(stft_coeffs) ** 2

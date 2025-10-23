@@ -54,7 +54,7 @@ LSTM_NUM_LAYERS = 3        # Number of stacked LSTM layers (increased depth)
 LSTM_DROPOUT = 0.5         # Dropout between LSTM layers (increased regularization)
 
 # Training configuration
-TRAINING_EPOCHS = 15
+TRAINING_EPOCHS = 5
 BATCH_SIZE = 32
 SEQUENCE_BATCH_SIZE = 4  # Small batch size for sequences (reduced from 12 to improve gradient estimates)
 LEARNING_RATE = 0.0001  # Reduced from 0.001 to prevent divergence

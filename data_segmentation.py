@@ -16,6 +16,10 @@ from data_segmentation_helpers.channel_validation import (
     get_validation_summary
 )
 
+# Safety margin to ensure sufficient data for preprocessing (filter padding + STFT requirements)
+# Preprocessing adds 5s padding for filter edge effects + margin for STFT windows
+SAFETY_MARGIN = 6.0  # seconds
+
 def get_file_duration(edf_path):
     """Get actual duration of EDF file"""
     try:
@@ -41,18 +45,22 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
         List of sequence dictionaries
     """
     sequences = []
+    skipped_boundary_sequences = 0  # Track sequences skipped due to insufficient boundary data
 
     # Calculate sequence parameters
     sequence_duration = SEGMENT_DURATION * SEQUENCE_LENGTH  # e.g., 30s * 5 = 150s
     stride_duration = SEGMENT_DURATION * SEQUENCE_STRIDE    # e.g., 30s * 1 = 30s
 
     # Calculate how many sequences we can extract
-    if file_duration < sequence_duration:
-        return sequences  # File too short for even one sequence
+    # Need safety margin at BOTH start and end of file
+    if file_duration < sequence_duration + (2 * SAFETY_MARGIN):
+        return sequences  # File too short for even one sequence (including safety margins)
 
     # Generate sequence start times using sliding window
-    sequence_start_local = 0
-    while sequence_start_local + sequence_duration <= file_duration:
+    # Start at SAFETY_MARGIN to allow padding before first sequence
+    # Ensure safety margin at end for preprocessing (filter padding + STFT requirements)
+    sequence_start_local = SAFETY_MARGIN
+    while sequence_start_local + sequence_duration + SAFETY_MARGIN <= file_duration:
         sequence_end_local = sequence_start_local + sequence_duration
 
         # Convert to global timeline
@@ -61,6 +69,14 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
 
         # Generate segment start times within this sequence (local to file)
         segment_starts = [sequence_start_local + (i * SEGMENT_DURATION) for i in range(SEQUENCE_LENGTH)]
+
+        # Validate all segments have sufficient data (including safety margin for preprocessing)
+        last_segment_end = segment_starts[-1] + SEGMENT_DURATION
+        if last_segment_end + SAFETY_MARGIN > file_duration:
+            # Skip this sequence - insufficient data for complete preprocessing
+            skipped_boundary_sequences += 1
+            sequence_start_local += stride_duration
+            continue
 
         # Determine sequence label based on LAST segment
         last_segment_start_local = segment_starts[-1]
@@ -173,6 +189,10 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
 
         # Move to next sequence with stride
         sequence_start_local += stride_duration
+
+    # Log skipped sequences if verbose warnings enabled
+    if VERBOSE_WARNINGS and skipped_boundary_sequences > 0:
+        print(f"  {filename}: Skipped {skipped_boundary_sequences} sequences due to insufficient boundary data (safety margin: {SAFETY_MARGIN}s)")
 
     return sequences
 

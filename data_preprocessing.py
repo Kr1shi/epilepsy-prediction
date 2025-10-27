@@ -5,6 +5,7 @@ import json
 import os
 import logging
 import warnings
+import random
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
@@ -32,13 +33,15 @@ class EEGPreprocessor:
     def __init__(self, input_json_path: str = None):
         # Auto-generate input filename based on task mode if not provided
         if input_json_path is None:
-            input_json_path = f'all_patients_sequences_{TASK_MODE}.json'
+            input_json_path = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
         self.input_json_path = input_json_path
         self.output_dir = Path("preprocessing")
-        self.data_dir = self.output_dir / "data"
-        self.logs_dir = self.output_dir / "logs"
-        self.checkpoint_dir = self.output_dir / "checkpoints"
+        self.dataset_prefix = OUTPUT_PREFIX
+        self.data_dir = self.output_dir / "data" / self.dataset_prefix
+        self.logs_dir = self.output_dir / "logs" / self.dataset_prefix
+        self.checkpoint_dir = self.output_dir / "checkpoints" / self.dataset_prefix
         self.checkpoint_file = self.checkpoint_dir / "progress.json"
+        self.balance_seed = SINGLE_PATIENT_RANDOM_SEED if SINGLE_PATIENT_MODE else 42
 
         # Processing settings
         self.checkpoint_interval = 50
@@ -120,6 +123,7 @@ class EEGPreprocessor:
         self.logger.info("="*60)
         self.logger.info("EEG PREPROCESSING PIPELINE STARTED")
         self.logger.info("="*60)
+        self.logger.info(f"Output prefix: {self.dataset_prefix}")
 
     def load_checkpoint(self) -> Dict:
         """Load checkpoint if exists, handle corrupted files"""
@@ -270,6 +274,66 @@ class EEGPreprocessor:
             self.logger.info(f"{split_name}: {len(split_seqs)} sequences ({positive_count} {self.positive_label}, {interictal_count} interictal) from {len(patients)} patients")
 
         return splits
+
+    def balance_split_sequences(self, splits: Dict[str, List[Dict]]) -> Tuple[Dict[str, List[Dict]], Dict[str, Dict[str, int]]]:
+        """Downsample majority class within each split to enforce class balance.
+
+        Args:
+            splits: Dict mapping split name to list of sequence dictionaries.
+
+        Returns:
+            Tuple of (balanced_splits, balance_stats)
+        """
+        rng = random.Random(self.balance_seed)
+        balanced_splits = {}
+        balance_stats = {}
+
+        for split_name, split_sequences in splits.items():
+            positives = [seq for seq in split_sequences if seq['type'] == self.positive_label]
+            interictals = [seq for seq in split_sequences if seq['type'] == 'interictal']
+            others = [seq for seq in split_sequences if seq['type'] not in (self.positive_label, 'interictal')]
+
+            if not positives or not interictals:
+                balanced_splits[split_name] = split_sequences[:]
+                balance_stats[split_name] = {
+                    'positive_kept': len(positives),
+                    'positive_dropped': 0,
+                    'interictal_kept': len(interictals),
+                    'interictal_dropped': 0,
+                    'other_sequences': len(others),
+                    'balanced': False,
+                    'note': 'Skipped balancing due to missing class'
+                }
+                continue
+
+            target_count = min(len(positives), len(interictals))
+            rng.shuffle(positives)
+            rng.shuffle(interictals)
+
+            kept_positive = positives[:target_count]
+            kept_interictal = interictals[:target_count]
+
+            dropped_positive = len(positives) - target_count
+            dropped_interictal = len(interictals) - target_count
+
+            combined = kept_positive + kept_interictal
+            rng.shuffle(combined)
+
+            if others:
+                combined.extend(others)
+
+            balanced_splits[split_name] = combined
+            balance_stats[split_name] = {
+                'positive_kept': len(kept_positive),
+                'positive_dropped': dropped_positive,
+                'interictal_kept': len(kept_interictal),
+                'interictal_dropped': dropped_interictal,
+                'other_sequences': len(others),
+                'balanced': True,
+                'target_per_class': target_count
+            }
+
+        return balanced_splits, balance_stats
 
     def select_target_channels(self, raw, target_channels=TARGET_CHANNELS):
         """Select target channels, handling duplicates"""
@@ -720,16 +784,73 @@ class EEGPreprocessor:
             valid_sequences = all_sequences
             self.logger.info("Using all sequences (channel validation performed during segmentation)")
 
-            # Patient-level split
+            # Determine data splits
             if not self.checkpoint.get('splits_created', False):
-                splits = self.balance_and_split_data(valid_sequences)
+                if valid_sequences and all(sequence.get('split') for sequence in valid_sequences):
+                    self.logger.info("Detected pre-assigned splits in segmentation metadata; using them directly.")
+                    splits = {split_name: [] for split_name in ['train', 'val', 'test']}
+                    ignored_sequences = {}
+
+                    for sequence in valid_sequences:
+                        split_name = sequence.get('split')
+                        if split_name in splits:
+                            splits[split_name].append(sequence)
+                        else:
+                            ignored_sequences[split_name] = ignored_sequences.get(split_name, 0) + 1
+
+                    for split_name, split_sequences in splits.items():
+                        positive_count = sum(1 for s in split_sequences if s['type'] == self.positive_label)
+                        interictal_count = len(split_sequences) - positive_count
+                        self.logger.info(f"{split_name}: {len(split_sequences)} sequences "
+                                         f"({positive_count} {self.positive_label}, {interictal_count} interictal)")
+
+                    if any(split_sequences == [] for split_sequences in splits.values()):
+                        empty_splits = [name for name, seqs in splits.items() if not seqs]
+                        raise ValueError(f"Empty splits detected in segmentation metadata: {empty_splits}")
+
+                    if ignored_sequences:
+                        self.logger.warning(f"Ignored {sum(ignored_sequences.values())} sequences with unknown splits: {ignored_sequences}")
+                else:
+                    self.logger.info("No split metadata found; performing patient-level split.")
+                    splits = self.balance_and_split_data(valid_sequences)
+
                 self.checkpoint['splits'] = splits
                 self.checkpoint['splits_created'] = True
-                self.checkpoint['total_sequences'] = sum(len(split_seqs) for split_seqs in splits.values())
+                self.checkpoint['splits_balanced'] = False  # Force balancing on initial assignment
                 self.save_checkpoint()
             else:
                 self.logger.info("Using cached data splits")
                 splits = self.checkpoint['splits']
+
+            # Ensure splits are balanced (positive vs interictal)
+            if not self.checkpoint.get('splits_balanced', False):
+                self.logger.info("Balancing splits to enforce equal positive/interictal counts per split...")
+                splits, balance_stats = self.balance_split_sequences(splits)
+
+                for split_name in ['train', 'val', 'test']:
+                    stats = balance_stats.get(split_name, {})
+                    if not stats:
+                        continue
+                    if stats.get('balanced', False):
+                        self.logger.info(
+                            f"{split_name}: kept {stats['positive_kept']} {self.positive_label} "
+                            f"and {stats['interictal_kept']} interictal "
+                            f"(dropped {stats['positive_dropped']} {self.positive_label}, "
+                            f"{stats['interictal_dropped']} interictal)"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"{split_name}: {stats.get('note', 'Balancing skipped due to missing class')}"
+                        )
+
+                self.checkpoint['splits'] = splits
+                self.checkpoint['split_balance_stats'] = balance_stats
+                self.checkpoint['splits_balanced'] = True
+                # Reset processed segments because the sequence list has changed
+                self.checkpoint['processed_segments'] = set()
+
+            self.checkpoint['total_sequences'] = sum(len(split_seqs) for split_seqs in splits.values())
+            self.save_checkpoint()
 
             # Compute normalization statistics from training data if not already done
             if not self.checkpoint.get('normalization_stats_computed', False):
@@ -737,8 +858,11 @@ class EEGPreprocessor:
                 self.logger.info("COMPUTING NORMALIZATION STATISTICS FROM TRAINING DATA")
                 self.logger.info("="*60)
 
-                train_sequences = splits['train'][:50]  # Use first 50 training sequences
+                train_sequences = splits['train']
                 train_spectrograms = []
+
+                if not train_sequences:
+                    raise ValueError("Training split is empty; cannot compute normalization statistics.")
 
                 self.logger.info(f"Processing {len(train_sequences)} training samples to compute normalization stats...")
 
@@ -840,7 +964,7 @@ class EEGPreprocessor:
                         self.save_checkpoint()
 
                 if not sequences_to_process and not existing_sequence_ids:
-                     self.logger.warning(f"No sequences processed for {split_name} and no existing file found")
+                    self.logger.warning(f"No sequences processed for {split_name} and no existing file found")
                 
                 # Log removal statistics for this split
                 total_removed = sum(self.removed_segments.values())

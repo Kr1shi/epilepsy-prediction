@@ -62,9 +62,12 @@ def evaluate_model(model_path, test_data_path, device):
         dropout=LSTM_DROPOUT
     )
 
-    # Load trained weights
+    # Load trained weights with compatibility for PyTorch >= 2.6 safety defaults
     print(f"Loading model checkpoint from {model_path}...")
-    checkpoint = torch.load(model_path, map_location=device)
+    try:
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
@@ -139,7 +142,8 @@ def main():
 
     # Setup
     model_path = Path(f"model/epoch_{args.epoch:03d}.pth")
-    test_data_path = Path("preprocessing/data/test_dataset.h5")
+    dataset_dir = Path("preprocessing") / "data" / OUTPUT_PREFIX
+    test_data_path = dataset_dir / "test_dataset.h5"
 
     # Check if files exist
     if not model_path.exists():
@@ -162,6 +166,8 @@ def main():
     print("="*60)
     print(f"TEST SET EVALUATION - {TASK_MODE.upper()} MODE")
     print(f"Evaluating model from epoch {args.epoch}")
+    print(f"Dataset prefix: {OUTPUT_PREFIX}")
+    print(f"Using test dataset: {test_data_path}")
     print("="*60)
 
     metrics, cm, true_labels, predictions, probabilities, checkpoint_task_mode, positive_class = evaluate_model(

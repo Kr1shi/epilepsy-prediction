@@ -25,6 +25,24 @@ LOW_FREQ_HZ = 0.5
 HIGH_FREQ_HZ = 50
 NOTCH_FREQ_HZ = 60
 
+# Single-patient experiment configuration
+SINGLE_PATIENT_MODE = True
+SINGLE_PATIENT_ID = "chb06"
+SINGLE_PATIENT_SEIZURE_SPLITS = {
+    "train": [0, 1, 2, 3, 4, 5],
+    "val": [6, 7],
+    "test": [8, 9],
+}
+SINGLE_PATIENT_INTERICTAL_SPLIT = {
+    "train": 0.6,
+    "val": 0.2,
+    "test": 0.2,
+}
+SINGLE_PATIENT_RANDOM_SEED = 42
+
+# Naming helper for outputs/datasets
+OUTPUT_PREFIX = SINGLE_PATIENT_ID if SINGLE_PATIENT_MODE else "all_patients"
+
 # STFT parameters
 STFT_NPERSEG = 256      # Window length for STFT
 STFT_NOVERLAP = 128     # Overlap between windows (50%)
@@ -54,7 +72,7 @@ LSTM_NUM_LAYERS = 3        # Number of stacked LSTM layers (increased depth)
 LSTM_DROPOUT = 0.5         # Dropout between LSTM layers (increased regularization)
 
 # Training configuration
-TRAINING_EPOCHS = 5
+TRAINING_EPOCHS = 15
 BATCH_SIZE = 32
 SEQUENCE_BATCH_SIZE = 4  # Small batch size for sequences (reduced from 12 to improve gradient estimates)
 LEARNING_RATE = 0.0001  # Reduced from 0.001 to prevent divergence
@@ -62,5 +80,5 @@ NUM_WORKERS = 4  # DataLoader workers
 WEIGHT_DECAY = 1e-4  # L2 regularization
 
 # Preprocessing performance (M4 optimization)
-PREPROCESSING_WORKERS = 8  # Number of parallel workers for preprocessing (adjust based on your CPU cores)
+PREPROCESSING_WORKERS = 12  # Number of parallel workers for preprocessing (adjust based on your CPU cores)
 MNE_N_JOBS = 8  # Parallel jobs for MNE filtering operations

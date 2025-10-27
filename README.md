@@ -206,6 +206,25 @@ python evaluate_test.py
 - Saves results to `model/test_results.json`
 - Generates visualization plots
 
+## Single-Patient Experiment Mode
+
+To run the entire pipeline on one subject, enable the single-patient switches in [data_segmentation_helpers/config.py](data_segmentation_helpers/config.py):
+
+- `SINGLE_PATIENT_MODE = True`
+- `SINGLE_PATIENT_ID = "chb06"` (recommended starting point: 10 documented seizures and consistent channel coverage)
+- `SINGLE_PATIENT_SEIZURE_SPLITS`: map seizure indices to `train` / `val` / `test` (default: first 6 seizures for training, 2 for validation, 2 for testing)
+- `SINGLE_PATIENT_INTERICTAL_SPLIT`: ratios for distributing interictal sequences (defaults to 60/20/20)
+
+With these flags enabled:
+- `python data_segmentation.py` writes `chb06_sequences_detection.json` (prefix follows `OUTPUT_PREFIX`) and tags each sequence with its split.
+- Each split is then auto-balanced (equal positives and interictals) by downsampling the majority class before saving the JSON.
+- `python data_preprocessing.py` reads that JSON, keeps the existing split assignments, and saves HDF5 datasets to `preprocessing/data/chb06/{train,val,test}_dataset.h5` with matching checkpoints/logs under `preprocessing/checkpoints/chb06/` and `preprocessing/logs/chb06/`.
+- `python train.py` and `python evaluate_test.py` automatically pick up the same prefix so they train/evaluate purely on the single-patient datasets.
+
+Notes:
+- Any positive sequence whose seizure index is not listed in `SINGLE_PATIENT_SEIZURE_SPLITS` is dropped, so adjust the mapping if you need additional seizures.
+- Interictal sequences are deterministically shuffled using `SINGLE_PATIENT_RANDOM_SEED` before applying the ratio split.
+
 ## Configuration
 
 All parameters are centralized in [data_segmentation_helpers/config.py](data_segmentation_helpers/config.py).
@@ -258,6 +277,7 @@ All parameters are centralized in [data_segmentation_helpers/config.py](data_seg
 
 ### Dataset Path
 - `BASE_PATH`: Root directory for CHB-MIT dataset
+- `OUTPUT_PREFIX`: File/directory prefix applied to segmentation JSON and preprocessed HDF5 outputs (`all_patients` by default, overrides to the single patient ID when `SINGLE_PATIENT_MODE` is enabled)
 
 ## Project Structure
 

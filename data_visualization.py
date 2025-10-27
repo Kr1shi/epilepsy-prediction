@@ -34,9 +34,12 @@ logger = logging.getLogger(__name__)
 class SequenceVisualizer:
     """Visualize preprocessed CNN-LSTM sequence data from HDF5 files"""
 
-    def __init__(self, data_dir='preprocessing/data'):
-        self.data_dir = Path(data_dir)
-        self.output_dir = Path('preprocessing/visualizations')
+    def __init__(self, data_dir=None):
+        if data_dir is None:
+            self.data_dir = Path("preprocessing") / "data" / OUTPUT_PREFIX
+        else:
+            self.data_dir = Path(data_dir)
+        self.output_dir = Path('preprocessing/visualizations') / OUTPUT_PREFIX
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("="*60)
@@ -45,6 +48,7 @@ class SequenceVisualizer:
         logger.info(f"Task mode: {TASK_MODE.upper()} ({get_positive_label()} vs interictal)")
         logger.info(f"Data directory: {self.data_dir}")
         logger.info(f"Output directory: {self.output_dir}")
+        logger.info(f"Output prefix: {OUTPUT_PREFIX}")
 
     def load_dataset_info(self, split='train'):
         """Load dataset metadata and sample data"""

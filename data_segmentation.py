@@ -88,6 +88,7 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
         sequence_type = 'interictal'
         time_to_seizure = None
         in_excluded_zone = False
+        matched_seizure_id = None
 
         # PASS 1: Check for positive class (preictal OR ictal depending on mode)
         if TASK_MODE == 'prediction':
@@ -101,6 +102,7 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
                 if preictal_window_start_global <= last_segment_start_global < seizure_start_global:
                     sequence_type = 'preictal'
                     time_to_seizure = seizure_start_global - last_segment_end_global
+                    matched_seizure_id = seizure.get('seizure_id')
                     break
 
         elif TASK_MODE == 'detection':
@@ -113,6 +115,7 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
                 # Overlap occurs if: sequence_start < seizure_end AND sequence_end > seizure_start
                 if sequence_start_global < seizure_end_global and sequence_end_global > seizure_start_global:
                     sequence_type = 'ictal'
+                    matched_seizure_id = seizure.get('seizure_id')
                     # Store overlap information (could be useful for analysis)
                     overlap_start = max(sequence_start_global, seizure_start_global)
                     overlap_end = min(sequence_end_global, seizure_end_global)
@@ -184,6 +187,10 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
 
         if sequence_type == 'preictal':
             sequence['time_to_seizure'] = time_to_seizure
+        if matched_seizure_id is not None:
+            sequence['seizure_id'] = matched_seizure_id
+        else:
+            sequence['seizure_id'] = None
 
         sequences.append(sequence)
 
@@ -278,13 +285,15 @@ def create_sequences_single_patient(patient_id):
         for seizure in seizures:
             if seizure['file'] in file_timeline:
                 file_offset = file_timeline[seizure['file']]['offset']
+                seizure_id = len(seizures_global)
                 seizures_global.append({
                     'file': seizure['file'],
                     'start_sec_local': seizure['start_sec'],
                     'end_sec_local': seizure['end_sec'],
                     'start_sec_global': file_offset + seizure['start_sec'],
                     'end_sec_global': file_offset + seizure['end_sec'],
-                    'duration_sec': seizure['duration_sec']
+                    'duration_sec': seizure['duration_sec'],
+                    'seizure_id': seizure_id
                 })
 
         all_sequences = []
@@ -439,7 +448,183 @@ def balance_sequences_per_patient(sequences, random_seed=42):
 
     return balanced_sequences, balancing_stats
 
-def save_sequences_to_file(sequences, validation_results, output_file=None, balancing_stats=None):
+def assign_single_patient_splits(
+    sequences,
+    seizure_splits,
+    interictal_ratios,
+    random_seed=SINGLE_PATIENT_RANDOM_SEED
+):
+    """Assign sequences for a single patient experiment into train/val/test splits.
+
+    Args:
+        sequences: List of sequence dictionaries for a single patient.
+        seizure_splits: Dict mapping split names to lists of seizure_ids.
+        interictal_ratios: Dict with ratios for distributing interictal sequences.
+        random_seed: Seed for deterministic interictal shuffling.
+
+    Returns:
+        Tuple of (retained_sequences, split_counts, dropped_positive_sequences, balance_stats)
+    """
+    required_splits = ['train', 'val', 'test']
+    for split_name in required_splits:
+        if split_name not in seizure_splits:
+            raise ValueError(f"Missing '{split_name}' in SINGLE_PATIENT_SEIZURE_SPLITS configuration.")
+
+    positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
+    splits = {split_name: [] for split_name in required_splits}
+    interictal_pool = []
+    dropped_positive = 0
+
+    # Assign positive sequences based on seizure mapping
+    for sequence in sequences:
+        if sequence['type'] == positive_label:
+            seizure_id = sequence.get('seizure_id')
+            assigned_split = next(
+                (split_name for split_name, seizure_ids in seizure_splits.items() if seizure_id in seizure_ids),
+                None
+            )
+            if assigned_split is None:
+                dropped_positive += 1
+                continue
+
+            sequence['split'] = assigned_split
+            splits[assigned_split].append(sequence)
+        else:
+            interictal_pool.append(sequence)
+
+    # Distribute interictal sequences according to requested ratios
+    if interictal_pool:
+        rng = random.Random(random_seed)
+        rng.shuffle(interictal_pool)
+
+        ratio_sum = sum(max(interictal_ratios.get(split_name, 0.0), 0.0) for split_name in required_splits)
+        if ratio_sum <= 0:
+            normalized = {split_name: 1.0 / len(required_splits) for split_name in required_splits}
+        else:
+            normalized = {
+                split_name: max(interictal_ratios.get(split_name, 0.0), 0.0) / ratio_sum
+                for split_name in required_splits
+            }
+
+        total_interictal = len(interictal_pool)
+        counts = {}
+        assigned_so_far = 0
+        for idx, split_name in enumerate(required_splits):
+            if idx == len(required_splits) - 1:
+                count = total_interictal - assigned_so_far
+            else:
+                count = int(round(normalized[split_name] * total_interictal))
+                count = max(0, min(count, total_interictal - assigned_so_far))
+            counts[split_name] = count
+            assigned_so_far += count
+
+        start_idx = 0
+        for split_name in required_splits:
+            count = counts[split_name]
+            end_idx = start_idx + count
+            for sequence in interictal_pool[start_idx:end_idx]:
+                sequence['split'] = split_name
+                splits[split_name].append(sequence)
+            start_idx = end_idx
+
+        # Assign any leftover sequences (due to rounding) to the training split
+        for sequence in interictal_pool[start_idx:]:
+            sequence['split'] = required_splits[0]
+            splits[required_splits[0]].append(sequence)
+
+    # Balance each split by downsampling majority class (positive/interictal)
+    balanced_splits, balance_stats = balance_sequences_across_splits(
+        splits,
+        positive_label,
+        random_seed
+    )
+
+    retained_sequences = []
+    for split_name in required_splits:
+        retained_sequences.extend(balanced_splits[split_name])
+
+    split_counts = {
+        split_name: {
+            'total': len(split_sequences),
+            positive_label: sum(1 for seq in split_sequences if seq['type'] == positive_label),
+            'interictal': sum(1 for seq in split_sequences if seq['type'] == 'interictal')
+        }
+        for split_name, split_sequences in balanced_splits.items()
+    }
+
+    return retained_sequences, split_counts, dropped_positive, balance_stats
+
+def balance_sequences_across_splits(splits, positive_label, random_seed=42):
+    """Balance each split by downsampling the majority class to match the minority.
+
+    Args:
+        splits: Dict mapping split name to list of sequences (each with 'type' label).
+        positive_label: Positive class label ('preictal' or 'ictal').
+        random_seed: Seed for deterministic shuffling.
+
+    Returns:
+        Tuple of (balanced_splits_dict, balance_stats)
+    """
+    rng = random.Random(random_seed)
+    balanced_splits = {}
+    balance_stats = {}
+
+    for split_name, split_sequences in splits.items():
+        positives = [seq for seq in split_sequences if seq['type'] == positive_label]
+        interictals = [seq for seq in split_sequences if seq['type'] == 'interictal']
+        others = [seq for seq in split_sequences if seq['type'] not in (positive_label, 'interictal')]
+
+        if not positives or not interictals:
+            balanced_splits[split_name] = split_sequences[:]
+            balance_stats[split_name] = {
+                'positive_kept': len(positives),
+                'positive_dropped': 0,
+                'interictal_kept': len(interictals),
+                'interictal_dropped': 0,
+                'other_sequences': len(others),
+                'balanced': False,
+                'note': 'Skipped balancing due to missing class'
+            }
+            continue
+
+        target_count = min(len(positives), len(interictals))
+
+        rng.shuffle(positives)
+        rng.shuffle(interictals)
+
+        kept_positive = positives[:target_count]
+        kept_interictal = interictals[:target_count]
+        dropped_positive = max(0, len(positives) - target_count)
+        dropped_interictal = max(0, len(interictals) - target_count)
+
+        combined = kept_positive + kept_interictal
+        rng.shuffle(combined)
+
+        if others:
+            # Preserve other sequence types (if any) at the end for completeness
+            combined.extend(others)
+
+        balanced_splits[split_name] = combined
+        balance_stats[split_name] = {
+            'positive_kept': len(kept_positive),
+            'positive_dropped': dropped_positive,
+            'interictal_kept': len(kept_interictal),
+            'interictal_dropped': dropped_interictal,
+            'other_sequences': len(others),
+            'balanced': True,
+            'target_per_class': target_count
+        }
+
+    return balanced_splits, balance_stats
+
+def save_sequences_to_file(
+    sequences,
+    validation_results,
+    output_file=None,
+    balancing_stats=None,
+    split_summary=None,
+    extra_summary=None
+):
     """Save all sequences to a single file with validation information
 
     Args:
@@ -447,12 +632,14 @@ def save_sequences_to_file(sequences, validation_results, output_file=None, bala
         validation_results: List of validation result dictionaries from each patient
         output_file: Output JSON filename (auto-generated based on mode if None)
         balancing_stats: Optional balancing statistics
+        split_summary: Optional per-split counts (for single-patient mode)
+        extra_summary: Optional dict of additional summary fields
     """
 
     # Determine positive class label and auto-generate filename if needed
     positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
     if output_file is None:
-        output_file = f"all_patients_sequences_{TASK_MODE}.json"
+        output_file = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
 
     # Separate by type
     positive_sequences = [s for s in sequences if s['type'] == positive_label]
@@ -485,6 +672,12 @@ def save_sequences_to_file(sequences, validation_results, output_file=None, bala
     # Add balancing info if provided
     if balancing_stats:
         data['balancing_info'] = balancing_stats
+
+    if split_summary:
+        data['summary']['per_split'] = split_summary
+
+    if extra_summary:
+        data['summary'].update(extra_summary)
 
     with open(output_file, 'w') as f:
         json.dump(data, f, indent=2)
@@ -525,6 +718,16 @@ def print_summary(sequences):
         interictal_count = len([s for s in patient_seqs if s['type'] == 'interictal'])
         print(f"{patient}: {len(patient_seqs)} total ({positive_count} {positive_label}, {interictal_count} interictal)")
 
+    # Per-split breakdown (only when split assignments exist)
+    if any(seq.get('split') for seq in sequences):
+        print(f"\n=== PER-SPLIT BREAKDOWN ===")
+        available_splits = sorted({seq.get('split') for seq in sequences if seq.get('split')})
+        for split_name in available_splits:
+            split_sequences = [s for s in sequences if s.get('split') == split_name]
+            split_positive = len([s for s in split_sequences if s['type'] == positive_label])
+            split_interictal = len([s for s in split_sequences if s['type'] == 'interictal'])
+            print(f"{split_name}: {len(split_sequences)} total ({split_positive} {positive_label}, {split_interictal} interictal)")
+
     # Statistics
     print(f"\n=== STATISTICS ===")
     if TASK_MODE == 'prediction' and positive_sequences:
@@ -550,72 +753,150 @@ if __name__ == "__main__":
         print(f"  - Interictal buffer: {INTERICTAL_BUFFER // 60} min")
         print(f"  - Channel validation: {'ENABLED' if not SKIP_CHANNEL_VALIDATION else 'DISABLED'}")
         print(f"  - Target channels: {len(TARGET_CHANNELS)} channels")
+        print(f"  - Output prefix: {OUTPUT_PREFIX}")
         print("="*60)
 
-        print("\nProcessing all patients...")
-        all_sequences, all_validation_results = create_sequences_all_patients()
+        processing_target = (
+            f"patient {SINGLE_PATIENT_ID}" if SINGLE_PATIENT_MODE else "all patients"
+        )
+        print(f"\nProcessing {processing_target}...")
 
-        if not all_sequences:
-            print("❌ No sequences generated!")
+        if SINGLE_PATIENT_MODE:
+            sequences, validation_results = create_sequences_single_patient(SINGLE_PATIENT_ID)
+            validation_list = [validation_results] if validation_results else None
+
+            if not sequences:
+                print(f"❌ No sequences generated for patient {SINGLE_PATIENT_ID}!")
+            else:
+                sequences_with_splits, split_counts, dropped_positive, balance_stats = assign_single_patient_splits(
+                    sequences,
+                    SINGLE_PATIENT_SEIZURE_SPLITS,
+                    SINGLE_PATIENT_INTERICTAL_SPLIT,
+                    SINGLE_PATIENT_RANDOM_SEED
+                )
+
+                if not sequences_with_splits:
+                    print("❌ No sequences retained after applying single-patient split configuration!")
+                else:
+                    positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
+                    print("\n" + "="*60)
+                    print("SINGLE-PATIENT SPLIT SUMMARY")
+                    print("="*60)
+                    print_summary(sequences_with_splits)
+
+                    if dropped_positive:
+                        print(f"\n⚠️ Dropped {dropped_positive} positive sequences because their seizure_id was not assigned to a split.")
+
+                    if balance_stats:
+                        print(f"\n=== SPLIT BALANCING SUMMARY ===")
+                        for split_name in ['train', 'val', 'test']:
+                            stats = balance_stats.get(split_name, {})
+                            if not stats:
+                                continue
+                            if stats.get('balanced', False):
+                                print(
+                                    f"{split_name}: {stats['positive_kept']} {positive_label}, "
+                                    f"{stats['interictal_kept']} interictal "
+                                    f"(dropped {stats['positive_dropped']} {positive_label}, "
+                                    f"{stats['interictal_dropped']} interictal)"
+                                )
+                            else:
+                                print(f"{split_name}: {stats.get('note', 'Balancing skipped')}")
+
+                    output_filename = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
+                    extra_summary = {'dropped_positive_sequences': dropped_positive} if dropped_positive else {}
+                    if balance_stats:
+                        extra_summary['split_balance'] = balance_stats
+                    if not extra_summary:
+                        extra_summary = None
+
+                    save_sequences_to_file(
+                        sequences_with_splits,
+                        validation_list,
+                        output_file=output_filename,
+                        split_summary=split_counts,
+                        extra_summary=extra_summary
+                    )
+
+                    if validation_list:
+                        validation_summary = get_validation_summary(validation_list)
+                        print(f"\n=== CHANNEL VALIDATION SUMMARY ===")
+                        print(f"Validation enabled: {validation_summary['validation_enabled']}")
+                        print(f"Files checked: {validation_summary['total_files_checked']}")
+                        print(f"Files with valid channels: {validation_summary['files_with_valid_channels']}")
+                        print(f"Files with invalid channels: {validation_summary['files_with_invalid_channels']}")
+
+                        if validation_summary['files_with_invalid_channels'] > 0:
+                            print(f"\nMost common missing channels:")
+                            for channel, count in list(validation_summary['missing_channel_frequency'].items())[:5]:
+                                print(f"  - {channel}: missing in {count} files")
+
+                    print("\n✅ Single-patient segmentation completed successfully!")
+                    print(f"✅ Sequences saved to {output_filename}")
         else:
-            # Print unbalanced summary
-            print("\n" + "="*60)
-            print("BEFORE BALANCING")
-            print("="*60)
-            print_summary(all_sequences)
+            all_sequences, all_validation_results = create_sequences_all_patients()
 
-            # Balance sequences per patient
-            print("\n" + "="*60)
-            print("BALANCING SEQUENCES PER PATIENT")
-            print("="*60)
-            positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
-            print(f"Downsampling interictal sequences to match {positive_label} counts per patient...")
+            if not all_sequences:
+                print("❌ No sequences generated!")
+            else:
+                # Print unbalanced summary
+                print("\n" + "="*60)
+                print("BEFORE BALANCING")
+                print("="*60)
+                print_summary(all_sequences)
 
-            balanced_sequences, balancing_stats = balance_sequences_per_patient(all_sequences)
+                # Balance sequences per patient
+                print("\n" + "="*60)
+                print("BALANCING SEQUENCES PER PATIENT")
+                print("="*60)
+                positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
+                print(f"Downsampling interictal sequences to match {positive_label} counts per patient...")
 
-            print(f"\nBalancing complete:")
-            print(f"  - Original sequences: {balancing_stats['total_original']}")
-            print(f"  - Balanced sequences: {balancing_stats['total_balanced']}")
-            print(f"  - Removed sequences: {balancing_stats['total_removed']}")
-            print(f"  - Reduction: {balancing_stats['total_removed']/balancing_stats['total_original']*100:.1f}%")
+                balanced_sequences, balancing_stats = balance_sequences_per_patient(all_sequences)
 
-            # Print balanced summary
-            print("\n" + "="*60)
-            print("AFTER BALANCING")
-            print("="*60)
-            print_summary(balanced_sequences)
+                print(f"\nBalancing complete:")
+                print(f"  - Original sequences: {balancing_stats['total_original']}")
+                print(f"  - Balanced sequences: {balancing_stats['total_balanced']}")
+                print(f"  - Removed sequences: {balancing_stats['total_removed']}")
+                print(f"  - Reduction: {balancing_stats['total_removed']/balancing_stats['total_original']*100:.1f}%")
 
-            # Print per-patient balancing details
-            print("\n=== PER-PATIENT BALANCING DETAILS ===")
-            positive_label = balancing_stats['positive_label']
-            for patient_id in sorted(balancing_stats['patients'].keys()):
-                stats = balancing_stats['patients'][patient_id]
-                positive_key = f'{positive_label}_original'
-                print(f"{patient_id}: {stats[positive_key]} {positive_label}, "
-                      f"{stats['interictal_original']} → {stats['interictal_kept']} interictal "
-                      f"(removed {stats['interictal_removed']})")
+                # Print balanced summary
+                print("\n" + "="*60)
+                print("AFTER BALANCING")
+                print("="*60)
+                print_summary(balanced_sequences)
 
-            # Save balanced sequences to file (auto-generates filename based on mode)
-            save_sequences_to_file(balanced_sequences, all_validation_results,
-                                  balancing_stats=balancing_stats)
+                # Print per-patient balancing details
+                print("\n=== PER-PATIENT BALANCING DETAILS ===")
+                positive_label = balancing_stats['positive_label']
+                for patient_id in sorted(balancing_stats['patients'].keys()):
+                    stats = balancing_stats['patients'][patient_id]
+                    positive_key = f'{positive_label}_original'
+                    print(f"{patient_id}: {stats[positive_key]} {positive_label}, "
+                          f"{stats['interictal_original']} → {stats['interictal_kept']} interictal "
+                          f"(removed {stats['interictal_removed']})")
 
-            # Print validation summary
-            if all_validation_results:
-                validation_summary = get_validation_summary(all_validation_results)
-                print(f"\n=== CHANNEL VALIDATION SUMMARY ===")
-                print(f"Validation enabled: {validation_summary['validation_enabled']}")
-                print(f"Files checked: {validation_summary['total_files_checked']}")
-                print(f"Files with valid channels: {validation_summary['files_with_valid_channels']}")
-                print(f"Files with invalid channels: {validation_summary['files_with_invalid_channels']}")
+                # Save balanced sequences to file (auto-generates filename based on mode)
+                save_sequences_to_file(balanced_sequences, all_validation_results,
+                                      balancing_stats=balancing_stats)
 
-                if validation_summary['files_with_invalid_channels'] > 0:
-                    print(f"\nMost common missing channels:")
-                    for channel, count in list(validation_summary['missing_channel_frequency'].items())[:5]:
-                        print(f"  - {channel}: missing in {count} files")
+                # Print validation summary
+                if all_validation_results:
+                    validation_summary = get_validation_summary(all_validation_results)
+                    print(f"\n=== CHANNEL VALIDATION SUMMARY ===")
+                    print(f"Validation enabled: {validation_summary['validation_enabled']}")
+                    print(f"Files checked: {validation_summary['total_files_checked']}")
+                    print(f"Files with valid channels: {validation_summary['files_with_valid_channels']}")
+                    print(f"Files with invalid channels: {validation_summary['files_with_invalid_channels']}")
 
-            print("\n✅ Sequence segmentation completed successfully!")
-            output_filename = f"all_patients_sequences_{TASK_MODE}.json"
-            print(f"✅ Balanced sequences saved to {output_filename}")
+                    if validation_summary['files_with_invalid_channels'] > 0:
+                        print(f"\nMost common missing channels:")
+                        for channel, count in list(validation_summary['missing_channel_frequency'].items())[:5]:
+                            print(f"  - {channel}: missing in {count} files")
+
+                print("\n✅ Sequence segmentation completed successfully!")
+                output_filename = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
+                print(f"✅ Balanced sequences saved to {output_filename}")
 
     except Exception as e:
         print(f"❌ Error: {e}")

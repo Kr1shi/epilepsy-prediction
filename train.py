@@ -354,6 +354,10 @@ class EEGCNNTrainer:
         # Setup directories
         self.model_dir = Path("model")
         self.model_dir.mkdir(exist_ok=True)
+        self.dataset_prefix = OUTPUT_PREFIX
+        self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
+        print(f"Using dataset prefix: {self.dataset_prefix}")
+        print(f"Loading datasets from: {self.dataset_dir}")
         
         # Device setup with MPS support for Apple Silicon
         self.device = self._get_device()
@@ -440,12 +444,12 @@ class EEGCNNTrainer:
         
     def _create_dataloader(self, split):
         """Create dataloader for given split"""
-        h5_file = f"preprocessing/data/{split}_dataset.h5"
+        h5_file = self.dataset_dir / f"{split}_dataset.h5"
         
-        if not os.path.exists(h5_file):
+        if not h5_file.exists():
             raise FileNotFoundError(f"Dataset file not found: {h5_file}")
         
-        dataset = EEGDataset(h5_file, split=split)
+        dataset = EEGDataset(str(h5_file), split=split)
         
         # Use shuffle for training, not for validation
         shuffle = (split == 'train')

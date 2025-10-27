@@ -217,6 +217,7 @@ aaron/
 mario/
 physionet.org/
 model/
+papers/
 
 # Data files
 *.json

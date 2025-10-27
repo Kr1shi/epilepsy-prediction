@@ -52,13 +52,10 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
     stride_duration = SEGMENT_DURATION * SEQUENCE_STRIDE    # e.g., 30s * 1 = 30s
 
     # Calculate how many sequences we can extract
-    # Need safety margin at BOTH start and end of file
     if file_duration < sequence_duration + (2 * SAFETY_MARGIN):
         return sequences  # File too short for even one sequence (including safety margins)
 
     # Generate sequence start times using sliding window
-    # Start at SAFETY_MARGIN to allow padding before first sequence
-    # Ensure safety margin at end for preprocessing (filter padding + STFT requirements)
     sequence_start_local = SAFETY_MARGIN
     while sequence_start_local + sequence_duration + SAFETY_MARGIN <= file_duration:
         sequence_end_local = sequence_start_local + sequence_duration
@@ -70,7 +67,7 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
         # Generate segment start times within this sequence (local to file)
         segment_starts = [sequence_start_local + (i * SEGMENT_DURATION) for i in range(SEQUENCE_LENGTH)]
 
-        # Validate all segments have sufficient data (including safety margin for preprocessing)
+        # Validate all segments have sufficient data 
         last_segment_end = segment_starts[-1] + SEGMENT_DURATION
         if last_segment_end + SAFETY_MARGIN > file_duration:
             # Skip this sequence - insufficient data for complete preprocessing

@@ -610,9 +610,9 @@ class EEGPreprocessor:
                 if APPLY_LOG_TRANSFORM:
                     power_spectrogram = np.log10(power_spectrogram + LOG_TRANSFORM_EPSILON)
 
-                # Apply normalization (using training statistics)
-                if self.global_mean is not None and self.global_std is not None:
-                    power_spectrogram = (power_spectrogram - self.global_mean) / (self.global_std + 1e-8)
+                # # Apply normalization (using training statistics)
+                # if self.global_mean is not None and self.global_std is not None:
+                #     power_spectrogram = (power_spectrogram - self.global_mean) / (self.global_std + 1e-8)
 
                 sequence_spectrograms.append(power_spectrogram)
 

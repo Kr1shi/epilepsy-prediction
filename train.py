@@ -572,7 +572,7 @@ class EEGCNNTrainer:
                 'task_mode': TASK_MODE,
                 'positive_class': self.positive_label,
                 'negative_class': 'interictal',
-                'batch_size': BATCH_SIZE,
+                'batch_size': SEQUENCE_BATCH_SIZE,
                 'learning_rate': LEARNING_RATE,
                 'weight_decay': WEIGHT_DECAY
             }
@@ -591,7 +591,7 @@ class EEGCNNTrainer:
                 'positive_class': self.positive_label,
                 'negative_class': 'interictal',
                 'epochs': TRAINING_EPOCHS,
-                'batch_size': BATCH_SIZE,
+                'batch_size': SEQUENCE_BATCH_SIZE,
                 'learning_rate': LEARNING_RATE,
                 'weight_decay': WEIGHT_DECAY
             },
@@ -668,7 +668,7 @@ class EEGCNNTrainer:
         print("="*60)
         print(f"Task mode: {TASK_MODE.upper()} ({self.positive_label} vs interictal)")
         print(f"Training for {TRAINING_EPOCHS} epochs")
-        print(f"Batch size: {BATCH_SIZE}")
+        print(f"Batch size: {SEQUENCE_BATCH_SIZE}")
         print(f"Learning rate: {LEARNING_RATE}")
         print(f"Device: {self.device} ({self._get_device_name()})")
         if self.device.type == 'mps':

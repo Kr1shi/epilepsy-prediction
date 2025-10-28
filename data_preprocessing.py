@@ -767,11 +767,12 @@ class EEGPreprocessor:
             # Compute normalization statistics from training data if not already done
             if not self.checkpoint.get('normalization_stats_computed', False):
                 self.logger.info("="*60)
-                self.logger.info("COMPUTING NORMALIZATION STATISTICS FROM TRAINING DATA")
+                self.logger.info("COMPUTING NORMALIZATION STATISTICS AND PROCESSING TRAINING DATA")
                 self.logger.info("="*60)
 
                 train_sequences = splits['train']
                 train_spectrograms = []
+                train_processed_data = []  # Store full processed dictionaries
 
                 if not train_sequences:
                     raise ValueError("Training split is empty; cannot compute normalization statistics.")
@@ -783,25 +784,58 @@ class EEGPreprocessor:
                 total_files = len(file_groups)
                 self.logger.info(f"Processing {len(train_sequences)} sequences from {total_files} unique files")
 
-                with tqdm(total=len(train_sequences), desc="Computing normalization stats") as pbar:
+                with tqdm(total=len(train_sequences), desc="Processing training data") as pbar:
                     for (patient_id, filename), file_sequences in file_groups.items():
                         # Process sequences WITHOUT normalization (apply_normalization=False)
                         processed_file_sequences = self.preprocess_sequences_from_file(
                             patient_id, filename, file_sequences, apply_normalization=False
                         )
 
-                        # Collect spectrograms for stats computation
-                        for processed in processed_file_sequences:
+                        # Collect spectrograms and full data for stats computation
+                        for sequence, processed in zip(file_sequences, processed_file_sequences):
                             if processed:
                                 train_spectrograms.append(processed['spectrogram'])
+                                train_processed_data.append(processed)
+                                # Mark as processed
+                                sequence_id = f"{sequence['patient_id']}_{sequence['sequence_start_sec']}"
+                                self.checkpoint['processed_segments'].add(sequence_id)
+                                self.checkpoint['processed_count'] = self.checkpoint.get('processed_count', 0) + 1
                             pbar.update(1)
 
-                if train_spectrograms:
-                    self.compute_normalization_stats(train_spectrograms)
-                    self.checkpoint['normalization_stats_computed'] = True
-                    self.save_checkpoint()
-                else:
+                if not train_spectrograms:
                     raise ValueError("Failed to process any training sequences for normalization stats!")
+
+                # Compute normalization stats
+                self.compute_normalization_stats(train_spectrograms)
+                self.checkpoint['normalization_stats_computed'] = True
+                self.save_checkpoint()
+
+                # Now apply normalization to the already-computed spectrograms and save
+                self.logger.info(f"Applying normalization and saving {len(train_processed_data)} training sequences...")
+                batch_sequences = []
+                for processed in tqdm(train_processed_data, desc="Normalizing and saving training data"):
+                    # Apply normalization in-place
+                    processed['spectrogram'] = (processed['spectrogram'] - self.global_mean) / (self.global_std + 1e-8)
+                    batch_sequences.append(processed)
+
+                    # Save in batches
+                    if len(batch_sequences) >= 10:
+                        self.append_to_hdf5('train', batch_sequences)
+                        self.save_checkpoint()
+                        batch_sequences = []
+
+                # Save any remaining sequences
+                if batch_sequences:
+                    self.append_to_hdf5('train', batch_sequences)
+                    self.save_checkpoint()
+
+                # Mark training split as completed
+                if 'splits_completed' not in self.checkpoint:
+                    self.checkpoint['splits_completed'] = []
+                self.checkpoint['splits_completed'].append('train')
+                self.save_checkpoint()
+
+                self.logger.info("Training data processing completed during stats computation phase")
 
             # Load normalization statistics before processing
             if not self.load_normalization_stats():

@@ -4,7 +4,7 @@
 SEGMENT_DURATION = 5  # seconds
 
 # Task mode configuration
-TASK_MODE = 'detection'  # Options: 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
+TASK_MODE = 'prediction'  # Options: 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
 
 # Seizure prediction parameters
 PREICTAL_WINDOW = 10 * 60       # 10 minutes in seconds - sequences within this window before seizure are preictal
@@ -73,12 +73,11 @@ LSTM_DROPOUT = 0.5         # Dropout between LSTM layers (increased regularizati
 
 # Training configuration
 TRAINING_EPOCHS = 15
-BATCH_SIZE = 32
-SEQUENCE_BATCH_SIZE = 4  # Small batch size for sequences (reduced from 12 to improve gradient estimates)
-LEARNING_RATE = 0.0001  # Reduced from 0.001 to prevent divergence
+SEQUENCE_BATCH_SIZE = 16  # Batch size for sequences
+LEARNING_RATE = 0.00001
 NUM_WORKERS = 4  # DataLoader workers
 WEIGHT_DECAY = 1e-4  # L2 regularization
 
 # Preprocessing performance (M4 optimization)
-PREPROCESSING_WORKERS = 12  # Number of parallel workers for preprocessing (adjust based on your CPU cores)
+PREPROCESSING_WORKERS = 10  # Number of parallel workers for preprocessing (adjust based on your CPU cores)
 MNE_N_JOBS = 8  # Parallel jobs for MNE filtering operations

@@ -428,7 +428,7 @@ class EEGPreprocessor:
 
         return stft_spectrograms, frequencies, time_array
 
-    def preprocess_sequences_from_file(self, patient_id: str, filename: str, sequences: List[Dict]) -> List[Optional[Dict]]:
+    def preprocess_sequences_from_file(self, patient_id: str, filename: str, sequences: List[Dict], apply_normalization: bool = True) -> List[Optional[Dict]]:
         """Process multiple sequences from the same EDF file efficiently.
 
         This method reads and filters the file ONCE, computes STFT ONCE on the entire range,
@@ -439,6 +439,7 @@ class EEGPreprocessor:
             patient_id: Patient identifier
             filename: EDF filename
             sequences: List of sequence dictionaries from this file
+            apply_normalization: Whether to apply z-score normalization (False when computing stats)
 
         Returns:
             List of processed sequence dictionaries (or None for failed sequences)
@@ -514,8 +515,8 @@ class EEGPreprocessor:
                         if APPLY_LOG_TRANSFORM:
                             power_spectrogram = np.log10(power_spectrogram + LOG_TRANSFORM_EPSILON)
 
-                        # Apply normalization (using training statistics)
-                        if self.global_mean is not None and self.global_std is not None:
+                        # Apply normalization (using training statistics) only if flag is True
+                        if apply_normalization and self.global_mean is not None and self.global_std is not None:
                             power_spectrogram = (power_spectrogram - self.global_mean) / (self.global_std + 1e-8)
 
                         sequence_spectrograms.append(power_spectrogram)
@@ -546,95 +547,6 @@ class EEGPreprocessor:
             self.logger.error(f"Failed to process file {patient_id}/{filename}: {e}")
             # Return None for all sequences if file processing fails
             return [None] * len(sequences)
-
-    def preprocess_sequence(self, sequence: Dict) -> Optional[Dict]:
-        """Preprocess an entire sequence (multiple consecutive segments)"""
-        try:
-            # Process each segment in the sequence
-            sequence_spectrograms = []
-            edf_path = f"physionet.org/files/chbmit/1.0.0/{sequence['patient_id']}/{sequence['file']}"
-
-            # Read EDF file once for the whole sequence
-            raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
-            sampling_rate = raw.info['sfreq']
-
-            # Select target channels
-            raw_selected, clean_channel_names = self.select_target_channels(raw)
-
-            # ✅ OPTIMIZATION 1: Crop to sequence range BEFORE filtering
-            # Only filter the portion of the file we actually need
-            min_time = min(sequence['segment_starts'])
-            max_time = max(sequence['segment_starts']) + SEGMENT_DURATION
-
-            # Add padding for filter edge effects (5 seconds on each side)
-            padding = 5.0
-            crop_tmin = max(0, min_time - padding)
-            crop_tmax = min(raw_selected.times[-1], max_time + padding)
-
-            # Crop to the sequence range (with padding)
-            raw_cropped = raw_selected.copy().crop(tmin=crop_tmin, tmax=crop_tmax)
-
-            # ✅ OPTIMIZATION 2: Filter ONCE (not per segment!) and only the cropped range
-            raw_filtered = raw_cropped.copy()
-            raw_filtered.filter(l_freq=LOW_FREQ_HZ, h_freq=HIGH_FREQ_HZ, fir_design='firwin',
-                              n_jobs=MNE_N_JOBS, verbose=False)
-            raw_filtered.notch_filter(freqs=NOTCH_FREQ_HZ, n_jobs=MNE_N_JOBS, verbose=False)
-
-            # Now extract segments from the pre-filtered data
-            for segment_start in sequence['segment_starts']:
-                # Adjust segment times to be relative to crop start (which includes padding)
-                # Example: if segment_start=1950s and crop_tmin=1945s (1950-5 padding),
-                # then adjusted_start=5s in the cropped data
-                adjusted_start = segment_start - crop_tmin
-                adjusted_end = adjusted_start + SEGMENT_DURATION
-
-                # Extract segment from ALREADY FILTERED data (using adjusted times)
-                raw_segment = raw_filtered.copy().crop(tmin=adjusted_start, tmax=adjusted_end)
-
-                # Artifact removal (light operation, ok to do per-segment)
-                artifact_counts = self.remove_amplitude_artifacts(raw_segment)
-
-                # Get filtered data (DO NOT normalize time-domain signal before STFT!)
-                filtered_data = raw_segment.get_data()
-
-                # ✅ CRITICAL FIX: Convert from Volts to microvolts before STFT
-                # MNE reads EEG in Volts (~0.0002V), but |STFT|² on such small values
-                # produces numerical zeros. Scaling to μV (~200μV) prevents this.
-                filtered_data_uv = filtered_data * 1e6
-
-                # STFT - apply to microvolts (NOT volts!)
-                stft_coeffs, frequencies, _ = self.apply_stft(filtered_data_uv, sampling_rate)
-
-                # Convert to power spectrograms
-                power_spectrogram = np.abs(stft_coeffs) ** 2
-                if APPLY_LOG_TRANSFORM:
-                    power_spectrogram = np.log10(power_spectrogram + LOG_TRANSFORM_EPSILON)
-
-                # # Apply normalization (using training statistics)
-                # if self.global_mean is not None and self.global_std is not None:
-                #     power_spectrogram = (power_spectrogram - self.global_mean) / (self.global_std + 1e-8)
-
-                sequence_spectrograms.append(power_spectrogram)
-
-            # Stack into sequence: (seq_len, n_channels, n_freqs, n_times)
-            sequence_array = np.stack(sequence_spectrograms, axis=0)
-
-            return {
-                'spectrogram': sequence_array,
-                'label': 1 if sequence['type'] == self.positive_label else 0,
-                'patient_id': sequence['patient_id'],
-                'sequence_start_sec': sequence['sequence_start_sec'],
-                'sequence_end_sec': sequence['sequence_end_sec'],
-                'file_name': sequence['file'],
-                'time_to_seizure': sequence.get('time_to_seizure', -1),
-                'channel_names': clean_channel_names,
-                'frequencies': frequencies
-            }
-
-        except Exception as e:
-            self.logger.error(f"Failed to process sequence {sequence['patient_id']}/{sequence['file']} at {sequence['sequence_start_sec']}s: {e}")
-            self.removed_segments['processing_errors'] += 1
-            return None
 
     def append_to_hdf5(self, split_name: str, batch_sequences: List[Dict]):
         """Append a batch of processed sequences to an HDF5 file.
@@ -866,10 +778,23 @@ class EEGPreprocessor:
 
                 self.logger.info(f"Processing {len(train_sequences)} training samples to compute normalization stats...")
 
-                for sequence in tqdm(train_sequences, desc="Computing normalization stats"):
-                    processed = self.preprocess_sequence(sequence)
-                    if processed:
-                        train_spectrograms.append(processed['spectrogram'])
+                # Group training sequences by file for efficient batch processing
+                file_groups = self.group_sequences_by_file(train_sequences)
+                total_files = len(file_groups)
+                self.logger.info(f"Processing {len(train_sequences)} sequences from {total_files} unique files")
+
+                with tqdm(total=len(train_sequences), desc="Computing normalization stats") as pbar:
+                    for (patient_id, filename), file_sequences in file_groups.items():
+                        # Process sequences WITHOUT normalization (apply_normalization=False)
+                        processed_file_sequences = self.preprocess_sequences_from_file(
+                            patient_id, filename, file_sequences, apply_normalization=False
+                        )
+
+                        # Collect spectrograms for stats computation
+                        for processed in processed_file_sequences:
+                            if processed:
+                                train_spectrograms.append(processed['spectrogram'])
+                            pbar.update(1)
 
                 if train_spectrograms:
                     self.compute_normalization_stats(train_spectrograms)

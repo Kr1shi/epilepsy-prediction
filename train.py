@@ -365,7 +365,9 @@ class EEGCNNTrainer:
         
         # Load datasets
         self.train_loader = self._create_dataloader('train')
-        self.val_loader = self._create_dataloader('val')
+        # LOOCV mode: no validation set
+        self.val_loader = None
+        print(f"LOOCV Mode (Fold {LOOCV_FOLD_ID}): No validation set, using training-only evaluation")
         
         # Initialize CNN-LSTM model with deep EEG-CNN backbone
         self.model = CNN_LSTM_Hybrid(
@@ -612,45 +614,66 @@ class EEGCNNTrainer:
         # Set style
         plt.style.use('seaborn-v0_8')
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        title = f'EEG Seizure {TASK_MODE.capitalize()} - Training Progress ({self.positive_label} vs interictal)'
+
+        # LOOCV mode: include fold information in title
+        title = f'EEG Seizure {TASK_MODE.capitalize()} - Fold {LOOCV_FOLD_ID} Training Progress ({self.positive_label} vs interictal)'
         fig.suptitle(title, fontsize=16, fontweight='bold')
-        
+
         epochs = range(1, len(self.train_metrics_history) + 1)
-        
+
         # Plot each metric
         metrics_to_plot = ['loss', 'accuracy', 'precision', 'recall', 'f1', 'auc_roc']
-        
+
         for idx, metric in enumerate(metrics_to_plot):
             row = idx // 3
             col = idx % 3
             ax = axes[row, col]
-            
+
             train_values = [m[metric] for m in self.train_metrics_history]
-            val_values = [m[metric] for m in self.val_metrics_history]
-            
+
             ax.plot(epochs, train_values, 'o-', label='Train', linewidth=2, markersize=4)
-            ax.plot(epochs, val_values, 's-', label='Validation', linewidth=2, markersize=4)
+
+            # Only plot validation if available
+            if self.val_metrics_history:
+                val_values = [m[metric] for m in self.val_metrics_history]
+                ax.plot(epochs, val_values, 's-', label='Validation', linewidth=2, markersize=4)
             
             ax.set_title(f'{metric.upper().replace("_", " ")}', fontweight='bold')
             ax.set_xlabel('Epoch')
             ax.set_ylabel(metric.replace('_', ' ').title())
             ax.legend()
             ax.grid(True, alpha=0.3)
-            
-            # Add best value annotation
-            if metric == 'loss':
-                best_val_idx = np.argmin(val_values)
-                best_val = val_values[best_val_idx]
+
+            # Add best value annotation (use validation if available, otherwise training)
+            if self.val_metrics_history:
+                if metric == 'loss':
+                    best_val_idx = np.argmin(val_values)
+                    best_val = val_values[best_val_idx]
+                else:
+                    best_val_idx = np.argmax(val_values)
+                    best_val = val_values[best_val_idx]
+
+                ax.annotate(f'Best Val: {best_val:.3f}',
+                           xy=(best_val_idx + 1, best_val),
+                           xytext=(10, 10),
+                           textcoords='offset points',
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                           arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
             else:
-                best_val_idx = np.argmax(val_values)
-                best_val = val_values[best_val_idx]
-            
-            ax.annotate(f'Best: {best_val:.3f}', 
-                       xy=(best_val_idx + 1, best_val), 
-                       xytext=(10, 10), 
-                       textcoords='offset points',
-                       bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
-                       arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+                # LOOCV mode: annotate best training value
+                if metric == 'loss':
+                    best_train_idx = np.argmin(train_values)
+                    best_train = train_values[best_train_idx]
+                else:
+                    best_train_idx = np.argmax(train_values)
+                    best_train = train_values[best_train_idx]
+
+                ax.annotate(f'Best Train: {best_train:.3f}',
+                           xy=(best_train_idx + 1, best_train),
+                           xytext=(10, 10),
+                           textcoords='offset points',
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor='lightblue', alpha=0.7),
+                           arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
         
         plt.tight_layout()
         
@@ -667,6 +690,8 @@ class EEGCNNTrainer:
         print(f"STARTING EEG SEIZURE {TASK_MODE.upper()} TRAINING")
         print("="*60)
         print(f"Task mode: {TASK_MODE.upper()} ({self.positive_label} vs interictal)")
+        print(f"LOOCV Mode: Fold {LOOCV_FOLD_ID}/{LOOCV_TOTAL_SEIZURES-1} (Test seizure: {LOOCV_FOLD_ID})")
+        print(f"Note: No validation set in LOOCV mode")
         print(f"Training for {TRAINING_EPOCHS} epochs")
         print(f"Batch size: {SEQUENCE_BATCH_SIZE}")
         print(f"Learning rate: {LEARNING_RATE}")
@@ -682,13 +707,12 @@ class EEGCNNTrainer:
         for epoch in range(TRAINING_EPOCHS):
             epoch_start_time = time.time()
             
-            # Train and validate
+            # Train (no validation in LOOCV mode)
             train_metrics = self.train_epoch(epoch)
-            val_metrics = self.validate_epoch(epoch)
-            
+            val_metrics = None
+
             # Store metrics
             self.train_metrics_history.append(train_metrics)
-            self.val_metrics_history.append(val_metrics)
 
             # Update learning rate (StepLR updates per-epoch)
             self.scheduler.step()
@@ -705,9 +729,10 @@ class EEGCNNTrainer:
             print(f"Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['accuracy']:.4f}, "
                   f"Precision: {train_metrics['precision']:.4f}, Recall: {train_metrics['recall']:.4f}, "
                   f"F1: {train_metrics['f1']:.4f}, AUC: {train_metrics['auc_roc']:.4f}")
-            print(f"Val   - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['accuracy']:.4f}, "
-                  f"Precision: {val_metrics['precision']:.4f}, Recall: {val_metrics['recall']:.4f}, "
-                  f"F1: {val_metrics['f1']:.4f}, AUC: {val_metrics['auc_roc']:.4f}")
+            if val_metrics is not None:
+                print(f"Val   - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['accuracy']:.4f}, "
+                      f"Precision: {val_metrics['precision']:.4f}, Recall: {val_metrics['recall']:.4f}, "
+                      f"F1: {val_metrics['f1']:.4f}, AUC: {val_metrics['auc_roc']:.4f}")
             print("-" * 60)
         
         # Training complete

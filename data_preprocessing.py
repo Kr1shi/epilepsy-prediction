@@ -647,8 +647,9 @@ class EEGPreprocessor:
     def validate_final_dataset(self):
         """Validate the final datasets"""
         self.logger.info("Validating final datasets...")
-        
-        for split_name in ['train', 'val', 'test']:
+
+        split_names = ['train', 'test']  # LOOCV mode only (2-split configuration)
+        for split_name in split_names:
             dataset_file = self.data_dir / f"{split_name}_dataset.h5"
             
             if not dataset_file.exists():
@@ -700,7 +701,9 @@ class EEGPreprocessor:
             if not self.checkpoint.get('splits_created', False):
                 if valid_sequences and all(sequence.get('split') for sequence in valid_sequences):
                     self.logger.info("Detected pre-assigned splits in segmentation metadata; using them directly.")
-                    splits = {split_name: [] for split_name in ['train', 'val', 'test']}
+                    # LOOCV mode: 2-split configuration (train/test only)
+                    splits = {split_name: [] for split_name in ['train', 'test']}
+                    self.logger.info(f"LOOCV Mode: Using 2-split configuration (train/test only) for fold {LOOCV_FOLD_ID}")
                     ignored_sequences = {}
 
                     for sequence in valid_sequences:
@@ -739,7 +742,8 @@ class EEGPreprocessor:
                 self.logger.info("Balancing splits to enforce equal positive/interictal counts per split...")
                 splits, balance_stats = self.balance_split_sequences(splits)
 
-                for split_name in ['train', 'val', 'test']:
+                split_names = ['train', 'test']  # LOOCV mode only (2-split configuration)
+                for split_name in split_names:
                     stats = balance_stats.get(split_name, {})
                     if not stats:
                         continue
@@ -842,7 +846,8 @@ class EEGPreprocessor:
                 raise ValueError("Failed to load normalization statistics! Cannot proceed.")
 
             # Process each split
-            for split_name in ['train', 'val', 'test']:
+            split_names = ['train', 'test']  # LOOCV mode only (2-split configuration)
+            for split_name in split_names:
                 if split_name in self.checkpoint.get('splits_completed', []):
                     self.logger.info(f"Split {split_name} already completed, skipping")
                     continue

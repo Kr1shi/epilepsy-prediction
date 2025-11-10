@@ -449,7 +449,8 @@ def assign_single_patient_splits(
     sequences,
     seizure_splits,
     interictal_ratios,
-    random_seed=SINGLE_PATIENT_RANDOM_SEED
+    fold_id,
+    random_seed=None
 ):
     """Assign sequences for a single patient experiment into train/val/test splits.
 
@@ -457,6 +458,7 @@ def assign_single_patient_splits(
         sequences: List of sequence dictionaries for a single patient.
         seizure_splits: Dict mapping split names to lists of seizure_ids.
         interictal_ratios: Dict with ratios for distributing interictal sequences.
+        fold_id: The fold ID for LOOCV (which seizure to hold out for testing)
         random_seed: Seed for deterministic interictal shuffling.
 
     Returns:
@@ -465,13 +467,13 @@ def assign_single_patient_splits(
     # LOOCV mode: compute splits by seizure index
     required_splits = ['train', 'test']  # No validation in LOOCV mode
     # Compute LOOCV splits: test=fold_id, train=all others
-    test_seizure = LOOCV_FOLD_ID
+    test_seizure = fold_id
     train_seizures = [i for i in range(LOOCV_TOTAL_SEIZURES) if i != test_seizure]
     seizure_splits = {
         'train': train_seizures,
         'test': [test_seizure]
     }
-    print(f"LOOCV Fold {LOOCV_FOLD_ID}: Test seizure={test_seizure}, Train seizures={train_seizures}")
+    print(f"LOOCV Fold {fold_id}: Test seizure={test_seizure}, Train seizures={train_seizures}")
 
     positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
     splits = {split_name: [] for split_name in required_splits}
@@ -741,14 +743,23 @@ def print_summary(sequences):
 
 if __name__ == "__main__":
     try:
-        print("="*60)
-        print("SEQUENCE-BASED SEGMENTATION FOR CNN-LSTM")
-        print("="*60)
-        print(f"Configuration:")
+        # Determine which folds to process
+        if LOOCV_FOLD_ID is None:
+            folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+            print("="*60)
+            print("BATCH PROCESSING: ALL FOLDS")
+            print(f"Processing {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+            print("="*60)
+        else:
+            folds_to_process = [LOOCV_FOLD_ID]
+            print("="*60)
+            print("SINGLE FOLD PROCESSING")
+            print(f"Processing fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+            print("="*60)
+
+        print(f"\nConfiguration:")
         print(f"  - Task mode: {TASK_MODE.upper()} ({'preictal' if TASK_MODE == 'prediction' else 'ictal'} vs interictal)")
-        print(f"  - LOOCV Mode: ENABLED (Fold {LOOCV_FOLD_ID}/{LOOCV_TOTAL_SEIZURES-1})")
-        print(f"  - Test seizure: {LOOCV_FOLD_ID}")
-        print(f"  - Train seizures: {[i for i in range(LOOCV_TOTAL_SEIZURES) if i != LOOCV_FOLD_ID]}")
+        print(f"  - LOOCV Mode: ENABLED")
         print(f"  - Sequence length: {SEQUENCE_LENGTH} segments")
         print(f"  - Sequence duration: {SEGMENT_DURATION * SEQUENCE_LENGTH}s ({SEGMENT_DURATION * SEQUENCE_LENGTH / 60:.1f} min)")
         overlap_pct = ((SEQUENCE_LENGTH - SEQUENCE_STRIDE) / SEQUENCE_LENGTH) * 100
@@ -759,26 +770,33 @@ if __name__ == "__main__":
         print(f"  - Interictal buffer: {INTERICTAL_BUFFER // 60} min")
         print(f"  - Channel validation: {'ENABLED' if not SKIP_CHANNEL_VALIDATION else 'DISABLED'}")
         print(f"  - Target channels: {len(TARGET_CHANNELS)} channels")
-        print(f"  - Output prefix: {OUTPUT_PREFIX}")
         print("="*60)
 
-        processing_target = (
-            f"patient {SINGLE_PATIENT_ID}" if SINGLE_PATIENT_MODE else "all patients"
-        )
-        print(f"\nProcessing {processing_target}...")
+        # Extract sequences once (shared across all folds)
+        print(f"\nExtracting sequences from patient {SINGLE_PATIENT_ID}...")
+        sequences, validation_results = create_sequences_single_patient(SINGLE_PATIENT_ID)
+        validation_list = [validation_results] if validation_results else None
 
-        if SINGLE_PATIENT_MODE:
-            sequences, validation_results = create_sequences_single_patient(SINGLE_PATIENT_ID)
-            validation_list = [validation_results] if validation_results else None
+        if not sequences:
+            print(f"❌ No sequences generated for patient {SINGLE_PATIENT_ID}!")
+        else:
+            # Process each fold
+            for current_fold in folds_to_process:
+                fold_config = get_fold_config(current_fold)
+                current_output_prefix = fold_config['output_prefix']
+                current_random_seed = fold_config['random_seed']
 
-            if not sequences:
-                print(f"❌ No sequences generated for patient {SINGLE_PATIENT_ID}!")
-            else:
+                print("\n" + "="*60)
+                print(f"PROCESSING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+                print("="*60)
+                print(f"Output prefix: {current_output_prefix}")
+
                 sequences_with_splits, split_counts, dropped_positive, balance_stats = assign_single_patient_splits(
                     sequences,
                     {},  # Not used in LOOCV mode (seizure splits computed automatically)
                     {},  # Not used in LOOCV mode (interictal ratios computed automatically)
-                    SINGLE_PATIENT_RANDOM_SEED
+                    fold_id=current_fold,
+                    random_seed=current_random_seed
                 )
 
                 if not sequences_with_splits:
@@ -786,7 +804,7 @@ if __name__ == "__main__":
                 else:
                     positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
                     print("\n" + "="*60)
-                    print("SINGLE-PATIENT SPLIT SUMMARY")
+                    print("FOLD SPLIT SUMMARY")
                     print("="*60)
                     print_summary(sequences_with_splits)
 
@@ -810,7 +828,7 @@ if __name__ == "__main__":
                             else:
                                 print(f"{split_name}: {stats.get('note', 'Balancing skipped')}")
 
-                    output_filename = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
+                    output_filename = f"{current_output_prefix}_sequences_{TASK_MODE}.json"
                     extra_summary = {'dropped_positive_sequences': dropped_positive} if dropped_positive else {}
                     if balance_stats:
                         extra_summary['split_balance'] = balance_stats
@@ -838,72 +856,15 @@ if __name__ == "__main__":
                             for channel, count in list(validation_summary['missing_channel_frequency'].items())[:5]:
                                 print(f"  - {channel}: missing in {count} files")
 
-                    print("\n✅ Single-patient segmentation completed successfully!")
+                    print(f"\n✅ Fold {current_fold} completed successfully!")
                     print(f"✅ Sequences saved to {output_filename}")
-        else:
-            all_sequences, all_validation_results = create_sequences_all_patients()
 
-            if not all_sequences:
-                print("❌ No sequences generated!")
-            else:
-                # Print unbalanced summary
+            # Final summary
+            if LOOCV_FOLD_ID is None:
                 print("\n" + "="*60)
-                print("BEFORE BALANCING")
+                print(f"✅ BATCH PROCESSING COMPLETED!")
+                print(f"✅ Processed {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
                 print("="*60)
-                print_summary(all_sequences)
-
-                # Balance sequences per patient
-                print("\n" + "="*60)
-                print("BALANCING SEQUENCES PER PATIENT")
-                print("="*60)
-                positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
-                print(f"Downsampling interictal sequences to match {positive_label} counts per patient...")
-
-                balanced_sequences, balancing_stats = balance_sequences_per_patient(all_sequences)
-
-                print(f"\nBalancing complete:")
-                print(f"  - Original sequences: {balancing_stats['total_original']}")
-                print(f"  - Balanced sequences: {balancing_stats['total_balanced']}")
-                print(f"  - Removed sequences: {balancing_stats['total_removed']}")
-                print(f"  - Reduction: {balancing_stats['total_removed']/balancing_stats['total_original']*100:.1f}%")
-
-                # Print balanced summary
-                print("\n" + "="*60)
-                print("AFTER BALANCING")
-                print("="*60)
-                print_summary(balanced_sequences)
-
-                # Print per-patient balancing details
-                print("\n=== PER-PATIENT BALANCING DETAILS ===")
-                positive_label = balancing_stats['positive_label']
-                for patient_id in sorted(balancing_stats['patients'].keys()):
-                    stats = balancing_stats['patients'][patient_id]
-                    positive_key = f'{positive_label}_original'
-                    print(f"{patient_id}: {stats[positive_key]} {positive_label}, "
-                          f"{stats['interictal_original']} → {stats['interictal_kept']} interictal "
-                          f"(removed {stats['interictal_removed']})")
-
-                # Save balanced sequences to file (auto-generates filename based on mode)
-                save_sequences_to_file(balanced_sequences, all_validation_results,
-                                      balancing_stats=balancing_stats)
-
-                # Print validation summary
-                if all_validation_results:
-                    validation_summary = get_validation_summary(all_validation_results)
-                    print(f"\n=== CHANNEL VALIDATION SUMMARY ===")
-                    print(f"Validation enabled: {validation_summary['validation_enabled']}")
-                    print(f"Files checked: {validation_summary['total_files_checked']}")
-                    print(f"Files with valid channels: {validation_summary['files_with_valid_channels']}")
-                    print(f"Files with invalid channels: {validation_summary['files_with_invalid_channels']}")
-
-                    if validation_summary['files_with_invalid_channels'] > 0:
-                        print(f"\nMost common missing channels:")
-                        for channel, count in list(validation_summary['missing_channel_frequency'].items())[:5]:
-                            print(f"  - {channel}: missing in {count} files")
-
-                print("\n✅ Sequence segmentation completed successfully!")
-                output_filename = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
-                print(f"✅ Balanced sequences saved to {output_filename}")
 
     except Exception as e:
         print(f"❌ Error: {e}")

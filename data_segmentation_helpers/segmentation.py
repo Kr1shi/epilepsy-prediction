@@ -59,6 +59,30 @@ def parse_summary_file(summary_path):
 
     return seizures, all_files, file_times
 
+def get_patient_seizure_count(patient_id, base_path=BASE_PATH):
+    """Automatically count total seizures for a patient from summary file
+
+    Args:
+        patient_id: Patient identifier (e.g., 'chb06')
+        base_path: Base path to dataset (default from config)
+
+    Returns:
+        int: Total number of seizures for the patient
+
+    Raises:
+        FileNotFoundError: If summary file doesn't exist
+    """
+    summary_path = f"{base_path}{patient_id}/{patient_id}-summary.txt"
+
+    if not os.path.exists(summary_path):
+        raise FileNotFoundError(
+            f"Summary file not found for patient {patient_id}: {summary_path}\n"
+            f"Expected file: {summary_path}"
+        )
+
+    seizures, _, _ = parse_summary_file(summary_path)
+    return len(seizures)
+
 def create_preictal_segments(seizures):
     """Create ALL possible preictal segments from available time before seizures"""
     segments = []

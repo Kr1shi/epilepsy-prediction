@@ -462,10 +462,16 @@ def assign_single_patient_splits(
     Returns:
         Tuple of (retained_sequences, split_counts, dropped_positive_sequences, balance_stats)
     """
-    required_splits = ['train', 'val', 'test']
-    for split_name in required_splits:
-        if split_name not in seizure_splits:
-            raise ValueError(f"Missing '{split_name}' in SINGLE_PATIENT_SEIZURE_SPLITS configuration.")
+    # LOOCV mode: compute splits by seizure index
+    required_splits = ['train', 'test']  # No validation in LOOCV mode
+    # Compute LOOCV splits: test=fold_id, train=all others
+    test_seizure = LOOCV_FOLD_ID
+    train_seizures = [i for i in range(LOOCV_TOTAL_SEIZURES) if i != test_seizure]
+    seizure_splits = {
+        'train': train_seizures,
+        'test': [test_seizure]
+    }
+    print(f"LOOCV Fold {LOOCV_FOLD_ID}: Test seizure={test_seizure}, Train seizures={train_seizures}")
 
     positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
     splits = {split_name: [] for split_name in required_splits}
@@ -740,6 +746,9 @@ if __name__ == "__main__":
         print("="*60)
         print(f"Configuration:")
         print(f"  - Task mode: {TASK_MODE.upper()} ({'preictal' if TASK_MODE == 'prediction' else 'ictal'} vs interictal)")
+        print(f"  - LOOCV Mode: ENABLED (Fold {LOOCV_FOLD_ID}/{LOOCV_TOTAL_SEIZURES-1})")
+        print(f"  - Test seizure: {LOOCV_FOLD_ID}")
+        print(f"  - Train seizures: {[i for i in range(LOOCV_TOTAL_SEIZURES) if i != LOOCV_FOLD_ID]}")
         print(f"  - Sequence length: {SEQUENCE_LENGTH} segments")
         print(f"  - Sequence duration: {SEGMENT_DURATION * SEQUENCE_LENGTH}s ({SEGMENT_DURATION * SEQUENCE_LENGTH / 60:.1f} min)")
         overlap_pct = ((SEQUENCE_LENGTH - SEQUENCE_STRIDE) / SEQUENCE_LENGTH) * 100
@@ -767,8 +776,8 @@ if __name__ == "__main__":
             else:
                 sequences_with_splits, split_counts, dropped_positive, balance_stats = assign_single_patient_splits(
                     sequences,
-                    SINGLE_PATIENT_SEIZURE_SPLITS,
-                    SINGLE_PATIENT_INTERICTAL_SPLIT,
+                    {},  # Not used in LOOCV mode (seizure splits computed automatically)
+                    {},  # Not used in LOOCV mode (interictal ratios computed automatically)
                     SINGLE_PATIENT_RANDOM_SEED
                 )
 
@@ -786,7 +795,8 @@ if __name__ == "__main__":
 
                     if balance_stats:
                         print(f"\n=== SPLIT BALANCING SUMMARY ===")
-                        for split_name in ['train', 'val', 'test']:
+                        split_names = ['train', 'test']  # LOOCV mode only (2-split configuration)
+                        for split_name in split_names:
                             stats = balance_stats.get(split_name, {})
                             if not stats:
                                 continue

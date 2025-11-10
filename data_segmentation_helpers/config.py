@@ -4,11 +4,10 @@
 SEGMENT_DURATION = 5  # seconds
 
 # Task mode configuration
-TASK_MODE = 'prediction'  # Options: 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
-
+TASK_MODE = 'prediction'  
 # Seizure prediction parameters
-PREICTAL_WINDOW = 10 * 60       # 10 minutes in seconds - sequences within this window before seizure are preictal
-INTERICTAL_BUFFER = 120 * 60     # 120 minutes (2 hours) - interictal sequences must be at least this far from any seizure
+PREICTAL_WINDOW = 10 * 60       # 10 minutes 
+INTERICTAL_BUFFER = 120 * 60     # 120 minutes 
 
 # File assumptions
 ESTIMATED_FILE_DURATION = 3600  # 1 hour
@@ -28,20 +27,20 @@ NOTCH_FREQ_HZ = 60
 # Single-patient experiment configuration
 SINGLE_PATIENT_MODE = True
 SINGLE_PATIENT_ID = "chb06"
-SINGLE_PATIENT_SEIZURE_SPLITS = {
-    "train": [0, 1, 2, 3, 4, 5],
-    "val": [6, 7],
-    "test": [8, 9],
-}
-SINGLE_PATIENT_INTERICTAL_SPLIT = {
-    "train": 0.6,
-    "val": 0.2,
-    "test": 0.2,
-}
-SINGLE_PATIENT_RANDOM_SEED = 42
+
+# Leave-One-Out Cross-Validation configuration (only supported mode)
+LOOCV_MODE = True  # LOOCV is the only supported mode
+LOOCV_FOLD_ID = 1   # Fold ID (0-9 for chb06) - test seizure for this fold
+LOOCV_TOTAL_SEIZURES = 10  # Total number of seizures for the patient
+
+# Random seed for reproducibility (fold-specific)
+SINGLE_PATIENT_RANDOM_SEED = 42 + LOOCV_FOLD_ID
 
 # Naming helper for outputs/datasets
-OUTPUT_PREFIX = SINGLE_PATIENT_ID if SINGLE_PATIENT_MODE else "all_patients"
+if SINGLE_PATIENT_MODE:
+    OUTPUT_PREFIX = f"{SINGLE_PATIENT_ID}_fold{LOOCV_FOLD_ID}"
+else:
+    OUTPUT_PREFIX = "all_patients"
 
 # STFT parameters
 STFT_NPERSEG = 256      # Window length for STFT
@@ -72,7 +71,7 @@ LSTM_NUM_LAYERS = 3        # Number of stacked LSTM layers (increased depth)
 LSTM_DROPOUT = 0.5         # Dropout between LSTM layers (increased regularization)
 
 # Training configuration
-TRAINING_EPOCHS = 15
+TRAINING_EPOCHS = 5
 SEQUENCE_BATCH_SIZE = 16  # Batch size for sequences
 LEARNING_RATE = 0.00001
 NUM_WORKERS = 4  # DataLoader workers

@@ -140,16 +140,19 @@ def main():
     )
     args = parser.parse_args()
 
-    # Setup
-    model_path = Path(f"model/epoch_{args.epoch:03d}.pth")
-    dataset_dir = Path("preprocessing") / "data" / OUTPUT_PREFIX
-    test_data_path = dataset_dir / "test_dataset.h5"
-
-    # Check if files exist
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model not found: {model_path}")
-    if not test_data_path.exists():
-        raise FileNotFoundError(f"Test dataset not found: {test_data_path}")
+    # Determine which folds to process
+    if LOOCV_FOLD_ID is None:
+        folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+        print("="*60)
+        print("BATCH EVALUATION: ALL FOLDS")
+        print(f"Evaluating {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+        print("="*60)
+    else:
+        folds_to_process = [LOOCV_FOLD_ID]
+        print("="*60)
+        print("SINGLE FOLD EVALUATION")
+        print(f"Evaluating fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+        print("="*60)
 
     # Device setup
     if torch.cuda.is_available():
@@ -162,70 +165,163 @@ def main():
         device = torch.device("cpu")
         print("Using CPU")
 
-    # Evaluate
-    print("="*60)
-    print(f"TEST SET EVALUATION - {TASK_MODE.upper()} MODE")
-    print(f"Evaluating model from epoch {args.epoch}")
-    print(f"Dataset prefix: {OUTPUT_PREFIX}")
-    print(f"Using test dataset: {test_data_path}")
-    print("="*60)
+    # Store results for all folds (for batch summary)
+    batch_results = {}
 
-    metrics, cm, true_labels, predictions, probabilities, checkpoint_task_mode, positive_class = evaluate_model(
-        model_path, test_data_path, device
-    )
+    # Evaluate each fold
+    for current_fold in folds_to_process:
+        fold_config = get_fold_config(current_fold)
+        current_output_prefix = fold_config['output_prefix']
 
-    # Print results
-    print("\n" + "="*60)
-    print("TEST RESULTS")
-    print("="*60)
-    print(f"Loss:      {metrics['loss']:.4f}")
-    print(f"Accuracy:  {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)")
-    print(f"Precision: {metrics['precision']:.4f}")
-    print(f"Recall:    {metrics['recall']:.4f}")
-    print(f"F1 Score:  {metrics['f1']:.4f}")
-    print(f"AUC-ROC:   {metrics['auc_roc']:.4f}")
+        print(f"\n{'='*60}")
+        print(f"EVALUATING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+        print(f"{'='*60}")
 
-    print("\nConfusion Matrix:")
-    print("                Predicted")
-    print(f"                Interictal  {positive_class.capitalize()}")
-    print(f"Actual Interictal    {cm[0,0]:6d}    {cm[0,1]:6d}")
-    print(f"       {positive_class.capitalize():9s}   {cm[1,0]:6d}    {cm[1,1]:6d}")
+        try:
+            # Setup fold-specific model and data
+            model_path = Path(f"model/{current_output_prefix}/epoch_{args.epoch:03d}.pth")
+            dataset_dir = Path("preprocessing") / "data" / current_output_prefix
+            test_data_path = dataset_dir / "test_dataset.h5"
 
-    # Class-wise statistics
-    print("\nClass Distribution:")
-    true_np = np.array(true_labels)
-    pred_np = np.array(predictions)
-    print(f"True Interictal (0): {np.sum(true_np == 0)} samples")
-    print(f"True {positive_class.capitalize()} (1):   {np.sum(true_np == 1)} samples")
-    print(f"Pred Interictal (0): {np.sum(pred_np == 0)} samples")
-    print(f"Pred {positive_class.capitalize()} (1):   {np.sum(pred_np == 1)} samples")
+            # Check if files exist
+            if not model_path.exists():
+                print(f"❌ Model not found: {model_path}")
+                continue
+            if not test_data_path.exists():
+                print(f"❌ Test dataset not found: {test_data_path}")
+                continue
 
-    # Detailed classification report
-    print("\nDetailed Classification Report:")
-    print(classification_report(
-        true_labels,
-        predictions,
-        target_names=['Interictal', positive_class.capitalize()],
-        digits=4
-    ))
+            print(f"Evaluating model from epoch {args.epoch}")
+            print(f"Dataset prefix: {current_output_prefix}")
+            print(f"Using test dataset: {test_data_path}")
 
-    # Save results
-    results = {
-        'task_mode': checkpoint_task_mode,
-        'positive_class': positive_class,
-        'negative_class': 'interictal',
-        'test_metrics': metrics,
-        'confusion_matrix': cm.tolist(),
-        'model_path': str(model_path),
-        'test_data_path': str(test_data_path)
-    }
+            metrics, cm, true_labels, predictions, probabilities, checkpoint_task_mode, positive_class = evaluate_model(
+                model_path, test_data_path, device
+            )
 
-    results_path = Path("model/test_results.json")
-    with open(results_path, 'w') as f:
-        json.dump(results, f, indent=2)
+            # Print results
+            print("\n" + "="*60)
+            print("FOLD TEST RESULTS")
+            print("="*60)
+            print(f"Loss:      {metrics['loss']:.4f}")
+            print(f"Accuracy:  {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)")
+            print(f"Precision: {metrics['precision']:.4f}")
+            print(f"Recall:    {metrics['recall']:.4f}")
+            print(f"F1 Score:  {metrics['f1']:.4f}")
+            print(f"AUC-ROC:   {metrics['auc_roc']:.4f}")
 
-    print(f"\nResults saved to {results_path}")
-    print("="*60)
+            print("\nConfusion Matrix:")
+            print("                Predicted")
+            print(f"                Interictal  {positive_class.capitalize()}")
+            print(f"Actual Interictal    {cm[0,0]:6d}    {cm[0,1]:6d}")
+            print(f"       {positive_class.capitalize():9s}   {cm[1,0]:6d}    {cm[1,1]:6d}")
+
+            # Class-wise statistics
+            print("\nClass Distribution:")
+            true_np = np.array(true_labels)
+            pred_np = np.array(predictions)
+            print(f"True Interictal (0): {np.sum(true_np == 0)} samples")
+            print(f"True {positive_class.capitalize()} (1):   {np.sum(true_np == 1)} samples")
+            print(f"Pred Interictal (0): {np.sum(pred_np == 0)} samples")
+            print(f"Pred {positive_class.capitalize()} (1):   {np.sum(pred_np == 1)} samples")
+
+            # Detailed classification report
+            print("\nDetailed Classification Report:")
+            print(classification_report(
+                true_labels,
+                predictions,
+                target_names=['Interictal', positive_class.capitalize()],
+                digits=4
+            ))
+
+            # Save fold-specific results
+            fold_results = {
+                'fold': current_fold,
+                'task_mode': checkpoint_task_mode,
+                'positive_class': positive_class,
+                'negative_class': 'interictal',
+                'test_metrics': metrics,
+                'confusion_matrix': cm.tolist(),
+                'model_path': str(model_path),
+                'test_data_path': str(test_data_path)
+            }
+
+            fold_results_path = Path(f"model/{current_output_prefix}/test_results.json")
+            fold_results_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(fold_results_path, 'w') as f:
+                json.dump(fold_results, f, indent=2)
+
+            print(f"\n✅ Results saved to {fold_results_path}")
+
+            # Store for batch summary
+            batch_results[current_fold] = {
+                'fold': current_fold,
+                'output_prefix': current_output_prefix,
+                'metrics': metrics,
+                'confusion_matrix': cm.tolist()
+            }
+
+        except Exception as e:
+            print(f"❌ Error evaluating fold {current_fold}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Save batch results summary if processing multiple folds
+    if LOOCV_FOLD_ID is None and batch_results:
+        print("\n" + "="*60)
+        print("BATCH EVALUATION SUMMARY")
+        print("="*60)
+
+        # Compute aggregate metrics
+        accuracies = [res['metrics']['accuracy'] for res in batch_results.values()]
+        precisions = [res['metrics']['precision'] for res in batch_results.values()]
+        recalls = [res['metrics']['recall'] for res in batch_results.values()]
+        f1_scores = [res['metrics']['f1'] for res in batch_results.values()]
+        auc_rocs = [res['metrics']['auc_roc'] for res in batch_results.values()]
+
+        print(f"Folds evaluated: {len(batch_results)}/{len(folds_to_process)}")
+        print(f"\nMean metrics (across folds):")
+        print(f"  Accuracy:  {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
+        print(f"  Precision: {np.mean(precisions):.4f} (±{np.std(precisions):.4f})")
+        print(f"  Recall:    {np.mean(recalls):.4f} (±{np.std(recalls):.4f})")
+        print(f"  F1 Score:  {np.mean(f1_scores):.4f} (±{np.std(f1_scores):.4f})")
+        print(f"  AUC-ROC:   {np.mean(auc_rocs):.4f} (±{np.std(auc_rocs):.4f})")
+
+        # Save batch summary
+        batch_summary = {
+            'total_folds': LOOCV_TOTAL_SEIZURES,
+            'evaluated_folds': len(batch_results),
+            'fold_results': batch_results,
+            'aggregate_metrics': {
+                'accuracy': {
+                    'mean': float(np.mean(accuracies)),
+                    'std': float(np.std(accuracies))
+                },
+                'precision': {
+                    'mean': float(np.mean(precisions)),
+                    'std': float(np.std(precisions))
+                },
+                'recall': {
+                    'mean': float(np.mean(recalls)),
+                    'std': float(np.std(recalls))
+                },
+                'f1_score': {
+                    'mean': float(np.mean(f1_scores)),
+                    'std': float(np.std(f1_scores))
+                },
+                'auc_roc': {
+                    'mean': float(np.mean(auc_rocs)),
+                    'std': float(np.std(auc_rocs))
+                }
+            }
+        }
+
+        batch_results_path = Path("model/batch_test_results.json")
+        with open(batch_results_path, 'w') as f:
+            json.dump(batch_summary, f, indent=2)
+
+        print(f"\n✅ Batch results saved to {batch_results_path}")
+        print("="*60)
 
 if __name__ == "__main__":
     main()

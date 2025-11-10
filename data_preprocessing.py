@@ -30,18 +30,26 @@ warnings.filterwarnings("ignore", message=".*file size.*", category=RuntimeWarni
 mne.set_log_level('ERROR')
 
 class EEGPreprocessor:
-    def __init__(self, input_json_path: str = None):
+    def __init__(self, input_json_path: str = None, fold_config: Dict = None):
+        # Use fold_config if provided, otherwise use global config
+        if fold_config is not None:
+            output_prefix = fold_config['output_prefix']
+            balance_seed = fold_config['random_seed']
+        else:
+            output_prefix = OUTPUT_PREFIX
+            balance_seed = SINGLE_PATIENT_RANDOM_SEED
+
         # Auto-generate input filename based on task mode if not provided
         if input_json_path is None:
-            input_json_path = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
+            input_json_path = f"{output_prefix}_sequences_{TASK_MODE}.json"
         self.input_json_path = input_json_path
         self.output_dir = Path("preprocessing")
-        self.dataset_prefix = OUTPUT_PREFIX
+        self.dataset_prefix = output_prefix
         self.data_dir = self.output_dir / "data" / self.dataset_prefix
         self.logs_dir = self.output_dir / "logs" / self.dataset_prefix
         self.checkpoint_dir = self.output_dir / "checkpoints" / self.dataset_prefix
         self.checkpoint_file = self.checkpoint_dir / "progress.json"
-        self.balance_seed = SINGLE_PATIENT_RANDOM_SEED if SINGLE_PATIENT_MODE else 42
+        self.balance_seed = balance_seed
 
         # Processing settings
         self.checkpoint_interval = 50
@@ -963,6 +971,42 @@ class EEGPreprocessor:
             raise
 
 if __name__ == "__main__":
-    # Run preprocessing
-    preprocessor = EEGPreprocessor()
-    preprocessor.run_preprocessing()
+    # Determine which folds to process
+    if LOOCV_FOLD_ID is None:
+        folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+        print("="*60)
+        print("BATCH PROCESSING: ALL FOLDS")
+        print(f"Processing {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+        print("="*60)
+    else:
+        folds_to_process = [LOOCV_FOLD_ID]
+        print("="*60)
+        print("SINGLE FOLD PROCESSING")
+        print(f"Processing fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+        print("="*60)
+
+    # Process each fold
+    for current_fold in folds_to_process:
+        fold_config = get_fold_config(current_fold)
+
+        print(f"\n{'='*60}")
+        print(f"PREPROCESSING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+        print(f"{'='*60}")
+
+        try:
+            # Run preprocessing with fold-specific config
+            preprocessor = EEGPreprocessor(fold_config=fold_config)
+            preprocessor.run_preprocessing()
+
+            print(f"✅ Fold {current_fold} preprocessing completed successfully!")
+        except Exception as e:
+            print(f"❌ Error processing fold {current_fold}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Final summary
+    if LOOCV_FOLD_ID is None:
+        print("\n" + "="*60)
+        print(f"✅ BATCH PREPROCESSING COMPLETED!")
+        print(f"✅ Processed {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+        print("="*60)

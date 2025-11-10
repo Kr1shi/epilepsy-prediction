@@ -24,23 +24,49 @@ LOW_FREQ_HZ = 0.5
 HIGH_FREQ_HZ = 50
 NOTCH_FREQ_HZ = 60
 
-# Single-patient experiment configuration
-SINGLE_PATIENT_MODE = True
-SINGLE_PATIENT_ID = "chb06"
+# Single-patient configuration (LOOCV operates on single patients only)
+SINGLE_PATIENT_ID = "chb11"
 
 # Leave-One-Out Cross-Validation configuration (only supported mode)
 LOOCV_MODE = True  # LOOCV is the only supported mode
-LOOCV_FOLD_ID = 1   # Fold ID (0-9 for chb06) - test seizure for this fold
-LOOCV_TOTAL_SEIZURES = 10  # Total number of seizures for the patient
+LOOCV_FOLD_ID = None  # Set to fold number or None to process all folds
 
-# Random seed for reproducibility (fold-specific)
-SINGLE_PATIENT_RANDOM_SEED = 42 + LOOCV_FOLD_ID
+# Load precomputed seizure counts
+from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 
-# Naming helper for outputs/datasets
-if SINGLE_PATIENT_MODE:
+if SINGLE_PATIENT_ID not in SEIZURE_COUNTS:
+    raise ValueError(
+        f"Patient {SINGLE_PATIENT_ID} not found in seizure_counts\n"
+        f"Available patients: {sorted(SEIZURE_COUNTS.keys())}"
+    )
+LOOCV_TOTAL_SEIZURES = SEIZURE_COUNTS[SINGLE_PATIENT_ID]
+
+def get_fold_config(fold_id):
+    """Get fold-specific configuration values
+
+    Args:
+        fold_id: Fold ID (0 to LOOCV_TOTAL_SEIZURES-1)
+
+    Returns:
+        Dictionary with fold-specific config:
+        - fold_id: The fold number
+        - random_seed: Fold-specific random seed (42 + fold_id)
+        - output_prefix: Fold-specific output prefix
+    """
+    return {
+        'fold_id': fold_id,
+        'random_seed': 42 + fold_id,
+        'output_prefix': f"{SINGLE_PATIENT_ID}_fold{fold_id}"
+    }
+
+# Compute values only when LOOCV_FOLD_ID is set
+if LOOCV_FOLD_ID is not None:
+    SINGLE_PATIENT_RANDOM_SEED = 42 + LOOCV_FOLD_ID
     OUTPUT_PREFIX = f"{SINGLE_PATIENT_ID}_fold{LOOCV_FOLD_ID}"
 else:
-    OUTPUT_PREFIX = "all_patients"
+    # Placeholder values when processing all folds
+    SINGLE_PATIENT_RANDOM_SEED = None
+    OUTPUT_PREFIX = None
 
 # STFT parameters
 STFT_NPERSEG = 256      # Window length for STFT

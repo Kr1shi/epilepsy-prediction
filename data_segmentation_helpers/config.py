@@ -25,11 +25,11 @@ HIGH_FREQ_HZ = 50
 NOTCH_FREQ_HZ = 60
 
 # Single-patient configuration (LOOCV operates on single patients only)
-SINGLE_PATIENT_ID = "chb11"
+SINGLE_PATIENT_ID = "chb06"
 
 # Leave-One-Out Cross-Validation configuration (only supported mode)
 LOOCV_MODE = True  # LOOCV is the only supported mode
-LOOCV_FOLD_ID = None  # Set to fold number or None to process all folds
+LOOCV_FOLD_ID = 0  # Set to fold number or None to process all folds
 
 # Load precomputed seizure counts
 from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS

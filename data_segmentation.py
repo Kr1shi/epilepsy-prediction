@@ -31,6 +31,51 @@ def get_file_duration(edf_path):
             print(f"Warning: Could not read {edf_path}: {e}")
         return ESTIMATED_FILE_DURATION
 
+def identify_positive_regions(all_seizures_global):
+    """Identify time regions where preictal/ictal sequences should be created.
+
+    This determines where the sliding window should use overlapping sequences (83% overlap).
+    Regions outside these bounds will use non-overlapping sequences (0% overlap) to prevent
+    interictal data leakage between train/test splits.
+
+    Args:
+        all_seizures_global: List of seizures with global timeline coordinates
+
+    Returns:
+        List of (start_global, end_global) tuples marking regions where positive sequences occur
+    """
+    positive_regions = []
+
+    for seizure in all_seizures_global:
+        if TASK_MODE == 'prediction':
+            # Prediction mode: preictal window before seizure
+            seizure_start_global = seizure['start_sec_global']
+            preictal_window_start_global = max(0, seizure_start_global - PREICTAL_WINDOW)
+            # Region: from preictal window start to seizure start
+            positive_regions.append((preictal_window_start_global, seizure_start_global))
+
+        elif TASK_MODE == 'detection':
+            # Detection mode: during seizure
+            seizure_start_global = seizure['start_sec_global']
+            seizure_end_global = seizure['end_sec_global']
+            # Region: from seizure start to seizure end
+            positive_regions.append((seizure_start_global, seizure_end_global))
+
+    # Merge overlapping regions
+    if not positive_regions:
+        return []
+
+    positive_regions.sort()
+    merged = [positive_regions[0]]
+    for start, end in positive_regions[1:]:
+        if start <= merged[-1][1]:
+            # Overlapping regions, merge them
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    return merged
+
 def create_sequences_from_file(patient_id, filename, all_seizures_global, file_duration, file_offset):
     """Create sequences of consecutive segments from a single file
 
@@ -48,14 +93,26 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
     skipped_boundary_sequences = 0  # Track sequences skipped due to insufficient boundary data
 
     # Calculate sequence parameters
-    sequence_duration = SEGMENT_DURATION * SEQUENCE_LENGTH  # e.g., 30s * 5 = 150s
-    stride_duration = SEGMENT_DURATION * SEQUENCE_STRIDE    # e.g., 30s * 1 = 30s
+    sequence_duration = SEGMENT_DURATION * SEQUENCE_LENGTH  # e.g., 5s * 30 = 150s
+    overlapping_stride = SEGMENT_DURATION * SEQUENCE_STRIDE  # e.g., 5s * 5 = 25s (83% overlap for preictal/ictal)
+    non_overlapping_stride = sequence_duration                # e.g., 150s (0% overlap for interictal)
+
+    # Identify positive regions (preictal/ictal) to determine stride strategy
+    positive_regions = identify_positive_regions(all_seizures_global)
 
     # Calculate how many sequences we can extract
     if file_duration < sequence_duration + (2 * SAFETY_MARGIN):
         return sequences  # File too short for even one sequence (including safety margins)
 
-    # Generate sequence start times using sliding window
+    # Helper function to check if a position is in a positive region
+    def is_in_positive_region(start_global, end_global):
+        """Check if sequence overlaps with any positive region"""
+        for region_start, region_end in positive_regions:
+            if start_global < region_end and end_global > region_start:
+                return True
+        return False
+
+    # Generate sequence start times using adaptive sliding window
     sequence_start_local = SAFETY_MARGIN
     while sequence_start_local + sequence_duration + SAFETY_MARGIN <= file_duration:
         sequence_end_local = sequence_start_local + sequence_duration
@@ -67,12 +124,13 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
         # Generate segment start times within this sequence (local to file)
         segment_starts = [sequence_start_local + (i * SEGMENT_DURATION) for i in range(SEQUENCE_LENGTH)]
 
-        # Validate all segments have sufficient data 
+        # Validate all segments have sufficient data
         last_segment_end = segment_starts[-1] + SEGMENT_DURATION
         if last_segment_end + SAFETY_MARGIN > file_duration:
             # Skip this sequence - insufficient data for complete preprocessing
             skipped_boundary_sequences += 1
-            sequence_start_local += stride_duration
+            # Use non-overlapping stride for interictal regions (safest assumption)
+            sequence_start_local += non_overlapping_stride
             continue
 
         # Determine sequence label based on LAST segment
@@ -166,7 +224,8 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
 
         # Skip sequences in excluded buffer zone
         if in_excluded_zone:
-            sequence_start_local += stride_duration
+            # Use non-overlapping stride for interictal regions (safest assumption)
+            sequence_start_local += non_overlapping_stride
             continue
 
         # Create sequence metadata (store LOCAL times for file-based processing)
@@ -191,8 +250,13 @@ def create_sequences_from_file(patient_id, filename, all_seizures_global, file_d
 
         sequences.append(sequence)
 
-        # Move to next sequence with stride
-        sequence_start_local += stride_duration
+        # Move to next sequence with adaptive stride
+        # Use overlapping stride for sequences in positive regions (preictal/ictal)
+        # Use non-overlapping stride for interictal sequences to prevent data leakage
+        if is_in_positive_region(sequence_start_global, sequence_end_global):
+            sequence_start_local += overlapping_stride  # 25s: 83% overlap for preictal/ictal
+        else:
+            sequence_start_local += non_overlapping_stride  # 150s: 0% overlap for interictal
 
     # Log skipped sequences if verbose warnings enabled
     if VERBOSE_WARNINGS and skipped_boundary_sequences > 0:

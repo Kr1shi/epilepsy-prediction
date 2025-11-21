@@ -1,0 +1,994 @@
+============================================================
+BATCH PROCESSING: ALL FOLDS
+Processing 3 folds for patient chb11
+============================================================
+
+Configuration:
+  - Task mode: PREDICTION (preictal vs interictal)
+  - LOOCV Mode: ENABLED
+  - Sequence length: 30 segments
+  - Sequence duration: 150s (2.5 min)
+  - Stride: 5 segments (83% overlap)
+  - Segment duration: 5s
+  - Preictal window: 10 min
+  - Interictal buffer: 120 min
+  - Channel validation: ENABLED
+  - Target channels: 18 channels
+============================================================
+
+Extracting sequences from patient chb11...
+  Channel validation: 34/35 files valid
+Patient chb11: 728 sequences (59 preictal, 669 interictal)
+
+============================================================
+PROCESSING FOLD 0/2
+============================================================
+Output prefix: chb11_fold0
+LOOCV Fold 0: Test seizure=0, Train seizures=[1, 2]
+
+============================================================
+FOLD SPLIT SUMMARY
+============================================================
+
+=== OVERALL SUMMARY ===
+Task mode: PREDICTION
+Total sequences: 118
+  - Preictal sequences: 59
+  - Interictal sequences: 59
+Sequence configuration:
+  - Segments per sequence: 30
+  - Sequence duration: 150s (2.5 min)
+  - Sequence stride: 5 segments (25s)
+  - Preictal window: 10 min
+  - Interictal buffer: 120 min
+
+=== PER-PATIENT BREAKDOWN ===
+Patients processed: 1
+chb11: 118 total (59 preictal, 59 interictal)
+
+=== PER-SPLIT BREAKDOWN ===
+test: 24 total (12 preictal, 12 interictal)
+train: 94 total (47 preictal, 47 interictal)
+
+=== STATISTICS ===
+Average time to seizure (preictal): 276.5s (4.6 min)
+Class balance: 59/59 = 1.00
+
+=== SPLIT BALANCING SUMMARY ===
+train: 47 preictal, 47 interictal (dropped 0 preictal, 287 interictal)
+test: 12 preictal, 12 interictal (dropped 0 preictal, 323 interictal)
+
+Sequences saved to chb11_fold0_sequences_prediction.json
+File size: 0.20 MB
+
+=== CHANNEL VALIDATION SUMMARY ===
+Validation enabled: True
+Files checked: 35
+Files with valid channels: 34
+Files with invalid channels: 1
+
+Most common missing channels:
+  - C3-P3: missing in 1 files
+  - C4-P4: missing in 1 files
+  - CZ-PZ: missing in 1 files
+  - F3-C3: missing in 1 files
+  - F4-C4: missing in 1 files
+
+✅ Fold 0 completed successfully!
+✅ Sequences saved to chb11_fold0_sequences_prediction.json
+
+============================================================
+PROCESSING FOLD 1/2
+============================================================
+Output prefix: chb11_fold1
+LOOCV Fold 1: Test seizure=1, Train seizures=[0, 2]
+
+============================================================
+FOLD SPLIT SUMMARY
+============================================================
+
+=== OVERALL SUMMARY ===
+Task mode: PREDICTION
+Total sequences: 118
+  - Preictal sequences: 59
+  - Interictal sequences: 59
+Sequence configuration:
+  - Segments per sequence: 30
+  - Sequence duration: 150s (2.5 min)
+  - Sequence stride: 5 segments (25s)
+  - Preictal window: 10 min
+  - Interictal buffer: 120 min
+
+=== PER-PATIENT BREAKDOWN ===
+Patients processed: 1
+chb11: 118 total (59 preictal, 59 interictal)
+
+=== PER-SPLIT BREAKDOWN ===
+test: 48 total (24 preictal, 24 interictal)
+train: 70 total (35 preictal, 35 interictal)
+
+=== STATISTICS ===
+Average time to seizure (preictal): 276.5s (4.6 min)
+Class balance: 59/59 = 1.00
+
+=== SPLIT BALANCING SUMMARY ===
+train: 35 preictal, 35 interictal (dropped 0 preictal, 299 interictal)
+test: 24 preictal, 24 interictal (dropped 0 preictal, 311 interictal)
+
+Sequences saved to chb11_fold1_sequences_prediction.json
+File size: 0.20 MB
+
+=== CHANNEL VALIDATION SUMMARY ===
+Validation enabled: True
+Files checked: 35
+Files with valid channels: 34
+Files with invalid channels: 1
+
+Most common missing channels:
+  - C3-P3: missing in 1 files
+  - C4-P4: missing in 1 files
+  - CZ-PZ: missing in 1 files
+  - F3-C3: missing in 1 files
+  - F4-C4: missing in 1 files
+
+✅ Fold 1 completed successfully!
+✅ Sequences saved to chb11_fold1_sequences_prediction.json
+
+============================================================
+PROCESSING FOLD 2/2
+============================================================
+Output prefix: chb11_fold2
+LOOCV Fold 2: Test seizure=2, Train seizures=[0, 1]
+
+============================================================
+FOLD SPLIT SUMMARY
+============================================================
+
+=== OVERALL SUMMARY ===
+Task mode: PREDICTION
+Total sequences: 118
+  - Preictal sequences: 59
+  - Interictal sequences: 59
+Sequence configuration:
+  - Segments per sequence: 30
+  - Sequence duration: 150s (2.5 min)
+  - Sequence stride: 5 segments (25s)
+  - Preictal window: 10 min
+  - Interictal buffer: 120 min
+
+=== PER-PATIENT BREAKDOWN ===
+Patients processed: 1
+chb11: 118 total (59 preictal, 59 interictal)
+
+=== PER-SPLIT BREAKDOWN ===
+test: 46 total (23 preictal, 23 interictal)
+train: 72 total (36 preictal, 36 interictal)
+
+=== STATISTICS ===
+Average time to seizure (preictal): 276.5s (4.6 min)
+Class balance: 59/59 = 1.00
+
+=== SPLIT BALANCING SUMMARY ===
+train: 36 preictal, 36 interictal (dropped 0 preictal, 298 interictal)
+test: 23 preictal, 23 interictal (dropped 0 preictal, 312 interictal)
+
+Sequences saved to chb11_fold2_sequences_prediction.json
+File size: 0.20 MB
+
+=== CHANNEL VALIDATION SUMMARY ===
+Validation enabled: True
+Files checked: 35
+Files with valid channels: 34
+Files with invalid channels: 1
+
+Most common missing channels:
+  - C3-P3: missing in 1 files
+  - C4-P4: missing in 1 files
+  - CZ-PZ: missing in 1 files
+  - F3-C3: missing in 1 files
+  - F4-C4: missing in 1 files
+
+✅ Fold 2 completed successfully!
+✅ Sequences saved to chb11_fold2_sequences_prediction.json
+
+============================================================
+✅ BATCH PROCESSING COMPLETED!
+✅ Processed 3 folds for patient chb11
+============================================================
+============================================================
+BATCH PROCESSING: ALL FOLDS
+Processing 3 folds for patient chb11
+============================================================
+
+============================================================
+PREPROCESSING FOLD 0/2
+============================================================
+2025-11-20 13:06:34,119 - INFO - ============================================================
+2025-11-20 13:06:34,119 - INFO - EEG PREPROCESSING PIPELINE STARTED
+2025-11-20 13:06:34,119 - INFO - ============================================================
+2025-11-20 13:06:34,119 - INFO - Output prefix: chb11_fold0
+2025-11-20 13:06:34,119 - INFO - EEG Preprocessor initialized
+2025-11-20 13:06:34,119 - INFO - Target channels: ['C3-P3', 'C4-P4', 'CZ-PZ', 'F3-C3', 'F4-C4', 'F7-T7', 'F8-T8', 'FP1-F3', 'FP1-F7', 'FP2-F4', 'FP2-F8', 'FZ-CZ', 'P3-O1', 'P4-O2', 'P7-O1', 'P8-O2', 'T7-P7', 'T8-P8']
+2025-11-20 13:06:34,119 - INFO - Filter settings: 0.5-50 Hz, notch: 60 Hz
+2025-11-20 13:06:34,119 - INFO - Segment duration: 5 seconds
+2025-11-20 13:06:34,119 - INFO - Note: Channel validation performed during segmentation phase
+2025-11-20 13:06:34,119 - INFO - Multiprocessing: Using 10/16 CPU cores for parallel preprocessing
+2025-11-20 13:06:34,120 - INFO - MNE parallel filtering: 8 jobs per sequence
+2025-11-20 13:06:34,120 - INFO - Loading segments from chb11_fold0_sequences_prediction.json
+2025-11-20 13:06:34,128 - INFO - Loaded 118 total sequences
+2025-11-20 13:06:34,128 - INFO - Channel validation (from segmentation): 34/35 files valid
+2025-11-20 13:06:34,128 - INFO - Files skipped due to missing channels: 1
+2025-11-20 13:06:34,128 - INFO - Using all sequences (channel validation performed during segmentation)
+2025-11-20 13:06:34,128 - INFO - Detected pre-assigned splits in segmentation metadata; using them directly.
+2025-11-20 13:06:34,128 - INFO - LOOCV Mode: Using 2-split configuration (train/test only) for fold None
+2025-11-20 13:06:34,128 - INFO - train: 94 sequences (47 preictal, 47 interictal)
+2025-11-20 13:06:34,129 - INFO - test: 24 sequences (12 preictal, 12 interictal)
+2025-11-20 13:06:34,135 - INFO - Balancing splits to enforce equal positive/interictal counts per split...
+2025-11-20 13:06:34,135 - INFO - train: kept 47 preictal and 47 interictal (dropped 0 preictal, 0 interictal)
+2025-11-20 13:06:34,135 - INFO - test: kept 12 preictal and 12 interictal (dropped 0 preictal, 0 interictal)
+2025-11-20 13:06:34,142 - INFO - ============================================================
+2025-11-20 13:06:34,142 - INFO - COMPUTING NORMALIZATION STATISTICS AND PROCESSING TRAINING DATA
+2025-11-20 13:06:34,142 - INFO - ============================================================
+2025-11-20 13:06:34,142 - INFO - Processing 94 training samples to compute normalization stats...
+2025-11-20 13:06:34,142 - INFO - Processing 94 sequences from 22 unique files
+Processing training data:   0%|                     | 0/94 [00:00<?, ?it/s]Processing training data:   1%|1            | 1/94 [00:02<03:15,  2.10s/it]Processing training data:  26%|###         | 24/94 [00:03<00:08,  7.80it/s]Processing training data:  29%|###4        | 27/94 [00:04<00:09,  6.74it/s]Processing training data:  31%|###7        | 29/94 [00:05<00:14,  4.53it/s]Processing training data:  34%|####        | 32/94 [00:06<00:14,  4.40it/s]Processing training data:  60%|#######1    | 56/94 [00:07<00:02, 12.82it/s]Processing training data:  63%|#######5    | 59/94 [00:09<00:05,  6.93it/s]Processing training data:  67%|########    | 63/94 [00:09<00:04,  6.82it/s]Processing training data:  69%|########2   | 65/94 [00:10<00:05,  4.91it/s]Processing training data:  74%|########9   | 70/94 [00:12<00:05,  4.25it/s]Processing training data:  78%|#########3  | 73/94 [00:13<00:05,  3.70it/s]Processing training data:  81%|#########7  | 76/94 [00:14<00:04,  3.64it/s]Processing training data:  83%|#########9  | 78/94 [00:16<00:06,  2.63it/s]Processing training data:  85%|##########2 | 80/94 [00:18<00:06,  2.03it/s]Processing training data:  87%|##########4 | 82/94 [00:19<00:06,  1.89it/s]Processing training data:  93%|###########1| 87/94 [00:20<00:02,  3.01it/s]Processing training data:  94%|###########2| 88/94 [00:20<00:02,  2.94it/s]Processing training data:  95%|###########3| 89/94 [00:20<00:01,  2.84it/s]Processing training data:  96%|###########4| 90/94 [00:21<00:01,  2.79it/s]Processing training data:  97%|###########6| 91/94 [00:22<00:01,  1.76it/s]Processing training data:  99%|###########8| 93/94 [00:23<00:00,  2.07it/s]Processing training data: 100%|############| 94/94 [00:23<00:00,  4.02it/s]
+2025-11-20 13:06:57,543 - INFO - Computing normalization statistics from training data...
+2025-11-20 13:06:57,714 - INFO - Normalization stats computed:
+2025-11-20 13:06:57,714 - INFO -   Mean: 0.315452
+2025-11-20 13:06:57,714 - INFO -   Std: 2.184679
+2025-11-20 13:06:57,714 - INFO -   Saved to: preprocessing\checkpoints\chb11_fold0\normalization_stats.json
+2025-11-20 13:06:57,732 - INFO - Applying normalization and saving 94 training sequences...
+Normalizing and saving training data:   0%|         | 0/94 [00:00<?, ?it/s]2025-11-20 13:06:57,742 - INFO - Creating new HDF5 file or datasets in: preprocessing\data\chb11_fold0\train_dataset.h5
+Normalizing and saving training data:  11%|1| 10/94 [00:00<00:05, 15.72it/sNormalizing and saving training data:  21%|2| 20/94 [00:01<00:04, 15.72it/sNormalizing and saving training data:  32%|3| 30/94 [00:01<00:04, 15.76it/sNormalizing and saving training data:  43%|4| 40/94 [00:02<00:03, 15.67it/sNormalizing and saving training data:  53%|5| 50/94 [00:03<00:02, 15.73it/sNormalizing and saving training data:  64%|6| 60/94 [00:03<00:02, 15.70it/sNormalizing and saving training data:  74%|7| 70/94 [00:04<00:01, 15.74it/sNormalizing and saving training data:  85%|8| 80/94 [00:05<00:00, 15.79it/sNormalizing and saving training data:  96%|9| 90/94 [00:05<00:00, 15.73it/sNormalizing and saving training data: 100%|#| 94/94 [00:05<00:00, 16.42it/s
+2025-11-20 13:07:03,726 - INFO - Training data processing completed during stats computation phase
+2025-11-20 13:07:03,732 - INFO - Loaded normalization statistics:
+2025-11-20 13:07:03,733 - INFO -   Mean: 0.315452
+2025-11-20 13:07:03,733 - INFO -   Std: 2.184679
+2025-11-20 13:07:03,733 - INFO - Split train already completed, skipping
+2025-11-20 13:07:03,733 - INFO - Processing test split...
+2025-11-20 13:07:03,733 - INFO - Need to process 24/24 sequences for test
+2025-11-20 13:07:03,733 - INFO - Processing 24 sequences from 13 unique files
+2025-11-20 13:07:03,733 - INFO - Average 1.8 sequences per file
+Processing test:   0%|                              | 0/24 [00:00<?, ?it/s]Processing test:   4%|9                     | 1/24 [00:00<00:10,  2.18it/s]Processing test:  29%|######4               | 7/24 [00:00<00:02,  8.34it/s]2025-11-20 13:07:04,675 - INFO - Creating new HDF5 file or datasets in: preprocessing\data\chb11_fold0\test_dataset.h5
+2025-11-20 13:07:05,416 - INFO - Progress: 106/118 (89.8%) - ETA: 0.1 minutes
+Processing test:  54%|###########3         | 13/24 [00:02<00:01,  6.39it/s]Processing test:  58%|############2        | 14/24 [00:02<00:01,  5.59it/s]Processing test:  62%|#############1       | 15/24 [00:02<00:02,  4.21it/s]Processing test:  71%|##############8      | 17/24 [00:03<00:01,  4.68it/s]Processing test:  75%|###############7     | 18/24 [00:03<00:01,  4.49it/s]Processing test:  79%|################6    | 19/24 [00:03<00:01,  4.11it/s]Processing test:  83%|#################5   | 20/24 [00:04<00:01,  3.87it/s]Processing test:  88%|##################3  | 21/24 [00:04<00:00,  3.69it/s]Processing test:  92%|###################2 | 22/24 [00:04<00:00,  3.50it/s]2025-11-20 13:07:09,201 - INFO - Progress: 116/118 (98.3%) - ETA: 0.0 minutes
+Processing test:  96%|####################1| 23/24 [00:05<00:00,  2.16it/s]Processing test: 100%|#####################| 24/24 [00:06<00:00,  2.36it/s]Processing test: 100%|#####################| 24/24 [00:06<00:00,  3.93it/s]
+2025-11-20 13:07:09,991 - INFO - Validating final datasets...
+2025-11-20 13:07:09,999 - INFO - train dataset validation:
+2025-11-20 13:07:09,999 - INFO -   - Segments: 94
+2025-11-20 13:07:09,999 - INFO -   - Spectrogram shape: (30, 18, 50, 10)
+2025-11-20 13:07:09,999 - INFO -   - Classes: 47 preictal, 47 interictal
+2025-11-20 13:07:09,999 - INFO -   - Balance: 50.0% preictal
+2025-11-20 13:07:10,005 - INFO - test dataset validation:
+2025-11-20 13:07:10,005 - INFO -   - Segments: 24
+2025-11-20 13:07:10,005 - INFO -   - Spectrogram shape: (30, 18, 50, 10)
+2025-11-20 13:07:10,005 - INFO -   - Classes: 12 preictal, 12 interictal
+2025-11-20 13:07:10,005 - INFO -   - Balance: 50.0% preictal
+2025-11-20 13:07:10,005 - INFO - ============================================================
+2025-11-20 13:07:10,005 - INFO - PREPROCESSING COMPLETED SUCCESSFULLY
+2025-11-20 13:07:10,005 - INFO - Total time: 0.6 minutes
+2025-11-20 13:07:10,005 - INFO - Processed segments: 118
+2025-11-20 13:07:10,005 - INFO - Average rate: 3.3 segments/second
+2025-11-20 13:07:10,006 - INFO - ============================================================
+✅ Fold 0 preprocessing completed successfully!
+
+============================================================
+PREPROCESSING FOLD 1/2
+============================================================
+2025-11-20 13:07:10,034 - INFO - ============================================================
+2025-11-20 13:07:10,034 - INFO - EEG PREPROCESSING PIPELINE STARTED
+2025-11-20 13:07:10,034 - INFO - ============================================================
+2025-11-20 13:07:10,034 - INFO - Output prefix: chb11_fold1
+2025-11-20 13:07:10,034 - INFO - EEG Preprocessor initialized
+2025-11-20 13:07:10,034 - INFO - Target channels: ['C3-P3', 'C4-P4', 'CZ-PZ', 'F3-C3', 'F4-C4', 'F7-T7', 'F8-T8', 'FP1-F3', 'FP1-F7', 'FP2-F4', 'FP2-F8', 'FZ-CZ', 'P3-O1', 'P4-O2', 'P7-O1', 'P8-O2', 'T7-P7', 'T8-P8']
+2025-11-20 13:07:10,034 - INFO - Filter settings: 0.5-50 Hz, notch: 60 Hz
+2025-11-20 13:07:10,034 - INFO - Segment duration: 5 seconds
+2025-11-20 13:07:10,034 - INFO - Note: Channel validation performed during segmentation phase
+2025-11-20 13:07:10,034 - INFO - Multiprocessing: Using 10/16 CPU cores for parallel preprocessing
+2025-11-20 13:07:10,034 - INFO - MNE parallel filtering: 8 jobs per sequence
+2025-11-20 13:07:10,034 - INFO - Loading segments from chb11_fold1_sequences_prediction.json
+2025-11-20 13:07:10,043 - INFO - Loaded 118 total sequences
+2025-11-20 13:07:10,043 - INFO - Channel validation (from segmentation): 34/35 files valid
+2025-11-20 13:07:10,043 - INFO - Files skipped due to missing channels: 1
+2025-11-20 13:07:10,043 - INFO - Using all sequences (channel validation performed during segmentation)
+2025-11-20 13:07:10,043 - INFO - Detected pre-assigned splits in segmentation metadata; using them directly.
+2025-11-20 13:07:10,043 - INFO - LOOCV Mode: Using 2-split configuration (train/test only) for fold None
+2025-11-20 13:07:10,043 - INFO - train: 70 sequences (35 preictal, 35 interictal)
+2025-11-20 13:07:10,043 - INFO - test: 48 sequences (24 preictal, 24 interictal)
+2025-11-20 13:07:10,050 - INFO - Balancing splits to enforce equal positive/interictal counts per split...
+2025-11-20 13:07:10,050 - INFO - train: kept 35 preictal and 35 interictal (dropped 0 preictal, 0 interictal)
+2025-11-20 13:07:10,050 - INFO - test: kept 24 preictal and 24 interictal (dropped 0 preictal, 0 interictal)
+2025-11-20 13:07:10,057 - INFO - ============================================================
+2025-11-20 13:07:10,057 - INFO - COMPUTING NORMALIZATION STATISTICS AND PROCESSING TRAINING DATA
+2025-11-20 13:07:10,057 - INFO - ============================================================
+2025-11-20 13:07:10,057 - INFO - Processing 70 training samples to compute normalization stats...
+2025-11-20 13:07:10,057 - INFO - Processing 70 sequences from 24 unique files
+Processing training data:   0%|                     | 0/70 [00:00<?, ?it/s]Processing training data:   1%|1            | 1/70 [00:00<00:36,  1.88it/s]Processing training data:  34%|####1       | 24/70 [00:00<00:01, 31.79it/s]Processing training data:  43%|#####1      | 30/70 [00:02<00:03, 11.12it/s]Processing training data:  47%|#####6      | 33/70 [00:03<00:05,  6.39it/s]Processing training data:  51%|######1     | 36/70 [00:04<00:05,  6.71it/s]Processing training data:  54%|######5     | 38/70 [00:05<00:06,  4.66it/s]Processing training data:  59%|#######     | 41/70 [00:05<00:05,  5.30it/s]Processing training data:  60%|#######2    | 42/70 [00:06<00:06,  4.58it/s]Processing training data:  63%|#######5    | 44/70 [00:06<00:05,  4.75it/s]Processing training data:  71%|########5   | 50/70 [00:07<00:02,  6.87it/s]Processing training data:  74%|########9   | 52/70 [00:08<00:04,  3.90it/s]Processing training data:  79%|#########4  | 55/70 [00:08<00:03,  4.46it/s]Processing training data:  80%|#########6  | 56/70 [00:09<00:03,  4.08it/s]Processing training data:  81%|#########7  | 57/70 [00:09<00:03,  3.73it/s]Processing training data:  83%|#########9  | 58/70 [00:10<00:04,  2.78it/s]Processing training data:  86%|##########2 | 60/70 [00:11<00:03,  2.74it/s]Processing training data:  89%|##########6 | 62/70 [00:12<00:03,  2.58it/s]Processing training data:  91%|##########9 | 64/70 [00:13<00:02,  2.30it/s]Processing training data:  94%|###########3| 66/70 [00:13<00:01,  2.76it/s]Processing training data:  96%|###########4| 67/70 [00:14<00:01,  2.72it/s]Processing training data:  97%|###########6| 68/70 [00:14<00:00,  2.68it/s]Processing training data:  99%|###########8| 69/70 [00:14<00:00,  2.65it/s]Processing training data: 100%|############| 70/70 [00:15<00:00,  2.63it/s]Processing training data: 100%|############| 70/70 [00:15<00:00,  4.59it/s]
+2025-11-20 13:07:25,301 - INFO - Computing normalization statistics from training data...
+2025-11-20 13:07:25,435 - INFO - Normalization stats computed:
+2025-11-20 13:07:25,435 - INFO -   Mean: 0.243282
+2025-11-20 13:07:25,435 - INFO -   Std: 2.138654
+2025-11-20 13:07:25,435 - INFO -   Saved to: preprocessing\checkpoints\chb11_fold1\normalization_stats.json
+2025-11-20 13:07:25,451 - INFO - Applying normalization and saving 70 training sequences...
+Normalizing and saving training data:   0%|         | 0/70 [00:00<?, ?it/s]2025-11-20 13:07:25,464 - INFO - Creating new HDF5 file or datasets in: preprocessing\data\chb11_fold1\train_dataset.h5
+Normalizing and saving training data:  14%|1| 10/70 [00:00<00:03, 15.45it/sNormalizing and saving training data:  29%|2| 20/70 [00:01<00:03, 15.14it/sNormalizing and saving training data:  43%|4| 30/70 [00:01<00:02, 15.41it/sNormalizing and saving training data:  57%|5| 40/70 [00:02<00:01, 15.54it/sNormalizing and saving training data:  71%|7| 50/70 [00:03<00:01, 15.68it/sNormalizing and saving training data:  86%|8| 60/70 [00:03<00:00, 15.65it/sNormalizing and saving training data: 100%|#| 70/70 [00:04<00:00, 15.82it/sNormalizing and saving training data: 100%|#| 70/70 [00:04<00:00, 15.64it/s
+2025-11-20 13:07:29,933 - INFO - Training data processing completed during stats computation phase
+2025-11-20 13:07:29,940 - INFO - Loaded normalization statistics:
+2025-11-20 13:07:29,940 - INFO -   Mean: 0.243282
+2025-11-20 13:07:29,940 - INFO -   Std: 2.138654
+2025-11-20 13:07:29,940 - INFO - Split train already completed, skipping
+2025-11-20 13:07:29,940 - INFO - Processing test split...
+2025-11-20 13:07:29,940 - INFO - Need to process 48/48 sequences for test
+2025-11-20 13:07:29,940 - INFO - Processing 48 sequences from 16 unique files
+2025-11-20 13:07:29,940 - INFO - Average 3.0 sequences per file
+Processing test:   0%|                              | 0/48 [00:00<?, ?it/s]Processing test:   2%|4                     | 1/48 [00:00<00:34,  1.36it/s]2025-11-20 13:07:30,675 - INFO - Creating new HDF5 file or datasets in: preprocessing\data\chb11_fold1\test_dataset.h5
+2025-11-20 13:07:32,136 - INFO - Progress: 94/118 (79.7%) - ETA: 0.1 minutes
+Processing test:  52%|##########9          | 25/48 [00:02<00:02, 10.71it/s]Processing test:  54%|###########3         | 26/48 [00:02<00:02,  9.49it/s]Processing test:  56%|###########8         | 27/48 [00:04<00:03,  5.49it/s]Processing test:  60%|############6        | 29/48 [00:04<00:04,  4.40it/s]Processing test:  67%|##############       | 32/48 [00:05<00:03,  5.04it/s]Processing test:  71%|##############8      | 34/48 [00:05<00:02,  5.21it/s]2025-11-20 13:07:36,161 - INFO - Progress: 104/118 (88.1%) - ETA: 0.1 minutes
+Processing test:  73%|###############3     | 35/48 [00:07<00:04,  2.73it/s]Processing test:  77%|################1    | 37/48 [00:08<00:04,  2.26it/s]Processing test:  81%|#################    | 39/48 [00:09<00:03,  2.47it/s]Processing test:  85%|#################9   | 41/48 [00:09<00:02,  2.94it/s]Processing test:  88%|##################3  | 42/48 [00:10<00:02,  2.59it/s]Processing test:  92%|###################2 | 44/48 [00:10<00:01,  3.21it/s]2025-11-20 13:07:40,908 - INFO - Progress: 114/118 (96.6%) - ETA: 0.0 minutes
+Processing test:  94%|###################6 | 45/48 [00:11<00:01,  2.33it/s]Processing test:  96%|####################1| 46/48 [00:11<00:00,  2.13it/s]Processing test: 100%|#####################| 48/48 [00:12<00:00,  2.85it/s]Processing test: 100%|#####################| 48/48 [00:12<00:00,  3.93it/s]
+2025-11-20 13:07:42,423 - INFO - Validating final datasets...
+2025-11-20 13:07:42,431 - INFO - train dataset validation:
+2025-11-20 13:07:42,431 - INFO -   - Segments: 70
+2025-11-20 13:07:42,431 - INFO -   - Spectrogram shape: (30, 18, 50, 10)
+2025-11-20 13:07:42,431 - INFO -   - Classes: 35 preictal, 35 interictal
+2025-11-20 13:07:42,431 - INFO -   - Balance: 50.0% preictal
+2025-11-20 13:07:42,436 - INFO - test dataset validation:
+2025-11-20 13:07:42,436 - INFO -   - Segments: 48
+2025-11-20 13:07:42,436 - INFO -   - Spectrogram shape: (30, 18, 50, 10)
+2025-11-20 13:07:42,436 - INFO -   - Classes: 24 preictal, 24 interictal
+2025-11-20 13:07:42,436 - INFO -   - Balance: 50.0% preictal
+2025-11-20 13:07:42,436 - INFO - ============================================================
+2025-11-20 13:07:42,436 - INFO - PREPROCESSING COMPLETED SUCCESSFULLY
+2025-11-20 13:07:42,436 - INFO - Total time: 0.5 minutes
+2025-11-20 13:07:42,436 - INFO - Processed segments: 118
+2025-11-20 13:07:42,436 - INFO - Average rate: 3.6 segments/second
+2025-11-20 13:07:42,436 - INFO - ============================================================
+✅ Fold 1 preprocessing completed successfully!
+
+============================================================
+PREPROCESSING FOLD 2/2
+============================================================
+2025-11-20 13:07:42,456 - INFO - ============================================================
+2025-11-20 13:07:42,456 - INFO - EEG PREPROCESSING PIPELINE STARTED
+2025-11-20 13:07:42,456 - INFO - ============================================================
+2025-11-20 13:07:42,456 - INFO - Output prefix: chb11_fold2
+2025-11-20 13:07:42,456 - INFO - EEG Preprocessor initialized
+2025-11-20 13:07:42,456 - INFO - Target channels: ['C3-P3', 'C4-P4', 'CZ-PZ', 'F3-C3', 'F4-C4', 'F7-T7', 'F8-T8', 'FP1-F3', 'FP1-F7', 'FP2-F4', 'FP2-F8', 'FZ-CZ', 'P3-O1', 'P4-O2', 'P7-O1', 'P8-O2', 'T7-P7', 'T8-P8']
+2025-11-20 13:07:42,456 - INFO - Filter settings: 0.5-50 Hz, notch: 60 Hz
+2025-11-20 13:07:42,456 - INFO - Segment duration: 5 seconds
+2025-11-20 13:07:42,456 - INFO - Note: Channel validation performed during segmentation phase
+2025-11-20 13:07:42,456 - INFO - Multiprocessing: Using 10/16 CPU cores for parallel preprocessing
+2025-11-20 13:07:42,456 - INFO - MNE parallel filtering: 8 jobs per sequence
+2025-11-20 13:07:42,456 - INFO - Loading segments from chb11_fold2_sequences_prediction.json
+2025-11-20 13:07:42,464 - INFO - Loaded 118 total sequences
+2025-11-20 13:07:42,464 - INFO - Channel validation (from segmentation): 34/35 files valid
+2025-11-20 13:07:42,464 - INFO - Files skipped due to missing channels: 1
+2025-11-20 13:07:42,464 - INFO - Using all sequences (channel validation performed during segmentation)
+2025-11-20 13:07:42,465 - INFO - Detected pre-assigned splits in segmentation metadata; using them directly.
+2025-11-20 13:07:42,465 - INFO - LOOCV Mode: Using 2-split configuration (train/test only) for fold None
+2025-11-20 13:07:42,465 - INFO - train: 72 sequences (36 preictal, 36 interictal)
+2025-11-20 13:07:42,465 - INFO - test: 46 sequences (23 preictal, 23 interictal)
+2025-11-20 13:07:42,471 - INFO - Balancing splits to enforce equal positive/interictal counts per split...
+2025-11-20 13:07:42,471 - INFO - train: kept 36 preictal and 36 interictal (dropped 0 preictal, 0 interictal)
+2025-11-20 13:07:42,471 - INFO - test: kept 23 preictal and 23 interictal (dropped 0 preictal, 0 interictal)
+2025-11-20 13:07:42,478 - INFO - ============================================================
+2025-11-20 13:07:42,478 - INFO - COMPUTING NORMALIZATION STATISTICS AND PROCESSING TRAINING DATA
+2025-11-20 13:07:42,478 - INFO - ============================================================
+2025-11-20 13:07:42,478 - INFO - Processing 72 training samples to compute normalization stats...
+2025-11-20 13:07:42,478 - INFO - Processing 72 sequences from 21 unique files
+Processing training data:   0%|                     | 0/72 [00:00<?, ?it/s]Processing training data:   1%|1            | 1/72 [00:00<00:40,  1.74it/s]Processing training data:  35%|####1       | 25/72 [00:00<00:01, 34.66it/s]Processing training data:  42%|#####       | 30/72 [00:01<00:01, 25.72it/s]Processing training data:  47%|#####6      | 34/72 [00:02<00:02, 12.78it/s]Processing training data:  51%|######1     | 37/72 [00:02<00:02, 11.71it/s]Processing training data:  57%|######8     | 41/72 [00:03<00:03,  8.49it/s]Processing training data:  60%|#######1    | 43/72 [00:04<00:05,  5.64it/s]Processing training data:  64%|#######6    | 46/72 [00:04<00:04,  6.29it/s]Processing training data:  65%|#######8    | 47/72 [00:05<00:06,  3.66it/s]Processing training data:  69%|########3   | 50/72 [00:06<00:06,  3.36it/s]Processing training data:  76%|#########1  | 55/72 [00:08<00:04,  3.77it/s]Processing training data:  82%|#########8  | 59/72 [00:08<00:02,  4.89it/s]Processing training data:  83%|##########  | 60/72 [00:09<00:03,  3.14it/s]Processing training data:  89%|##########6 | 64/72 [00:10<00:02,  4.00it/s]Processing training data:  92%|########### | 66/72 [00:10<00:01,  4.16it/s]Processing training data:  93%|###########1| 67/72 [00:10<00:01,  3.97it/s]Processing training data:  94%|###########3| 68/72 [00:11<00:01,  3.65it/s]Processing training data:  96%|###########5| 69/72 [00:11<00:00,  3.38it/s]Processing training data:  97%|###########6| 70/72 [00:12<00:00,  3.25it/s]Processing training data:  99%|###########8| 71/72 [00:12<00:00,  3.05it/s]Processing training data: 100%|############| 72/72 [00:12<00:00,  2.91it/s]Processing training data: 100%|############| 72/72 [00:12<00:00,  5.57it/s]
+2025-11-20 13:07:55,403 - INFO - Computing normalization statistics from training data...
+2025-11-20 13:07:55,534 - INFO - Normalization stats computed:
+2025-11-20 13:07:55,535 - INFO -   Mean: 0.263798
+2025-11-20 13:07:55,535 - INFO -   Std: 2.117137
+2025-11-20 13:07:55,535 - INFO -   Saved to: preprocessing\checkpoints\chb11_fold2\normalization_stats.json
+2025-11-20 13:07:55,550 - INFO - Applying normalization and saving 72 training sequences...
+Normalizing and saving training data:   0%|         | 0/72 [00:00<?, ?it/s]2025-11-20 13:07:55,561 - INFO - Creating new HDF5 file or datasets in: preprocessing\data\chb11_fold2\train_dataset.h5
+Normalizing and saving training data:  14%|1| 10/72 [00:00<00:03, 15.93it/sNormalizing and saving training data:  28%|2| 20/72 [00:01<00:03, 15.99it/sNormalizing and saving training data:  42%|4| 30/72 [00:01<00:02, 16.16it/sNormalizing and saving training data:  56%|5| 40/72 [00:02<00:01, 16.26it/sNormalizing and saving training data:  69%|6| 50/72 [00:03<00:01, 16.31it/sNormalizing and saving training data:  83%|8| 60/72 [00:03<00:00, 16.26it/sNormalizing and saving training data:  97%|9| 70/72 [00:04<00:00, 16.28it/sNormalizing and saving training data: 100%|#| 72/72 [00:04<00:00, 16.69it/s
+2025-11-20 13:08:00,016 - INFO - Training data processing completed during stats computation phase
+2025-11-20 13:08:00,023 - INFO - Loaded normalization statistics:
+2025-11-20 13:08:00,023 - INFO -   Mean: 0.263798
+2025-11-20 13:08:00,023 - INFO -   Std: 2.117137
+2025-11-20 13:08:00,023 - INFO - Split train already completed, skipping
+2025-11-20 13:08:00,023 - INFO - Processing test split...
+2025-11-20 13:08:00,023 - INFO - Need to process 46/46 sequences for test
+2025-11-20 13:08:00,023 - INFO - Processing 46 sequences from 16 unique files
+2025-11-20 13:08:00,023 - INFO - Average 2.9 sequences per file
+Processing test:   0%|                              | 0/46 [00:00<?, ?it/s]Processing test:   2%|4                     | 1/46 [00:00<00:26,  1.72it/s]Processing test:   7%|#4                    | 3/46 [00:02<00:33,  1.30it/s]Processing test:  11%|##3                   | 5/46 [00:02<00:22,  1.82it/s]2025-11-20 13:08:02,956 - INFO - Creating new HDF5 file or datasets in: preprocessing\data\chb11_fold2\test_dataset.h5
+2025-11-20 13:08:04,567 - INFO - Progress: 99/118 (83.9%) - ETA: 0.1 minutes
+Processing test:  61%|############7        | 28/46 [00:05<00:02,  6.01it/s]Processing test:  67%|##############1      | 31/46 [00:06<00:02,  6.19it/s]Processing test:  70%|##############6      | 32/46 [00:06<00:02,  5.80it/s]Processing test:  72%|###############      | 33/46 [00:06<00:02,  5.24it/s]Processing test:  74%|###############5     | 34/46 [00:07<00:02,  4.74it/s]Processing test:  76%|###############9     | 35/46 [00:08<00:04,  2.68it/s]2025-11-20 13:08:09,289 - INFO - Progress: 109/118 (92.4%) - ETA: 0.0 minutes
+Processing test:  83%|#################3   | 38/46 [00:09<00:02,  2.84it/s]Processing test:  85%|#################8   | 39/46 [00:10<00:02,  2.79it/s]Processing test:  87%|##################2  | 40/46 [00:10<00:02,  2.80it/s]Processing test:  89%|##################7  | 41/46 [00:10<00:01,  2.75it/s]Processing test:  91%|###################1 | 42/46 [00:11<00:01,  2.05it/s]Processing test:  96%|#################### | 44/46 [00:13<00:01,  1.77it/s]Processing test: 100%|#####################| 46/46 [00:13<00:00,  2.35it/s]Processing test: 100%|#####################| 46/46 [00:13<00:00,  3.44it/s]
+2025-11-20 13:08:13,981 - INFO - Validating final datasets...
+2025-11-20 13:08:13,989 - INFO - train dataset validation:
+2025-11-20 13:08:13,989 - INFO -   - Segments: 72
+2025-11-20 13:08:13,989 - INFO -   - Spectrogram shape: (30, 18, 50, 10)
+2025-11-20 13:08:13,989 - INFO -   - Classes: 36 preictal, 36 interictal
+2025-11-20 13:08:13,989 - INFO -   - Balance: 50.0% preictal
+2025-11-20 13:08:13,995 - INFO - test dataset validation:
+2025-11-20 13:08:13,995 - INFO -   - Segments: 46
+2025-11-20 13:08:13,995 - INFO -   - Spectrogram shape: (30, 18, 50, 10)
+2025-11-20 13:08:13,995 - INFO -   - Classes: 23 preictal, 23 interictal
+2025-11-20 13:08:13,995 - INFO -   - Balance: 50.0% preictal
+2025-11-20 13:08:13,995 - INFO - ============================================================
+2025-11-20 13:08:13,995 - INFO - PREPROCESSING COMPLETED SUCCESSFULLY
+2025-11-20 13:08:13,995 - INFO - Total time: 0.5 minutes
+2025-11-20 13:08:13,995 - INFO - Processed segments: 118
+2025-11-20 13:08:13,995 - INFO - Average rate: 3.7 segments/second
+2025-11-20 13:08:13,995 - INFO - ============================================================
+✅ Fold 2 preprocessing completed successfully!
+
+============================================================
+✅ BATCH PREPROCESSING COMPLETED!
+✅ Processed 3 folds for patient chb11
+============================================================
+============================================================
+BATCH PROCESSING: ALL FOLDS
+Processing 3 folds for patient chb11
+============================================================
+
+============================================================
+TRAINING FOLD 0/2
+============================================================
+Using dataset prefix: chb11_fold0
+Loading datasets from: preprocessing\data\chb11_fold0
+Saving models to: model\chb11_fold0
+🚀 CUDA detected: NVIDIA GeForce RTX 3090 Ti
+Using device: cuda
+  - Normalization: z-score, mean=0.3155, std=2.1847
+Loaded train dataset: 94 samples
+  - Spectrogram shape: torch.Size([94, 30, 18, 50, 10])
+  - Value range: [-5.6372, 4.0697]
+  - Class distribution: tensor([47, 47])
+LOOCV Mode (Fold 0): No validation set, using training-only evaluation
+Model initialized with 41286914 parameters
+============================================================
+STARTING EEG SEIZURE PREDICTION TRAINING
+============================================================
+Task mode: PREDICTION (preictal vs interictal)
+LOOCV Mode: Fold None/2 (Test seizure: None)
+Note: No validation set in LOOCV mode
+Training for 5 epochs
+Batch size: 16
+Learning rate: 1e-05
+Device: cuda (NVIDIA GeForce RTX 3090 Ti)
+🚀 Using CUDA GPU - maximum performance!
+============================================================
+Training Epoch 1/5:   0%|                            | 0/6 [00:00<?, ?it/s]Training Epoch 1/5:   0%| | 0/6 [00:04<?, ?it/s, loss=0.6956, grad_norm=1.1Training Epoch 1/5:  17%|1| 1/6 [00:04<00:21,  4.25s/it, loss=0.6956, grad_Training Epoch 1/5:  17%|1| 1/6 [00:04<00:21,  4.25s/it, loss=0.7022, grad_Training Epoch 1/5:  33%|3| 2/6 [00:04<00:07,  1.82s/it, loss=0.7022, grad_Training Epoch 1/5:  33%|3| 2/6 [00:04<00:07,  1.82s/it, loss=0.6943, grad_Training Epoch 1/5:  50%|5| 3/6 [00:04<00:03,  1.04s/it, loss=0.6943, grad_Training Epoch 1/5:  50%|5| 3/6 [00:04<00:03,  1.04s/it, loss=0.6788, grad_Training Epoch 1/5:  67%|6| 4/6 [00:04<00:01,  1.48it/s, loss=0.6788, grad_Training Epoch 1/5:  67%|6| 4/6 [00:04<00:01,  1.48it/s, loss=0.6799, grad_Training Epoch 1/5:  83%|8| 5/6 [00:04<00:00,  2.12it/s, loss=0.6799, grad_Training Epoch 1/5:  83%|8| 5/6 [00:04<00:00,  2.12it/s, loss=0.6889, grad_Training Epoch 1/5: 100%|#| 6/6 [00:04<00:00,  2.89it/s, loss=0.6889, grad_Training Epoch 1/5: 100%|#| 6/6 [00:05<00:00,  1.10it/s, loss=0.6889, grad_
+
+Epoch 1/5 Complete (6.1s) [LR: 0.000010]
+Train - Loss: 0.6900, Acc: 0.5319, Precision: 0.5231, Recall: 0.7234, F1: 0.6071, AUC: 0.5749
+------------------------------------------------------------
+Training Epoch 2/5:   0%|                            | 0/6 [00:00<?, ?it/s]Training Epoch 2/5:   0%| | 0/6 [00:04<?, ?it/s, loss=0.6710, grad_norm=1.1Training Epoch 2/5:  17%|1| 1/6 [00:04<00:21,  4.37s/it, loss=0.6710, grad_Training Epoch 2/5:  17%|1| 1/6 [00:04<00:21,  4.37s/it, loss=0.6766, grad_Training Epoch 2/5:  33%|3| 2/6 [00:04<00:07,  1.88s/it, loss=0.6766, grad_Training Epoch 2/5:  33%|3| 2/6 [00:04<00:07,  1.88s/it, loss=0.6790, grad_Training Epoch 2/5:  50%|5| 3/6 [00:04<00:03,  1.08s/it, loss=0.6790, grad_Training Epoch 2/5:  50%|5| 3/6 [00:04<00:03,  1.08s/it, loss=0.6764, grad_Training Epoch 2/5:  67%|6| 4/6 [00:04<00:01,  1.42it/s, loss=0.6764, grad_Training Epoch 2/5:  67%|6| 4/6 [00:04<00:01,  1.42it/s, loss=0.6555, grad_Training Epoch 2/5:  83%|8| 5/6 [00:04<00:00,  2.02it/s, loss=0.6555, grad_Training Epoch 2/5:  83%|8| 5/6 [00:04<00:00,  2.02it/s, loss=0.6787, grad_Training Epoch 2/5: 100%|#| 6/6 [00:05<00:00,  1.05it/s, loss=0.6787, grad_
+
+Epoch 2/5 Complete (6.2s) [LR: 0.000010]
+Train - Loss: 0.6729, Acc: 0.7447, Precision: 0.7018, Recall: 0.8511, F1: 0.7692, AUC: 0.7687
+------------------------------------------------------------
+Training Epoch 3/5:   0%|                            | 0/6 [00:00<?, ?it/s]Training Epoch 3/5:   0%| | 0/6 [00:04<?, ?it/s, loss=0.6757, grad_norm=1.1Training Epoch 3/5:  17%|1| 1/6 [00:04<00:23,  4.62s/it, loss=0.6757, grad_Training Epoch 3/5:  17%|1| 1/6 [00:04<00:23,  4.62s/it, loss=0.6640, grad_Training Epoch 3/5:  33%|3| 2/6 [00:04<00:07,  1.97s/it, loss=0.6640, grad_Training Epoch 3/5:  33%|3| 2/6 [00:04<00:07,  1.97s/it, loss=0.6550, grad_Training Epoch 3/5:  50%|5| 3/6 [00:04<00:03,  1.14s/it, loss=0.6550, grad_Training Epoch 3/5:  50%|5| 3/6 [00:05<00:03,  1.14s/it, loss=0.6559, grad_Training Epoch 3/5:  67%|6| 4/6 [00:05<00:01,  1.34it/s, loss=0.6559, grad_Training Epoch 3/5:  67%|6| 4/6 [00:05<00:01,  1.34it/s, loss=0.6556, grad_Training Epoch 3/5:  83%|8| 5/6 [00:05<00:00,  1.93it/s, loss=0.6556, grad_Training Epoch 3/5:  83%|8| 5/6 [00:05<00:00,  1.93it/s, loss=0.6295, grad_Training Epoch 3/5: 100%|#| 6/6 [00:05<00:00,  2.65it/s, loss=0.6295, grad_Training Epoch 3/5: 100%|#| 6/6 [00:05<00:00,  1.03it/s, loss=0.6295, grad_
+
+Epoch 3/5 Complete (6.2s) [LR: 0.000010]
+Train - Loss: 0.6560, Acc: 0.7660, Precision: 0.7660, Recall: 0.7660, F1: 0.7660, AUC: 0.8470
+------------------------------------------------------------
+Training Epoch 4/5:   0%|                            | 0/6 [00:00<?, ?it/s]Training Epoch 4/5:   0%| | 0/6 [00:04<?, ?it/s, loss=0.6326, grad_norm=1.2Training Epoch 4/5:  17%|1| 1/6 [00:04<00:21,  4.37s/it, loss=0.6326, grad_Training Epoch 4/5:  17%|1| 1/6 [00:04<00:21,  4.37s/it, loss=0.6385, grad_Training Epoch 4/5:  33%|3| 2/6 [00:04<00:07,  1.88s/it, loss=0.6385, grad_Training Epoch 4/5:  33%|3| 2/6 [00:04<00:07,  1.88s/it, loss=0.6230, grad_Training Epoch 4/5:  50%|5| 3/6 [00:04<00:03,  1.09s/it, loss=0.6230, grad_Training Epoch 4/5:  50%|5| 3/6 [00:04<00:03,  1.09s/it, loss=0.6263, grad_Training Epoch 4/5:  67%|6| 4/6 [00:04<00:01,  1.41it/s, loss=0.6263, grad_Training Epoch 4/5:  67%|6| 4/6 [00:04<00:01,  1.41it/s, loss=0.6572, grad_Training Epoch 4/5:  83%|8| 5/6 [00:04<00:00,  1.98it/s, loss=0.6572, grad_Training Epoch 4/5:  83%|8| 5/6 [00:05<00:00,  1.98it/s, loss=0.6135, grad_Training Epoch 4/5: 100%|#| 6/6 [00:05<00:00,  2.67it/s, loss=0.6135, grad_Training Epoch 4/5: 100%|#| 6/6 [00:05<00:00,  1.03it/s, loss=0.6135, grad_
+
+Epoch 4/5 Complete (6.8s) [LR: 0.000010]
+Train - Loss: 0.6319, Acc: 0.7979, Precision: 0.7800, Recall: 0.8298, F1: 0.8041, AUC: 0.9072
+------------------------------------------------------------
+Training Epoch 5/5:   0%|                            | 0/6 [00:00<?, ?it/s]Training Epoch 5/5:   0%| | 0/6 [00:06<?, ?it/s, loss=0.6105, grad_norm=1.2Training Epoch 5/5:  17%|1| 1/6 [00:06<00:31,  6.29s/it, loss=0.6105, grad_Training Epoch 5/5:  17%|1| 1/6 [00:06<00:31,  6.29s/it, loss=0.5929, grad_Training Epoch 5/5:  33%|3| 2/6 [00:06<00:11,  2.78s/it, loss=0.5929, grad_Training Epoch 5/5:  33%|3| 2/6 [00:06<00:11,  2.78s/it, loss=0.5801, grad_Training Epoch 5/5:  50%|5| 3/6 [00:06<00:04,  1.66s/it, loss=0.5801, grad_Training Epoch 5/5:  50%|5| 3/6 [00:07<00:04,  1.66s/it, loss=0.5935, grad_Training Epoch 5/5:  67%|6| 4/6 [00:07<00:02,  1.13s/it, loss=0.5935, grad_Training Epoch 5/5:  67%|6| 4/6 [00:07<00:02,  1.13s/it, loss=0.5922, grad_Training Epoch 5/5:  83%|8| 5/6 [00:07<00:00,  1.19it/s, loss=0.5922, grad_Training Epoch 5/5:  83%|8| 5/6 [00:07<00:00,  1.19it/s, loss=0.6267, grad_Training Epoch 5/5: 100%|#| 6/6 [00:07<00:00,  1.54it/s, loss=0.6267, grad_Training Epoch 5/5: 100%|#| 6/6 [00:08<00:00,  1.42s/it, loss=0.6267, grad_
+
+Epoch 5/5 Complete (8.9s) [LR: 0.000005]
+Train - Loss: 0.5993, Acc: 0.8830, Precision: 0.8462, Recall: 0.9362, F1: 0.8889, AUC: 0.9538
+------------------------------------------------------------
+Training curves saved to model\chb11_fold0\training_curves.png
+============================================================
+TRAINING COMPLETED!
+Total training time: 0.6 minutes
+Models saved in: model\chb11_fold0
+============================================================
+✅ Fold 0 training completed successfully!
+
+============================================================
+TRAINING FOLD 1/2
+============================================================
+Using dataset prefix: chb11_fold1
+Loading datasets from: preprocessing\data\chb11_fold1
+Saving models to: model\chb11_fold1
+🚀 CUDA detected: NVIDIA GeForce RTX 3090 Ti
+Using device: cuda
+  - Normalization: z-score, mean=0.2433, std=2.1387
+Loaded train dataset: 70 samples
+  - Spectrogram shape: torch.Size([70, 30, 18, 50, 10])
+  - Value range: [-5.7240, 3.9253]
+  - Class distribution: tensor([35, 35])
+LOOCV Mode (Fold 1): No validation set, using training-only evaluation
+Model initialized with 41286914 parameters
+============================================================
+STARTING EEG SEIZURE PREDICTION TRAINING
+============================================================
+Task mode: PREDICTION (preictal vs interictal)
+LOOCV Mode: Fold None/2 (Test seizure: None)
+Note: No validation set in LOOCV mode
+Training for 5 epochs
+Batch size: 16
+Learning rate: 1e-05
+Device: cuda (NVIDIA GeForce RTX 3090 Ti)
+🚀 Using CUDA GPU - maximum performance!
+============================================================
+Training Epoch 1/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 1/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6942, grad_norm=1.1Training Epoch 1/5:  20%|2| 1/5 [00:04<00:18,  4.67s/it, loss=0.6942, grad_Training Epoch 1/5:  20%|2| 1/5 [00:04<00:18,  4.67s/it, loss=0.6979, grad_Training Epoch 1/5:  40%|4| 2/5 [00:04<00:06,  2.09s/it, loss=0.6979, grad_Training Epoch 1/5:  40%|4| 2/5 [00:05<00:06,  2.09s/it, loss=0.6832, grad_Training Epoch 1/5:  60%|6| 3/5 [00:05<00:02,  1.27s/it, loss=0.6832, grad_Training Epoch 1/5:  60%|6| 3/5 [00:05<00:02,  1.27s/it, loss=0.6898, grad_Training Epoch 1/5:  80%|8| 4/5 [00:05<00:00,  1.12it/s, loss=0.6898, grad_Training Epoch 1/5:  80%|8| 4/5 [00:05<00:00,  1.12it/s, loss=0.6815, grad_Training Epoch 1/5: 100%|#| 5/5 [00:05<00:00,  1.61it/s, loss=0.6815, grad_Training Epoch 1/5: 100%|#| 5/5 [00:06<00:00,  1.28s/it, loss=0.6815, grad_
+
+Epoch 1/5 Complete (6.8s) [LR: 0.000010]
+Train - Loss: 0.6893, Acc: 0.5143, Precision: 0.5135, Recall: 0.5429, F1: 0.5278, AUC: 0.5731
+------------------------------------------------------------
+Training Epoch 2/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 2/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6836, grad_norm=1.1Training Epoch 2/5:  20%|2| 1/5 [00:04<00:18,  4.54s/it, loss=0.6836, grad_Training Epoch 2/5:  20%|2| 1/5 [00:04<00:18,  4.54s/it, loss=0.6933, grad_Training Epoch 2/5:  40%|4| 2/5 [00:04<00:06,  2.05s/it, loss=0.6933, grad_Training Epoch 2/5:  40%|4| 2/5 [00:05<00:06,  2.05s/it, loss=0.6932, grad_Training Epoch 2/5:  60%|6| 3/5 [00:05<00:02,  1.24s/it, loss=0.6932, grad_Training Epoch 2/5:  60%|6| 3/5 [00:05<00:02,  1.24s/it, loss=0.6754, grad_Training Epoch 2/5:  80%|8| 4/5 [00:05<00:00,  1.15it/s, loss=0.6754, grad_Training Epoch 2/5:  80%|8| 4/5 [00:05<00:00,  1.15it/s, loss=0.6968, grad_Training Epoch 2/5: 100%|#| 5/5 [00:05<00:00,  1.65it/s, loss=0.6968, grad_Training Epoch 2/5: 100%|#| 5/5 [00:06<00:00,  1.24s/it, loss=0.6968, grad_
+
+Epoch 2/5 Complete (6.6s) [LR: 0.000010]
+Train - Loss: 0.6885, Acc: 0.5429, Precision: 0.5385, Recall: 0.6000, F1: 0.5676, AUC: 0.6147
+------------------------------------------------------------
+Training Epoch 3/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 3/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6765, grad_norm=1.0Training Epoch 3/5:  20%|2| 1/5 [00:04<00:18,  4.51s/it, loss=0.6765, grad_Training Epoch 3/5:  20%|2| 1/5 [00:04<00:18,  4.51s/it, loss=0.6775, grad_Training Epoch 3/5:  40%|4| 2/5 [00:04<00:06,  2.03s/it, loss=0.6775, grad_Training Epoch 3/5:  40%|4| 2/5 [00:05<00:06,  2.03s/it, loss=0.6790, grad_Training Epoch 3/5:  60%|6| 3/5 [00:05<00:02,  1.23s/it, loss=0.6790, grad_Training Epoch 3/5:  60%|6| 3/5 [00:05<00:02,  1.23s/it, loss=0.6678, grad_Training Epoch 3/5:  80%|8| 4/5 [00:05<00:00,  1.16it/s, loss=0.6678, grad_Training Epoch 3/5:  80%|8| 4/5 [00:05<00:00,  1.16it/s, loss=0.7035, grad_Training Epoch 3/5: 100%|#| 5/5 [00:05<00:00,  1.66it/s, loss=0.7035, grad_Training Epoch 3/5: 100%|#| 5/5 [00:06<00:00,  1.24s/it, loss=0.7035, grad_
+
+Epoch 3/5 Complete (6.6s) [LR: 0.000010]
+Train - Loss: 0.6809, Acc: 0.6714, Precision: 0.6765, Recall: 0.6571, F1: 0.6667, AUC: 0.7404
+------------------------------------------------------------
+Training Epoch 4/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 4/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6695, grad_norm=1.1Training Epoch 4/5:  20%|2| 1/5 [00:04<00:16,  4.25s/it, loss=0.6695, grad_Training Epoch 4/5:  20%|2| 1/5 [00:04<00:16,  4.25s/it, loss=0.6718, grad_Training Epoch 4/5:  40%|4| 2/5 [00:04<00:05,  1.82s/it, loss=0.6718, grad_Training Epoch 4/5:  40%|4| 2/5 [00:04<00:05,  1.82s/it, loss=0.6629, grad_Training Epoch 4/5:  60%|6| 3/5 [00:04<00:02,  1.05s/it, loss=0.6629, grad_Training Epoch 4/5:  60%|6| 3/5 [00:04<00:02,  1.05s/it, loss=0.6433, grad_Training Epoch 4/5:  80%|8| 4/5 [00:04<00:00,  1.44it/s, loss=0.6433, grad_Training Epoch 4/5:  80%|8| 4/5 [00:04<00:00,  1.44it/s, loss=0.6862, grad_Training Epoch 4/5: 100%|#| 5/5 [00:05<00:00,  1.08s/it, loss=0.6862, grad_
+
+Epoch 4/5 Complete (5.8s) [LR: 0.000010]
+Train - Loss: 0.6667, Acc: 0.8429, Precision: 0.9000, Recall: 0.7714, F1: 0.8308, AUC: 0.8710
+------------------------------------------------------------
+Training Epoch 5/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 5/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6513, grad_norm=1.1Training Epoch 5/5:  20%|2| 1/5 [00:04<00:18,  4.71s/it, loss=0.6513, grad_Training Epoch 5/5:  20%|2| 1/5 [00:04<00:18,  4.71s/it, loss=0.6658, grad_Training Epoch 5/5:  40%|4| 2/5 [00:04<00:06,  2.06s/it, loss=0.6658, grad_Training Epoch 5/5:  40%|4| 2/5 [00:05<00:06,  2.06s/it, loss=0.6576, grad_Training Epoch 5/5:  60%|6| 3/5 [00:05<00:02,  1.22s/it, loss=0.6576, grad_Training Epoch 5/5:  60%|6| 3/5 [00:05<00:02,  1.22s/it, loss=0.6634, grad_Training Epoch 5/5:  80%|8| 4/5 [00:05<00:00,  1.21it/s, loss=0.6634, grad_Training Epoch 5/5:  80%|8| 4/5 [00:05<00:00,  1.21it/s, loss=0.6594, grad_Training Epoch 5/5: 100%|#| 5/5 [00:06<00:00,  1.23s/it, loss=0.6594, grad_
+
+Epoch 5/5 Complete (6.7s) [LR: 0.000005]
+Train - Loss: 0.6595, Acc: 0.8000, Precision: 0.9200, Recall: 0.6571, F1: 0.7667, AUC: 0.8857
+------------------------------------------------------------
+Training curves saved to model\chb11_fold1\training_curves.png
+============================================================
+TRAINING COMPLETED!
+Total training time: 0.5 minutes
+Models saved in: model\chb11_fold1
+============================================================
+✅ Fold 1 training completed successfully!
+
+============================================================
+TRAINING FOLD 2/2
+============================================================
+Using dataset prefix: chb11_fold2
+Loading datasets from: preprocessing\data\chb11_fold2
+Saving models to: model\chb11_fold2
+🚀 CUDA detected: NVIDIA GeForce RTX 3090 Ti
+Using device: cuda
+  - Normalization: z-score, mean=0.2638, std=2.1171
+Loaded train dataset: 72 samples
+  - Spectrogram shape: torch.Size([72, 30, 18, 50, 10])
+  - Value range: [-5.7926, 4.2023]
+  - Class distribution: tensor([36, 36])
+LOOCV Mode (Fold 2): No validation set, using training-only evaluation
+Model initialized with 41286914 parameters
+============================================================
+STARTING EEG SEIZURE PREDICTION TRAINING
+============================================================
+Task mode: PREDICTION (preictal vs interictal)
+LOOCV Mode: Fold None/2 (Test seizure: None)
+Note: No validation set in LOOCV mode
+Training for 5 epochs
+Batch size: 16
+Learning rate: 1e-05
+Device: cuda (NVIDIA GeForce RTX 3090 Ti)
+🚀 Using CUDA GPU - maximum performance!
+============================================================
+Training Epoch 1/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 1/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6999, grad_norm=1.2Training Epoch 1/5:  20%|2| 1/5 [00:04<00:18,  4.54s/it, loss=0.6999, grad_Training Epoch 1/5:  20%|2| 1/5 [00:04<00:18,  4.54s/it, loss=0.7033, grad_Training Epoch 1/5:  40%|4| 2/5 [00:04<00:06,  2.13s/it, loss=0.7033, grad_Training Epoch 1/5:  40%|4| 2/5 [00:05<00:06,  2.13s/it, loss=0.6997, grad_Training Epoch 1/5:  60%|6| 3/5 [00:05<00:02,  1.35s/it, loss=0.6997, grad_Training Epoch 1/5:  60%|6| 3/5 [00:05<00:02,  1.35s/it, loss=0.6864, grad_Training Epoch 1/5:  80%|8| 4/5 [00:05<00:00,  1.01it/s, loss=0.6864, grad_Training Epoch 1/5:  80%|8| 4/5 [00:06<00:00,  1.01it/s, loss=0.7004, grad_Training Epoch 1/5: 100%|#| 5/5 [00:06<00:00,  1.38it/s, loss=0.7004, grad_Training Epoch 1/5: 100%|#| 5/5 [00:06<00:00,  1.36s/it, loss=0.7004, grad_
+
+Epoch 1/5 Complete (7.2s) [LR: 0.000010]
+Train - Loss: 0.6979, Acc: 0.4028, Precision: 0.3600, Recall: 0.2500, F1: 0.2951, AUC: 0.3881
+------------------------------------------------------------
+Training Epoch 2/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 2/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6718, grad_norm=1.1Training Epoch 2/5:  20%|2| 1/5 [00:04<00:18,  4.54s/it, loss=0.6718, grad_Training Epoch 2/5:  20%|2| 1/5 [00:04<00:18,  4.54s/it, loss=0.6749, grad_Training Epoch 2/5:  40%|4| 2/5 [00:04<00:06,  2.06s/it, loss=0.6749, grad_Training Epoch 2/5:  40%|4| 2/5 [00:05<00:06,  2.06s/it, loss=0.6744, grad_Training Epoch 2/5:  60%|6| 3/5 [00:05<00:02,  1.28s/it, loss=0.6744, grad_Training Epoch 2/5:  60%|6| 3/5 [00:05<00:02,  1.28s/it, loss=0.6803, grad_Training Epoch 2/5:  80%|8| 4/5 [00:05<00:00,  1.08it/s, loss=0.6803, grad_Training Epoch 2/5:  80%|8| 4/5 [00:05<00:00,  1.08it/s, loss=0.7116, grad_Training Epoch 2/5: 100%|#| 5/5 [00:06<00:00,  1.26s/it, loss=0.7116, grad_
+
+Epoch 2/5 Complete (6.7s) [LR: 0.000010]
+Train - Loss: 0.6826, Acc: 0.6528, Precision: 0.7391, Recall: 0.4722, F1: 0.5763, AUC: 0.7616
+------------------------------------------------------------
+Training Epoch 3/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 3/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6825, grad_norm=1.2Training Epoch 3/5:  20%|2| 1/5 [00:04<00:16,  4.14s/it, loss=0.6825, grad_Training Epoch 3/5:  20%|2| 1/5 [00:04<00:16,  4.14s/it, loss=0.6749, grad_Training Epoch 3/5:  40%|4| 2/5 [00:04<00:05,  1.81s/it, loss=0.6749, grad_Training Epoch 3/5:  40%|4| 2/5 [00:04<00:05,  1.81s/it, loss=0.6763, grad_Training Epoch 3/5:  60%|6| 3/5 [00:04<00:02,  1.07s/it, loss=0.6763, grad_Training Epoch 3/5:  60%|6| 3/5 [00:04<00:02,  1.07s/it, loss=0.6889, grad_Training Epoch 3/5:  80%|8| 4/5 [00:04<00:00,  1.37it/s, loss=0.6889, grad_Training Epoch 3/5:  80%|8| 4/5 [00:04<00:00,  1.37it/s, loss=0.6806, grad_Training Epoch 3/5: 100%|#| 5/5 [00:04<00:00,  1.95it/s, loss=0.6806, grad_Training Epoch 3/5: 100%|#| 5/5 [00:05<00:00,  1.09s/it, loss=0.6806, grad_
+
+Epoch 3/5 Complete (5.9s) [LR: 0.000010]
+Train - Loss: 0.6806, Acc: 0.6389, Precision: 0.6786, Recall: 0.5278, F1: 0.5938, AUC: 0.7145
+------------------------------------------------------------
+Training Epoch 4/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 4/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6738, grad_norm=1.1Training Epoch 4/5:  20%|2| 1/5 [00:04<00:17,  4.44s/it, loss=0.6738, grad_Training Epoch 4/5:  20%|2| 1/5 [00:04<00:17,  4.44s/it, loss=0.6722, grad_Training Epoch 4/5:  40%|4| 2/5 [00:04<00:06,  2.06s/it, loss=0.6722, grad_Training Epoch 4/5:  40%|4| 2/5 [00:05<00:06,  2.06s/it, loss=0.6668, grad_Training Epoch 4/5:  60%|6| 3/5 [00:05<00:02,  1.29s/it, loss=0.6668, grad_Training Epoch 4/5:  60%|6| 3/5 [00:05<00:02,  1.29s/it, loss=0.6912, grad_Training Epoch 4/5:  80%|8| 4/5 [00:05<00:00,  1.09it/s, loss=0.6912, grad_Training Epoch 4/5:  80%|8| 4/5 [00:05<00:00,  1.09it/s, loss=0.6712, grad_Training Epoch 4/5: 100%|#| 5/5 [00:05<00:00,  1.49it/s, loss=0.6712, grad_Training Epoch 4/5: 100%|#| 5/5 [00:06<00:00,  1.30s/it, loss=0.6712, grad_
+
+Epoch 4/5 Complete (6.9s) [LR: 0.000010]
+Train - Loss: 0.6750, Acc: 0.7222, Precision: 0.7000, Recall: 0.7778, F1: 0.7368, AUC: 0.7917
+------------------------------------------------------------
+Training Epoch 5/5:   0%|                            | 0/5 [00:00<?, ?it/s]Training Epoch 5/5:   0%| | 0/5 [00:04<?, ?it/s, loss=0.6538, grad_norm=1.1Training Epoch 5/5:  20%|2| 1/5 [00:04<00:18,  4.56s/it, loss=0.6538, grad_Training Epoch 5/5:  20%|2| 1/5 [00:04<00:18,  4.56s/it, loss=0.6451, grad_Training Epoch 5/5:  40%|4| 2/5 [00:04<00:06,  2.11s/it, loss=0.6451, grad_Training Epoch 5/5:  40%|4| 2/5 [00:05<00:06,  2.11s/it, loss=0.6720, grad_Training Epoch 5/5:  60%|6| 3/5 [00:05<00:02,  1.32s/it, loss=0.6720, grad_Training Epoch 5/5:  60%|6| 3/5 [00:05<00:02,  1.32s/it, loss=0.6360, grad_Training Epoch 5/5:  80%|8| 4/5 [00:05<00:00,  1.07it/s, loss=0.6360, grad_Training Epoch 5/5:  80%|8| 4/5 [00:05<00:00,  1.07it/s, loss=0.6269, grad_Training Epoch 5/5: 100%|#| 5/5 [00:05<00:00,  1.47it/s, loss=0.6269, grad_Training Epoch 5/5: 100%|#| 5/5 [00:06<00:00,  1.33s/it, loss=0.6269, grad_
+
+Epoch 5/5 Complete (7.0s) [LR: 0.000005]
+Train - Loss: 0.6468, Acc: 0.8611, Precision: 0.8095, Recall: 0.9444, F1: 0.8718, AUC: 0.9097
+------------------------------------------------------------
+Training curves saved to model\chb11_fold2\training_curves.png
+============================================================
+TRAINING COMPLETED!
+Total training time: 0.6 minutes
+Models saved in: model\chb11_fold2
+============================================================
+✅ Fold 2 training completed successfully!
+
+============================================================
+✅ BATCH TRAINING COMPLETED!
+✅ Trained models for 3 folds for patient chb11
+============================================================
+============================================================
+============================================================
+BATCH EVALUATION: ALL FOLDS
+BATCH EVALUATION: ALL FOLDS
+Evaluating 3 folds for patient chb11
+Evaluating 3 folds for patient chb11
+============================================================
+============================================================
+Using CUDA: NVIDIA GeForce RTX 3090 Ti
+Using CUDA: NVIDIA GeForce RTX 3090 Ti
+
+============================================================
+============================================================
+
+EVALUATING FOLD 0/2
+EVALUATING FOLD 0/2
+============================================================
+============================================================
+Evaluating model from epoch 5
+Evaluating model from epoch 5
+Dataset prefix: chb11_fold0
+Dataset prefix: chb11_fold0
+Using test dataset: preprocessing\data\chb11_fold0\test_dataset.h5
+Using test dataset: preprocessing\data\chb11_fold0\test_dataset.h5
+Loading test dataset from preprocessing\data\chb11_fold0\test_dataset.h5...
+Loading test dataset from preprocessing\data\chb11_fold0\test_dataset.h5...
+  - Normalization: z-score, mean=0.3155, std=2.1847
+  - Normalization: z-score, mean=0.3155, std=2.1847
+Loaded test dataset: 24 samples
+Loaded test dataset: 24 samples
+  - Spectrogram shape: torch.Size([24, 30, 18, 50, 10])
+  - Spectrogram shape: torch.Size([24, 30, 18, 50, 10])
+  - Value range: [-5.6372, 3.7924]
+  - Value range: [-5.6372, 3.7924]
+  - Class distribution: tensor([12, 12])
+  - Class distribution: tensor([12, 12])
+Initializing Deep CNN-BiLSTM model...
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model\chb11_fold0\epoch_005.pth...
+Loading model checkpoint from model\chb11_fold0\epoch_005.pth...
+Model loaded from epoch 4
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Evaluating on test set...
+
+Testing:   0%|                                       | 0/2 [00:00<?, ?it/s]Testing:   0%|                                       | 0/2 [00:00<?, ?it/s]Testing:  50%|###############5               | 1/2 [00:00<00:00,  4.70it/s]Testing:  50%|###############5               | 1/2 [00:00<00:00,  4.70it/s]Testing: 100%|###############################| 2/2 [00:00<00:00,  8.22it/s]Testing: 100%|###############################| 2/2 [00:00<00:00,  8.22it/s]
+
+
+============================================================
+============================================================
+
+FOLD TEST RESULTS
+FOLD TEST RESULTS
+============================================================
+============================================================
+Loss:      0.6329
+Loss:      0.6329
+Accuracy:  0.9583 (95.83%)
+Accuracy:  0.9583 (95.83%)
+Precision: 0.9231
+Precision: 0.9231
+Recall:    1.0000
+Recall:    1.0000
+F1 Score:  0.9600
+F1 Score:  0.9600
+AUC-ROC:   0.9792
+AUC-ROC:   0.9792
+
+Confusion Matrix:
+Confusion Matrix:
+
+                Predicted
+                Predicted
+                Interictal  Preictal
+                Interictal  Preictal
+Actual Interictal        11         1
+Actual Interictal        11         1
+       Preictal         0        12
+       Preictal         0        12
+
+Class Distribution:
+Class Distribution:
+
+True Interictal (0): 12 samples
+True Interictal (0): 12 samples
+True Preictal (1):   12 samples
+True Preictal (1):   12 samples
+Pred Interictal (0): 11 samples
+Pred Interictal (0): 11 samples
+Pred Preictal (1):   13 samples
+Pred Preictal (1):   13 samples
+
+Detailed Classification Report:
+Detailed Classification Report:
+
+              precision    recall  f1-score   support
+
+  Interictal     1.0000    0.9167    0.9565        12
+    Preictal     0.9231    1.0000    0.9600        12
+
+    accuracy                         0.9583        24
+   macro avg     0.9615    0.9583    0.9583        24
+weighted avg     0.9615    0.9583    0.9583        24
+              precision    recall  f1-score   support
+
+  Interictal     1.0000    0.9167    0.9565        12
+    Preictal     0.9231    1.0000    0.9600        12
+
+    accuracy                         0.9583        24
+   macro avg     0.9615    0.9583    0.9583        24
+weighted avg     0.9615    0.9583    0.9583        24
+
+
+
+✅ Results saved to model\chb11_fold0\test_results.json
+✅ Results saved to model\chb11_fold0\test_results.json
+
+
+============================================================
+============================================================
+
+EVALUATING FOLD 1/2
+EVALUATING FOLD 1/2
+============================================================
+============================================================
+Evaluating model from epoch 5
+Evaluating model from epoch 5
+Dataset prefix: chb11_fold1
+Dataset prefix: chb11_fold1
+Using test dataset: preprocessing\data\chb11_fold1\test_dataset.h5
+Using test dataset: preprocessing\data\chb11_fold1\test_dataset.h5
+Loading test dataset from preprocessing\data\chb11_fold1\test_dataset.h5...
+Loading test dataset from preprocessing\data\chb11_fold1\test_dataset.h5...
+  - Normalization: z-score, mean=0.2433, std=2.1387
+  - Normalization: z-score, mean=0.2433, std=2.1387
+Loaded test dataset: 48 samples
+Loaded test dataset: 48 samples
+  - Spectrogram shape: torch.Size([48, 30, 18, 50, 10])
+  - Spectrogram shape: torch.Size([48, 30, 18, 50, 10])
+  - Value range: [-5.7238, 3.8568]
+  - Value range: [-5.7238, 3.8568]
+  - Class distribution: tensor([24, 24])
+  - Class distribution: tensor([24, 24])
+Initializing Deep CNN-BiLSTM model...
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model\chb11_fold1\epoch_005.pth...
+Loading model checkpoint from model\chb11_fold1\epoch_005.pth...
+Model loaded from epoch 4
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Evaluating on test set...
+
+Testing:   0%|                                       | 0/3 [00:00<?, ?it/s]Testing:   0%|                                       | 0/3 [00:00<?, ?it/s]Testing: 100%|###############################| 3/3 [00:00<00:00, 26.30it/s]Testing: 100%|###############################| 3/3 [00:00<00:00, 26.30it/s]Testing: 100%|###############################| 3/3 [00:00<00:00, 26.22it/s]Testing: 100%|###############################| 3/3 [00:00<00:00, 26.22it/s]
+
+
+============================================================
+============================================================
+
+FOLD TEST RESULTS
+FOLD TEST RESULTS
+============================================================
+============================================================
+Loss:      0.6898
+Loss:      0.6898
+Accuracy:  0.5000 (50.00%)
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Precision: 0.0000
+Recall:    0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.9080
+AUC-ROC:   0.9080
+
+Confusion Matrix:
+Confusion Matrix:
+
+                Predicted
+                Predicted
+                Interictal  Preictal
+                Interictal  Preictal
+Actual Interictal        24         0
+Actual Interictal        24         0
+       Preictal        24         0
+       Preictal        24         0
+
+Class Distribution:
+Class Distribution:
+
+True Interictal (0): 24 samples
+True Interictal (0): 24 samples
+True Preictal (1):   24 samples
+True Preictal (1):   24 samples
+Pred Interictal (0): 48 samples
+Pred Interictal (0): 48 samples
+Pred Preictal (1):   0 samples
+Pred Preictal (1):   0 samples
+
+Detailed Classification Report:
+Detailed Classification Report:
+
+              precision    recall  f1-score   support
+
+  Interictal     0.5000    1.0000    0.6667        24
+    Preictal     0.0000    0.0000    0.0000        24
+
+    accuracy                         0.5000        48
+   macro avg     0.2500    0.5000    0.3333        48
+weighted avg     0.2500    0.5000    0.3333        48
+              precision    recall  f1-score   support
+
+  Interictal     0.5000    1.0000    0.6667        24
+    Preictal     0.0000    0.0000    0.0000        24
+
+    accuracy                         0.5000        48
+   macro avg     0.2500    0.5000    0.3333        48
+weighted avg     0.2500    0.5000    0.3333        48
+
+
+
+✅ Results saved to model\chb11_fold1\test_results.json
+✅ Results saved to model\chb11_fold1\test_results.json
+
+
+============================================================
+============================================================
+
+EVALUATING FOLD 2/2
+EVALUATING FOLD 2/2
+============================================================
+============================================================
+Evaluating model from epoch 5
+Evaluating model from epoch 5
+Dataset prefix: chb11_fold2
+Dataset prefix: chb11_fold2
+Using test dataset: preprocessing\data\chb11_fold2\test_dataset.h5
+Using test dataset: preprocessing\data\chb11_fold2\test_dataset.h5
+Loading test dataset from preprocessing\data\chb11_fold2\test_dataset.h5...
+Loading test dataset from preprocessing\data\chb11_fold2\test_dataset.h5...
+  - Normalization: z-score, mean=0.2638, std=2.1171
+  - Normalization: z-score, mean=0.2638, std=2.1171
+Loaded test dataset: 46 samples
+Loaded test dataset: 46 samples
+  - Spectrogram shape: torch.Size([46, 30, 18, 50, 10])
+  - Spectrogram shape: torch.Size([46, 30, 18, 50, 10])
+  - Value range: [-5.7919, 4.1663]
+  - Value range: [-5.7919, 4.1663]
+  - Class distribution: tensor([23, 23])
+  - Class distribution: tensor([23, 23])
+Initializing Deep CNN-BiLSTM model...
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model\chb11_fold2\epoch_005.pth...
+Loading model checkpoint from model\chb11_fold2\epoch_005.pth...
+Model loaded from epoch 4
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Evaluating on test set...
+
+Testing:   0%|                                       | 0/3 [00:00<?, ?it/s]Testing:   0%|                                       | 0/3 [00:00<?, ?it/s]Testing: 100%|###############################| 3/3 [00:00<00:00, 30.14it/s]Testing: 100%|###############################| 3/3 [00:00<00:00, 30.14it/s]
+
+
+============================================================
+============================================================
+
+FOLD TEST RESULTS
+FOLD TEST RESULTS
+============================================================
+============================================================
+Loss:      0.6910
+Loss:      0.6910
+Accuracy:  0.5000 (50.00%)
+Accuracy:  0.5000 (50.00%)
+Precision: 0.5000
+Precision: 0.5000
+Recall:    1.0000
+Recall:    1.0000
+F1 Score:  0.6667
+F1 Score:  0.6667
+AUC-ROC:   0.8658
+AUC-ROC:   0.8658
+
+Confusion Matrix:
+Confusion Matrix:
+
+                Predicted
+                Predicted
+                Interictal  Preictal
+                Interictal  Preictal
+Actual Interictal         0        23
+Actual Interictal         0        23
+       Preictal         0        23
+       Preictal         0        23
+
+Class Distribution:
+Class Distribution:
+
+True Interictal (0): 23 samples
+True Interictal (0): 23 samples
+True Preictal (1):   23 samples
+True Preictal (1):   23 samples
+Pred Interictal (0): 0 samples
+Pred Interictal (0): 0 samples
+Pred Preictal (1):   46 samples
+Pred Preictal (1):   46 samples
+
+Detailed Classification Report:
+Detailed Classification Report:
+
+              precision    recall  f1-score   support
+
+  Interictal     0.0000    0.0000    0.0000        23
+    Preictal     0.5000    1.0000    0.6667        23
+
+    accuracy                         0.5000        46
+   macro avg     0.2500    0.5000    0.3333        46
+weighted avg     0.2500    0.5000    0.3333        46
+              precision    recall  f1-score   support
+
+  Interictal     0.0000    0.0000    0.0000        23
+    Preictal     0.5000    1.0000    0.6667        23
+
+    accuracy                         0.5000        46
+   macro avg     0.2500    0.5000    0.3333        46
+weighted avg     0.2500    0.5000    0.3333        46
+
+
+
+✅ Results saved to model\chb11_fold2\test_results.json
+✅ Results saved to model\chb11_fold2\test_results.json
+
+
+============================================================
+============================================================
+
+BATCH EVALUATION SUMMARY
+BATCH EVALUATION SUMMARY
+============================================================
+============================================================
+Folds evaluated: 3/3
+Folds evaluated: 3/3
+
+Mean metrics (across folds):
+Mean metrics (across folds):
+
+  Accuracy:  0.6528 (±0.2161)
+  Accuracy:  0.6528 (±0.2161)
+  Precision: 0.4744 (±0.3773)
+  Precision: 0.4744 (±0.3773)
+  Recall:    0.6667 (±0.4714)
+  Recall:    0.6667 (±0.4714)
+  F1 Score:  0.5422 (±0.4017)
+  F1 Score:  0.5422 (±0.4017)
+  AUC-ROC:   0.9176 (±0.0468)
+  AUC-ROC:   0.9176 (±0.0468)
+
+✅ Batch results saved to model\batch_test_results.json
+✅ Batch results saved to model\batch_test_results.json
+
+============================================================
+============================================================

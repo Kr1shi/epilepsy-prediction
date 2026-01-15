@@ -355,10 +355,12 @@ class EEGCNNTrainer:
         # Use fold_config if provided, otherwise use global config
         if fold_config is not None:
             dataset_prefix = fold_config['output_prefix']
-            self.fold_id = fold_config['fold_id']
+            # LOPO config doesn't have fold_id, use test_patient_id instead
+            self.fold_id = fold_config.get('test_patient_id', fold_config.get('fold_id', 'unknown'))
         else:
-            dataset_prefix = OUTPUT_PREFIX
-            self.fold_id = LOOCV_FOLD_ID
+            # Fallback for when config is not set
+            dataset_prefix = OUTPUT_PREFIX if OUTPUT_PREFIX else 'unknown'
+            self.fold_id = 'unknown'
 
         # Setup directories (fold-specific)
         self.model_dir = Path("model") / dataset_prefix
@@ -375,9 +377,9 @@ class EEGCNNTrainer:
 
         # Load datasets
         self.train_loader = self._create_dataloader('train')
-        # LOOCV mode: no validation set
+        # LOPO mode: no validation set
         self.val_loader = None
-        print(f"LOOCV Mode (Fold {self.fold_id}): No validation set, using training-only evaluation")
+        print(f"LOPO Mode (Test Patient {self.fold_id}): No validation set, evaluating on test set only")
         
         # Initialize CNN-LSTM model with deep EEG-CNN backbone
         self.model = CNN_LSTM_Hybrid(
@@ -427,19 +429,6 @@ class EEGCNNTrainer:
             return "CPU"
     
     def _get_device(self):
-        """Detect best available device with preference: CUDA > MPS > CPU"""
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-            print(f"🚀 CUDA detected: {torch.cuda.get_device_name()}")
-            return device
-        elif torch.backends.mps.is_available():
-            device = torch.device("mps")
-            print(f"🍎 MPS detected: Using Apple Silicon GPU acceleration")
-            return device
-        else:
-            device = torch.device("cpu")
-            print(f"💻 Using CPU (consider upgrading to GPU for faster training)")
-            return device
         """Detect best available device with preference: CUDA > MPS > CPU"""
         if torch.cuda.is_available():
             device = torch.device("cuda")
@@ -750,6 +739,28 @@ class EEGCNNTrainer:
         # Training complete
         total_time = time.time() - start_time
         
+        # Save final model checkpoint (for LOPO evaluation)
+        final_checkpoint = {
+            'epoch': TRAINING_EPOCHS,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'train_metrics': self.train_metrics_history[-1] if self.train_metrics_history else None,
+            'val_metrics': self.val_metrics_history[-1] if self.val_metrics_history else None,
+            'config': {
+                'task_mode': TASK_MODE,
+                'positive_class': self.positive_label,
+                'negative_class': 'interictal',
+                'batch_size': SEQUENCE_BATCH_SIZE,
+                'learning_rate': LEARNING_RATE,
+                'weight_decay': WEIGHT_DECAY
+            }
+        }
+        
+        final_model_path = self.model_dir / "checkpoint_final.pth"
+        torch.save(final_checkpoint, final_model_path)
+        print(f"Saved final model to: {final_model_path}")
+        
         # Save final metrics and plots
         self.save_metrics()
         self.plot_training_curves()
@@ -762,45 +773,70 @@ class EEGCNNTrainer:
 
 def main():
     """Main execution function"""
-    # Determine which folds to process
-    if LOOCV_FOLD_ID is None:
-        folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
-        print("="*60)
-        print("BATCH PROCESSING: ALL FOLDS")
-        print(f"Processing {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
-        print("="*60)
-    else:
-        folds_to_process = [LOOCV_FOLD_ID]
-        print("="*60)
-        print("SINGLE FOLD PROCESSING")
-        print(f"Processing fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
-        print("="*60)
-
-    # Process each fold
-    for current_fold in folds_to_process:
-        fold_config = get_fold_config(current_fold)
-
-        print(f"\n{'='*60}")
-        print(f"TRAINING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
-        print(f"{'='*60}")
-
-        try:
-            # Run training with fold-specific config
-            trainer = EEGCNNTrainer(fold_config=fold_config)
-            trainer.train()
-
-            print(f"✅ Fold {current_fold} training completed successfully!")
-        except Exception as e:
-            print(f"❌ Error training fold {current_fold}: {e}")
-            import traceback
-            traceback.print_exc()
-
-    # Final summary
-    if LOOCV_FOLD_ID is None:
-        print("\n" + "="*60)
-        print(f"✅ BATCH TRAINING COMPLETED!")
-        print(f"✅ Trained models for {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
-        print("="*60)
+    import argparse
+    from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
+    from data_segmentation_helpers.config import get_lopo_config
+    
+    parser = argparse.ArgumentParser(description="Train models for LOPO cross-validation")
+    parser.add_argument('--test_patient', type=str, default=None,
+                        help='Patient ID to test on (None = process all patients)')
+    args = parser.parse_args()
+    
+    try:
+        if args.test_patient is None:
+            # Process all patients
+            all_patients = sorted(SEIZURE_COUNTS.keys())
+            
+            print("=" * 60)
+            print("BATCH TRAINING: ALL PATIENTS (LOPO)")
+            print(f"Processing {len(all_patients)} patients")
+            print("=" * 60)
+            
+            for test_patient_id in all_patients:
+                print(f"\n{'='*60}")
+                print(f"TRAINING PATIENT {test_patient_id}")
+                print(f"{'='*60}")
+                
+                try:
+                    lopo_config = get_lopo_config(test_patient_id)
+                    trainer = EEGCNNTrainer(fold_config=lopo_config)
+                    trainer.train()
+                    
+                    print(f"✅ Patient {test_patient_id} training completed successfully!")
+                except Exception as e:
+                    print(f"❌ Error training patient {test_patient_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            print("\n" + "=" * 60)
+            print(f"✅ BATCH TRAINING COMPLETED!")
+            print(f"✅ Trained models for {len(all_patients)} patients")
+            print("=" * 60)
+        
+        else:
+            # Process single test patient
+            test_patient_id = args.test_patient
+            
+            print("=" * 60)
+            print("LOPO TRAINING: SINGLE PATIENT")
+            print(f"Test patient: {test_patient_id}")
+            print("=" * 60)
+            
+            try:
+                lopo_config = get_lopo_config(test_patient_id)
+                trainer = EEGCNNTrainer(fold_config=lopo_config)
+                trainer.train()
+                
+                print(f"✅ Patient {test_patient_id} training completed successfully!")
+            except Exception as e:
+                print(f"❌ Error training patient {test_patient_id}: {e}")
+                import traceback
+                traceback.print_exc()
+    
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

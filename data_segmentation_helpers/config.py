@@ -24,49 +24,45 @@ LOW_FREQ_HZ = 0.5
 HIGH_FREQ_HZ = 50
 NOTCH_FREQ_HZ = 60
 
-# Single-patient configuration (LOOCV operates on single patients only)
-SINGLE_PATIENT_ID = "chb06"
-
-# Leave-One-Out Cross-Validation configuration (only supported mode)
-LOOCV_MODE = True  # LOOCV is the only supported mode
-LOOCV_FOLD_ID = 0  # Set to fold number or None to process all folds
+# Leave-One-Patient-Out Cross-Validation configuration (only supported mode)
+CV_MODE = 'lopo'  # Leave-One-Patient-Out
+TEST_PATIENT_ID = None  # Patient to test on (None = iterate all 23 patients)
+LOPO_RANDOM_SEED = 42  # Random seed for reproducibility
 
 # Load precomputed seizure counts
 from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 
-if SINGLE_PATIENT_ID not in SEIZURE_COUNTS:
-    raise ValueError(
-        f"Patient {SINGLE_PATIENT_ID} not found in seizure_counts\n"
-        f"Available patients: {sorted(SEIZURE_COUNTS.keys())}"
-    )
-LOOCV_TOTAL_SEIZURES = SEIZURE_COUNTS[SINGLE_PATIENT_ID]
-
-def get_fold_config(fold_id):
-    """Get fold-specific configuration values
+def get_lopo_config(test_patient_id):
+    """Get LOPO configuration for a test patient
 
     Args:
-        fold_id: Fold ID (0 to LOOCV_TOTAL_SEIZURES-1)
+        test_patient_id: Patient ID to use as test set (e.g., 'chb06')
 
     Returns:
-        Dictionary with fold-specific config:
-        - fold_id: The fold number
-        - random_seed: Fold-specific random seed (42 + fold_id)
-        - output_prefix: Fold-specific output prefix
+        Dictionary with LOPO config:
+        - test_patient_id: The test patient
+        - random_seed: Random seed for reproducibility
+        - output_prefix: Output prefix for file naming
     """
+    if test_patient_id not in SEIZURE_COUNTS:
+        raise ValueError(
+            f"Patient {test_patient_id} not found in seizure_counts\n"
+            f"Available patients: {sorted(SEIZURE_COUNTS.keys())}"
+        )
     return {
-        'fold_id': fold_id,
-        'random_seed': 42 + fold_id,
-        'output_prefix': f"{SINGLE_PATIENT_ID}_fold{fold_id}"
+        'test_patient_id': test_patient_id,
+        'random_seed': LOPO_RANDOM_SEED,
+        'output_prefix': f"lopo_test_{test_patient_id}"
     }
 
-# Compute values only when LOOCV_FOLD_ID is set
-if LOOCV_FOLD_ID is not None:
-    SINGLE_PATIENT_RANDOM_SEED = 42 + LOOCV_FOLD_ID
-    OUTPUT_PREFIX = f"{SINGLE_PATIENT_ID}_fold{LOOCV_FOLD_ID}"
+# Compute values only when TEST_PATIENT_ID is set
+if TEST_PATIENT_ID is not None:
+    OUTPUT_PREFIX = f"lopo_test_{TEST_PATIENT_ID}"
+    LOPO_OUTPUT_CONFIG = get_lopo_config(TEST_PATIENT_ID)
 else:
-    # Placeholder values when processing all folds
-    SINGLE_PATIENT_RANDOM_SEED = None
+    # Placeholder values when processing all patients
     OUTPUT_PREFIX = None
+    LOPO_OUTPUT_CONFIG = None
 
 # STFT parameters
 STFT_NPERSEG = 256      # Window length for STFT

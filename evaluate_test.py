@@ -130,28 +130,33 @@ def evaluate_model(model_path, test_data_path, device):
 
 def main():
     """Main evaluation function"""
+    from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
+    from data_segmentation_helpers.config import get_lopo_config
+    
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Evaluate trained model on test dataset')
+    parser = argparse.ArgumentParser(description='Evaluate trained models on test dataset')
     parser.add_argument(
         '--epoch',
         type=int,
         default=TRAINING_EPOCHS,
         help=f'Epoch number to evaluate (default: {TRAINING_EPOCHS}, the final epoch)'
     )
+    parser.add_argument('--test_patient', type=str, default=None,
+                        help='Patient ID to test on (None = process all patients)')
     args = parser.parse_args()
-
-    # Determine which folds to process
-    if LOOCV_FOLD_ID is None:
-        folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+    
+    # Determine which patients to process
+    if args.test_patient is None:
+        all_patients = sorted(SEIZURE_COUNTS.keys())
         print("="*60)
-        print("BATCH EVALUATION: ALL FOLDS")
-        print(f"Evaluating {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+        print("BATCH EVALUATION: ALL PATIENTS (LOPO)")
+        print(f"Evaluating {len(all_patients)} patients")
         print("="*60)
     else:
-        folds_to_process = [LOOCV_FOLD_ID]
+        all_patients = [args.test_patient]
         print("="*60)
-        print("SINGLE FOLD EVALUATION")
-        print(f"Evaluating fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+        print("LOPO EVALUATION: SINGLE PATIENT")
+        print(f"Evaluating patient {args.test_patient}")
         print("="*60)
 
     # Device setup
@@ -165,21 +170,21 @@ def main():
         device = torch.device("cpu")
         print("Using CPU")
 
-    # Store results for all folds (for batch summary)
+    # Store results for all patients (for batch summary)
     batch_results = {}
 
-    # Evaluate each fold
-    for current_fold in folds_to_process:
-        fold_config = get_fold_config(current_fold)
-        current_output_prefix = fold_config['output_prefix']
-
-        print(f"\n{'='*60}")
-        print(f"EVALUATING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
-        print(f"{'='*60}")
-
+    # Evaluate each patient
+    for test_patient_id in all_patients:
         try:
-            # Setup fold-specific model and data
-            model_path = Path(f"model/{current_output_prefix}/epoch_{args.epoch:03d}.pth")
+            lopo_config = get_lopo_config(test_patient_id)
+            current_output_prefix = lopo_config['output_prefix']
+
+            print(f"\n{'='*60}")
+            print(f"EVALUATING PATIENT {test_patient_id}")
+            print(f"{'='*60}")
+
+            # Setup patient-specific model and data
+            model_path = Path(f"model/{current_output_prefix}/checkpoint_final.pth")
             dataset_dir = Path("preprocessing") / "data" / current_output_prefix
             test_data_path = dataset_dir / "test_dataset.h5"
 
@@ -191,7 +196,6 @@ def main():
                 print(f"❌ Test dataset not found: {test_data_path}")
                 continue
 
-            print(f"Evaluating model from epoch {args.epoch}")
             print(f"Dataset prefix: {current_output_prefix}")
             print(f"Using test dataset: {test_data_path}")
 
@@ -201,7 +205,7 @@ def main():
 
             # Print results
             print("\n" + "="*60)
-            print("FOLD TEST RESULTS")
+            print("TEST RESULTS")
             print("="*60)
             print(f"Loss:      {metrics['loss']:.4f}")
             print(f"Accuracy:  {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)")
@@ -234,9 +238,9 @@ def main():
                 digits=4
             ))
 
-            # Save fold-specific results
-            fold_results = {
-                'fold': current_fold,
+            # Save patient-specific results
+            patient_results = {
+                'test_patient': test_patient_id,
                 'task_mode': checkpoint_task_mode,
                 'positive_class': positive_class,
                 'negative_class': 'interictal',
@@ -246,30 +250,30 @@ def main():
                 'test_data_path': str(test_data_path)
             }
 
-            fold_results_path = Path(f"model/{current_output_prefix}/test_results.json")
-            fold_results_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(fold_results_path, 'w') as f:
-                json.dump(fold_results, f, indent=2)
+            patient_results_path = Path(f"model/{current_output_prefix}/test_results.json")
+            patient_results_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(patient_results_path, 'w') as f:
+                json.dump(patient_results, f, indent=2)
 
-            print(f"\n✅ Results saved to {fold_results_path}")
+            print(f"\n✅ Results saved to {patient_results_path}")
 
             # Store for batch summary
-            batch_results[current_fold] = {
-                'fold': current_fold,
+            batch_results[test_patient_id] = {
+                'test_patient': test_patient_id,
                 'output_prefix': current_output_prefix,
                 'metrics': metrics,
                 'confusion_matrix': cm.tolist()
             }
 
         except Exception as e:
-            print(f"❌ Error evaluating fold {current_fold}: {e}")
+            print(f"❌ Error evaluating patient {test_patient_id}: {e}")
             import traceback
             traceback.print_exc()
 
-    # Save batch results summary if processing multiple folds
-    if LOOCV_FOLD_ID is None and batch_results:
+    # Save batch results summary if processing multiple patients
+    if args.test_patient is None and batch_results:
         print("\n" + "="*60)
-        print("BATCH EVALUATION SUMMARY")
+        print("BATCH EVALUATION SUMMARY (LOPO)")
         print("="*60)
 
         # Compute aggregate metrics
@@ -279,8 +283,8 @@ def main():
         f1_scores = [res['metrics']['f1'] for res in batch_results.values()]
         auc_rocs = [res['metrics']['auc_roc'] for res in batch_results.values()]
 
-        print(f"Folds evaluated: {len(batch_results)}/{len(folds_to_process)}")
-        print(f"\nMean metrics (across folds):")
+        print(f"Patients evaluated: {len(batch_results)}/{len(all_patients)}")
+        print(f"\nMean metrics (across patients):")
         print(f"  Accuracy:  {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
         print(f"  Precision: {np.mean(precisions):.4f} (±{np.std(precisions):.4f})")
         print(f"  Recall:    {np.mean(recalls):.4f} (±{np.std(recalls):.4f})")
@@ -289,9 +293,9 @@ def main():
 
         # Save batch summary
         batch_summary = {
-            'total_folds': LOOCV_TOTAL_SEIZURES,
-            'evaluated_folds': len(batch_results),
-            'fold_results': batch_results,
+            'total_patients': len(all_patients),
+            'evaluated_patients': len(batch_results),
+            'patient_results': batch_results,
             'aggregate_metrics': {
                 'accuracy': {
                     'mean': float(np.mean(accuracies)),
@@ -316,7 +320,7 @@ def main():
             }
         }
 
-        batch_results_path = Path("model/batch_test_results.json")
+        batch_results_path = Path("model/lopo_batch_test_results.json")
         with open(batch_results_path, 'w') as f:
             json.dump(batch_summary, f, indent=2)
 

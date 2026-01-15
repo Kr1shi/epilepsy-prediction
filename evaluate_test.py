@@ -21,7 +21,11 @@ import argparse
 
 # Import from train.py
 from train import EEGDataset, CNN_LSTM_Hybrid, MetricsTracker
-from data_segmentation_helpers.config import *
+from data_segmentation_helpers.config import (
+    TASK_MODE, SEQUENCE_LENGTH, SEQUENCE_BATCH_SIZE,
+    LSTM_HIDDEN_DIM, LSTM_NUM_LAYERS, LSTM_DROPOUT, TRAINING_EPOCHS,
+    LOPO_FOLD_ID, LOPO_PATIENTS, get_fold_config
+)
 
 def get_positive_label():
     """Get positive class label based on task mode"""
@@ -140,18 +144,19 @@ def main():
     )
     args = parser.parse_args()
 
+    n_folds = len(LOPO_PATIENTS)
+    
     # Determine which folds to process
-    if LOOCV_FOLD_ID is None:
-        folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+    if LOPO_FOLD_ID is None:
+        folds_to_process = list(range(n_folds))
         print("="*60)
-        print("BATCH EVALUATION: ALL FOLDS")
-        print(f"Evaluating {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+        print(f"LOPO EVALUATION: ALL {n_folds} FOLDS")
         print("="*60)
     else:
-        folds_to_process = [LOOCV_FOLD_ID]
+        folds_to_process = [LOPO_FOLD_ID]
+        fold_cfg = get_fold_config(LOPO_FOLD_ID)
         print("="*60)
-        print("SINGLE FOLD EVALUATION")
-        print(f"Evaluating fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+        print(f"LOPO EVALUATION: Fold {LOPO_FOLD_ID} (test={fold_cfg['test_patient']})")
         print("="*60)
 
     # Device setup
@@ -165,16 +170,17 @@ def main():
         device = torch.device("cpu")
         print("Using CPU")
 
-    # Store results for all folds (for batch summary)
+    # Store results for all folds
     batch_results = {}
 
     # Evaluate each fold
     for current_fold in folds_to_process:
         fold_config = get_fold_config(current_fold)
         current_output_prefix = fold_config['output_prefix']
-
+        test_patient = fold_config['test_patient']
+        
         print(f"\n{'='*60}")
-        print(f"EVALUATING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+        print(f"FOLD {current_fold}/{n_folds-1}: test={test_patient}")
         print(f"{'='*60}")
 
         try:
@@ -267,7 +273,7 @@ def main():
             traceback.print_exc()
 
     # Save batch results summary if processing multiple folds
-    if LOOCV_FOLD_ID is None and batch_results:
+    if LOPO_FOLD_ID is None and batch_results:
         print("\n" + "="*60)
         print("BATCH EVALUATION SUMMARY")
         print("="*60)
@@ -289,7 +295,7 @@ def main():
 
         # Save batch summary
         batch_summary = {
-            'total_folds': LOOCV_TOTAL_SEIZURES,
+            'total_folds': n_folds,
             'evaluated_folds': len(batch_results),
             'fold_results': batch_results,
             'aggregate_metrics': {

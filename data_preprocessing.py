@@ -33,7 +33,7 @@ mne.set_log_level("ERROR")
 
 
 class EEGPreprocessor:
-    def __init__(self, input_json_path: str = None, fold_config: Dict = None):
+    def __init__(self, input_json_path: str = None, fold_config: Dict = None, use_global_stats: bool = False):
         # Use fold_config if provided, otherwise use global config
         if fold_config is not None:
             output_prefix = fold_config["output_prefix"]
@@ -65,6 +65,8 @@ class EEGPreprocessor:
         }
 
         # Normalization statistics (computed from training data only)
+        self.use_global_stats = use_global_stats
+        self.global_stats_file = self.output_dir / "checkpoints" / "global_normalization_stats.json"
         self.norm_stats_file = self.checkpoint_dir / "normalization_stats.json"
         self.global_mean = None
         self.global_std = None
@@ -234,7 +236,33 @@ class EEGPreprocessor:
         self.logger.info(f"  Saved to: {self.norm_stats_file}")
 
     def load_normalization_stats(self):
-        """Load normalization statistics from file"""
+        """Load normalization statistics from file
+        
+        Priority:
+        1. If use_global_stats=True, load from global stats file
+        2. Otherwise, load from fold-specific stats file
+        """
+        # Try loading global stats first if requested
+        if self.use_global_stats:
+            if self.global_stats_file.exists():
+                with open(self.global_stats_file, "r") as f:
+                    stats = json.load(f)
+
+                self.global_mean = stats["global_mean"]
+                self.global_std = stats["global_std"]
+
+                self.logger.info("✅ Loaded GLOBAL normalization statistics:")
+                self.logger.info(f"  Mean: {self.global_mean:.6f}")
+                self.logger.info(f"  Std: {self.global_std:.6f}")
+                self.logger.info(f"  Source: {self.global_stats_file}")
+                self.logger.info(f"  Computed from: {stats.get('n_patients', 'N/A')} patients, {stats.get('n_sequences', 'N/A')} sequences")
+                return True
+            else:
+                self.logger.warning(f"Global stats file not found: {self.global_stats_file}")
+                self.logger.warning("Run: python compute_global_normalization_stats.py")
+                self.logger.warning("Falling back to fold-specific stats...")
+        
+        # Fall back to fold-specific stats
         if self.norm_stats_file.exists():
             with open(self.norm_stats_file, "r") as f:
                 stats = json.load(f)
@@ -242,9 +270,10 @@ class EEGPreprocessor:
             self.global_mean = stats["global_mean"]
             self.global_std = stats["global_std"]
 
-            self.logger.info("Loaded normalization statistics:")
+            self.logger.info("Loaded fold-specific normalization statistics:")
             self.logger.info(f"  Mean: {self.global_mean:.6f}")
             self.logger.info(f"  Std: {self.global_std:.6f}")
+            self.logger.info(f"  Source: {self.norm_stats_file}")
             return True
         else:
             self.logger.warning("No normalization statistics file found")
@@ -746,6 +775,16 @@ class EEGPreprocessor:
             self.save_checkpoint()
 
             # Compute normalization statistics from training data if not already done
+            # Skip if using global stats
+            if self.use_global_stats:
+                self.logger.info("=" * 60)
+                self.logger.info("USING GLOBAL NORMALIZATION STATISTICS")
+                self.logger.info("Skipping per-fold stats computation")
+                self.logger.info("=" * 60)
+                # Mark as computed so we don't try to compute it
+                self.checkpoint["normalization_stats_computed"] = True
+                self.save_checkpoint()
+            
             if not self.checkpoint.get("normalization_stats_computed", False):
                 self.logger.info("=" * 60)
                 self.logger.info(
@@ -1032,6 +1071,11 @@ if __name__ == "__main__":
         default=None,
         help="Patient ID to test on (None = process all patients)",
     )
+    parser.add_argument(
+        "--use_global_stats",
+        action="store_true",
+        help="Use global normalization statistics (faster, computed from all patients)",
+    )
     args = parser.parse_args()
 
     try:
@@ -1042,6 +1086,10 @@ if __name__ == "__main__":
             print("=" * 60)
             print("BATCH PREPROCESSING: ALL PATIENTS (LOPO)")
             print(f"Processing {len(all_patients)} patients")
+            if args.use_global_stats:
+                print("Using GLOBAL normalization statistics")
+            else:
+                print("Using PER-FOLD normalization statistics")
             print("=" * 60)
 
             for test_patient_id in all_patients:
@@ -1051,7 +1099,10 @@ if __name__ == "__main__":
 
                 try:
                     lopo_config = get_lopo_config(test_patient_id)
-                    preprocessor = EEGPreprocessor(fold_config=lopo_config)
+                    preprocessor = EEGPreprocessor(
+                        fold_config=lopo_config,
+                        use_global_stats=args.use_global_stats
+                    )
                     preprocessor.run_preprocessing()
 
                     print(
@@ -1075,11 +1126,18 @@ if __name__ == "__main__":
             print("=" * 60)
             print("LOPO PREPROCESSING: SINGLE PATIENT")
             print(f"Test patient: {test_patient_id}")
+            if args.use_global_stats:
+                print("Using GLOBAL normalization statistics")
+            else:
+                print("Using PER-FOLD normalization statistics")
             print("=" * 60)
 
             try:
                 lopo_config = get_lopo_config(test_patient_id)
-                preprocessor = EEGPreprocessor(fold_config=lopo_config)
+                preprocessor = EEGPreprocessor(
+                    fold_config=lopo_config,
+                    use_global_stats=args.use_global_stats
+                )
                 preprocessor.run_preprocessing()
 
                 print(

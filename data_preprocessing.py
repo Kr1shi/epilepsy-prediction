@@ -16,7 +16,14 @@ from sklearn.preprocessing import RobustScaler
 from scipy.signal import spectrogram
 from multiprocessing import Pool, cpu_count
 from functools import partial
-from data_segmentation_helpers.config import *
+from data_segmentation_helpers.config import (
+    TASK_MODE, SEGMENT_DURATION, SEQUENCE_LENGTH,
+    BASE_PATH, TARGET_CHANNELS, LOW_FREQ_HZ, HIGH_FREQ_HZ, NOTCH_FREQ_HZ,
+    STFT_NPERSEG, STFT_NOVERLAP, ARTIFACT_THRESHOLD_STD,
+    LOG_TRANSFORM_EPSILON, APPLY_LOG_TRANSFORM,
+    PREPROCESSING_WORKERS, MNE_N_JOBS,
+    LOPO_FOLD_ID, LOPO_PATIENTS, get_fold_config
+)
 
 # Suppress MNE warnings that don't affect processing
 warnings.filterwarnings("ignore", message="Channel names are not unique")
@@ -30,19 +37,19 @@ warnings.filterwarnings("ignore", message=".*file size.*", category=RuntimeWarni
 mne.set_log_level('ERROR')
 
 class EEGPreprocessor:
-    def __init__(self, input_json_path: str = None, fold_config: Dict = None):
-        # Use fold_config if provided, otherwise use global config
-        if fold_config is not None:
-            output_prefix = fold_config['output_prefix']
-            balance_seed = fold_config['random_seed']
-        else:
-            output_prefix = OUTPUT_PREFIX
-            balance_seed = SINGLE_PATIENT_RANDOM_SEED
+    def __init__(self, fold_config: Dict):
+        """Initialize preprocessor with fold-specific configuration.
+        
+        Args:
+            fold_config: Dictionary from get_fold_config() with output_prefix, random_seed, etc.
+        """
+        output_prefix = fold_config['output_prefix']
+        balance_seed = fold_config['random_seed']
 
-        # Auto-generate input filename based on task mode if not provided
-        if input_json_path is None:
-            input_json_path = f"{output_prefix}_sequences_{TASK_MODE}.json"
-        self.input_json_path = input_json_path
+        # Input JSON from segmentation
+        self.input_json_path = f"{output_prefix}_sequences_{TASK_MODE}.json"
+        
+        # Output directories
         self.output_dir = Path("preprocessing")
         self.dataset_prefix = output_prefix
         self.data_dir = self.output_dir / "data" / self.dataset_prefix
@@ -185,36 +192,258 @@ class EEGPreprocessor:
         with open(self.checkpoint_file, 'w') as f:
             json.dump(checkpoint_copy, f, indent=2)
 
-    def compute_normalization_stats(self, train_spectrograms):
-        """Compute global mean and std from training spectrograms
-
+    def compute_stats_and_save_unnormalized(self, train_sequences):
+        """Compute normalization stats while saving UNNORMALIZED data to HDF5.
+        
+        Stream-and-save approach:
+        1. Process sequences patient-by-patient
+        2. Compute running mean/variance using Welford's algorithm
+        3. Save unnormalized spectrograms directly to HDF5 (no memory accumulation)
+        4. After all data is saved, apply normalization in-place on the HDF5 file
+        
         Args:
-            train_spectrograms: List of spectrogram arrays from training data
+            train_sequences: List of training sequence dictionaries
+            
+        Returns:
+            Number of sequences successfully processed and saved
         """
-        self.logger.info("Computing normalization statistics from training data...")
-
-        # Stack all spectrograms
-        all_specs = np.concatenate(train_spectrograms, axis=0)
-
-        # Compute global statistics
-        self.global_mean = np.mean(all_specs)
-        self.global_std = np.std(all_specs)
-
-        # Save to file
+        self.logger.info("Computing normalization statistics (streaming) and saving unnormalized data...")
+        
+        # Group sequences by patient
+        patient_sequences = {}
+        for seq in train_sequences:
+            pid = seq['patient_id']
+            if pid not in patient_sequences:
+                patient_sequences[pid] = []
+            patient_sequences[pid].append(seq)
+        
+        patients = sorted(patient_sequences.keys())
+        self.logger.info(f"Processing {len(train_sequences)} sequences from {len(patients)} patients")
+        
+        # Welford's online algorithm for mean and variance
+        n = 0  # Total count of values
+        mean = 0.0
+        M2 = 0.0  # Sum of squared differences from mean
+        
+        total_saved = 0
+        batch_sequences = []  # Small batch buffer for HDF5 writes
+        
+        for patient_idx, patient_id in enumerate(patients):
+            seqs = patient_sequences[patient_id]
+            
+            # Group by file for efficient processing
+            file_groups = self.group_sequences_by_file(seqs)
+            n_files = len(file_groups)
+            
+            self.logger.info(f"Patient {patient_idx+1}/{len(patients)} ({patient_id}): {len(seqs)} sequences from {n_files} files")
+            
+            for file_idx, ((pid, filename), file_seqs) in enumerate(file_groups.items()):
+                # Process without normalization
+                processed_list = self.preprocess_sequences_from_file(
+                    pid, filename, file_seqs, apply_normalization=False
+                )
+                
+                for seq, processed in zip(file_seqs, processed_list):
+                    if processed is None:
+                        continue
+                    
+                    spec = processed['spectrogram']
+                    
+                    # Update running statistics using Welford's algorithm
+                    for val in spec.flat:
+                        n += 1
+                        delta = val - mean
+                        mean += delta / n
+                        delta2 = val - mean
+                        M2 += delta * delta2
+                    
+                    # Add to batch (will be saved unnormalized)
+                    batch_sequences.append(processed)
+                    
+                    # Track in checkpoint
+                    sequence_id = f"{seq['patient_id']}_{seq['sequence_start_sec']}"
+                    self.checkpoint['processed_segments'].add(sequence_id)
+                    self.checkpoint['processed_count'] = self.checkpoint.get('processed_count', 0) + 1
+                    
+                    # Save batch to HDF5 when full (unnormalized!)
+                    if len(batch_sequences) >= 50:
+                        self.append_to_hdf5_unnormalized('train', batch_sequences)
+                        total_saved += len(batch_sequences)
+                        batch_sequences = []
+                        self.save_checkpoint()
+                
+                # Log progress per file
+                if (file_idx + 1) % 5 == 0 or file_idx == n_files - 1:
+                    current_std = np.sqrt(M2 / n) if n > 1 else 0.0
+                    self.logger.info(f"  Files: {file_idx+1}/{n_files}, saved: {total_saved}, mean={mean:.4f}, std={current_std:.4f}")
+        
+        # Save any remaining sequences
+        if batch_sequences:
+            self.append_to_hdf5_unnormalized('train', batch_sequences)
+            total_saved += len(batch_sequences)
+            self.save_checkpoint()
+        
+        if n == 0:
+            raise ValueError("No training data processed for normalization stats!")
+        
+        # Compute final statistics
+        self.global_mean = mean
+        self.global_std = np.sqrt(M2 / n) if n > 1 else 1.0
+        
+        # Save stats to file
         stats = {
             'global_mean': float(self.global_mean),
             'global_std': float(self.global_std),
-            'n_samples': len(train_spectrograms),
-            'total_values': all_specs.size
+            'n_samples': total_saved,
+            'total_values': int(n),
+            'method': 'streaming_welford'
         }
-
+        
         with open(self.norm_stats_file, 'w') as f:
             json.dump(stats, f, indent=2)
-
-        self.logger.info(f"Normalization stats computed:")
+        
+        self.logger.info(f"Normalization stats computed (streaming):")
         self.logger.info(f"  Mean: {self.global_mean:.6f}")
         self.logger.info(f"  Std: {self.global_std:.6f}")
-        self.logger.info(f"  Saved to: {self.norm_stats_file}")
+        self.logger.info(f"  Total values: {n:,}")
+        self.logger.info(f"  Sequences saved (unnormalized): {total_saved}")
+        
+        return total_saved
+
+    def append_to_hdf5_unnormalized(self, split_name: str, batch_sequences: List[Dict]):
+        """Append unnormalized sequences to HDF5. 
+        
+        Similar to append_to_hdf5 but doesn't store normalization params in metadata
+        since they haven't been computed yet.
+        """
+        if not batch_sequences:
+            return
+
+        output_file = self.data_dir / f"{split_name}_dataset.h5"
+
+        # Get dimensions from first sequence
+        first_spec = batch_sequences[0]['spectrogram']
+        n_seq_len, n_channels, n_freqs, n_times = first_spec.shape
+
+        with h5py.File(output_file, 'a') as f:
+            # Create datasets if they don't exist
+            if 'spectrograms' not in f:
+                self.logger.info(f"Creating new HDF5 file: {output_file}")
+                f.create_dataset('spectrograms',
+                                 (0, n_seq_len, n_channels, n_freqs, n_times),
+                                 maxshape=(None, n_seq_len, n_channels, n_freqs, n_times),
+                                 dtype=np.float32, chunks=True)
+                f.create_dataset('labels', (0,), maxshape=(None,), dtype=np.int32, chunks=True)
+                f.create_dataset('patient_ids', (0,), maxshape=(None,), dtype='S10', chunks=True)
+                
+                seg_info = f.create_group('segment_info')
+                seg_info.create_dataset('start_times', (0,), maxshape=(None,), dtype=np.float32, chunks=True)
+                seg_info.create_dataset('end_times', (0,), maxshape=(None,), dtype=np.float32, chunks=True)
+                seg_info.create_dataset('file_names', (0,), maxshape=(None,), dtype='S20', chunks=True)
+                seg_info.create_dataset('time_to_seizure', (0,), maxshape=(None,), dtype=np.float32, chunks=True)
+                seg_info.create_dataset('segment_ids', (0,), maxshape=(None,), dtype='S50', chunks=True)
+
+                metadata = f.create_group('metadata')
+                metadata.attrs['task_mode'] = TASK_MODE
+                metadata.attrs['positive_class'] = self.positive_label
+                metadata.attrs['negative_class'] = 'interictal'
+                metadata.attrs['target_channels'] = [ch.encode('utf-8') for ch in batch_sequences[0]['channel_names']]
+                metadata.attrs['frequencies'] = batch_sequences[0]['frequencies']
+                metadata.attrs['frequency_range'] = [LOW_FREQ_HZ, HIGH_FREQ_HZ]
+                metadata.attrs['sequence_length'] = SEQUENCE_LENGTH
+                metadata.attrs['segment_duration'] = SEGMENT_DURATION
+                metadata.attrs['stft_params'] = f"nperseg={STFT_NPERSEG}, noverlap={STFT_NOVERLAP}"
+                metadata.attrs['preprocessing_config'] = json.dumps({
+                    'low_freq_hz': LOW_FREQ_HZ,
+                    'high_freq_hz': HIGH_FREQ_HZ,
+                    'notch_freq_hz': NOTCH_FREQ_HZ,
+                    'artifact_threshold_std': ARTIFACT_THRESHOLD_STD,
+                    'log_transform': APPLY_LOG_TRANSFORM
+                })
+                # Mark as unnormalized - will be updated after normalization pass
+                metadata.attrs['normalized'] = False
+                metadata.attrs['creation_timestamp'] = datetime.now().isoformat()
+
+            # Append data
+            n_existing = f['spectrograms'].shape[0]
+            n_new = len(batch_sequences)
+            new_total = n_existing + n_new
+
+            # Resize datasets
+            f['spectrograms'].resize(new_total, axis=0)
+            f['labels'].resize(new_total, axis=0)
+            f['patient_ids'].resize(new_total, axis=0)
+            seg_info = f['segment_info']
+            for key in seg_info.keys():
+                seg_info[key].resize(new_total, axis=0)
+
+            # Fill new data
+            for i, seq in enumerate(batch_sequences):
+                idx = n_existing + i
+                f['spectrograms'][idx] = seq['spectrogram']
+                f['labels'][idx] = seq['label']
+                f['patient_ids'][idx] = seq['patient_id'].encode('utf-8')
+                seg_info['start_times'][idx] = seq['sequence_start_sec']
+                seg_info['end_times'][idx] = seq['sequence_end_sec']
+                seg_info['file_names'][idx] = seq['file_name'].encode('utf-8')
+                seg_info['time_to_seizure'][idx] = seq['time_to_seizure']
+                sequence_id = f"{seq['patient_id']}_{seq['sequence_start_sec']}"
+                seg_info['segment_ids'][idx] = sequence_id.encode('utf-8')
+
+            f['metadata'].attrs['n_sequences'] = new_total
+
+    def apply_normalization_to_hdf5(self, split_name: str, chunk_size: int = 100):
+        """Apply normalization in-place to an HDF5 file.
+        
+        Processes the file in chunks to avoid loading everything into memory.
+        
+        Args:
+            split_name: Name of the split ('train', 'test')
+            chunk_size: Number of sequences to process at a time
+        """
+        output_file = self.data_dir / f"{split_name}_dataset.h5"
+        
+        if not output_file.exists():
+            raise FileNotFoundError(f"HDF5 file not found: {output_file}")
+        
+        if self.global_mean is None or self.global_std is None:
+            raise ValueError("Normalization stats not loaded!")
+        
+        self.logger.info(f"Applying normalization to {output_file} (chunk_size={chunk_size})...")
+        
+        with h5py.File(output_file, 'r+') as f:
+            # Check if already normalized
+            if f['metadata'].attrs.get('normalized', False):
+                self.logger.info(f"  {split_name} already normalized, skipping")
+                return
+            
+            n_total = f['spectrograms'].shape[0]
+            self.logger.info(f"  Normalizing {n_total} sequences...")
+            
+            # Process in chunks
+            for start_idx in tqdm(range(0, n_total, chunk_size), desc=f"Normalizing {split_name}"):
+                end_idx = min(start_idx + chunk_size, n_total)
+                
+                # Load chunk
+                chunk = f['spectrograms'][start_idx:end_idx]
+                
+                # Normalize
+                chunk = (chunk - self.global_mean) / (self.global_std + 1e-8)
+                
+                # Write back
+                f['spectrograms'][start_idx:end_idx] = chunk
+            
+            # Update metadata
+            f['metadata'].attrs['normalized'] = True
+            f['metadata'].attrs['normalization'] = json.dumps({
+                'method': 'z-score',
+                'global_mean': float(self.global_mean),
+                'global_std': float(self.global_std),
+                'computed_from': 'training_data'
+            })
+            f['metadata'].attrs['normalization_timestamp'] = datetime.now().isoformat()
+        
+        self.logger.info(f"  Normalization complete for {split_name}")
 
     def load_normalization_stats(self):
         """Load normalization statistics from file"""
@@ -709,9 +938,9 @@ class EEGPreprocessor:
             if not self.checkpoint.get('splits_created', False):
                 if valid_sequences and all(sequence.get('split') for sequence in valid_sequences):
                     self.logger.info("Detected pre-assigned splits in segmentation metadata; using them directly.")
-                    # LOOCV mode: 2-split configuration (train/test only)
+                    # LOPO mode: 2-split configuration (train/test only)
                     splits = {split_name: [] for split_name in ['train', 'test']}
-                    self.logger.info(f"LOOCV Mode: Using 2-split configuration (train/test only) for fold {LOOCV_FOLD_ID}")
+                    self.logger.info(f"LOPO Mode: Using 2-split configuration (train/test only) for fold {LOPO_FOLD_ID}")
                     ignored_sequences = {}
 
                     for sequence in valid_sequences:
@@ -776,85 +1005,57 @@ class EEGPreprocessor:
             self.checkpoint['total_sequences'] = sum(len(split_seqs) for split_seqs in splits.values())
             self.save_checkpoint()
 
-            # Compute normalization statistics from training data if not already done
+            # Phase 1: Compute normalization statistics while saving UNNORMALIZED training data
             if not self.checkpoint.get('normalization_stats_computed', False):
                 self.logger.info("="*60)
-                self.logger.info("COMPUTING NORMALIZATION STATISTICS AND PROCESSING TRAINING DATA")
+                self.logger.info("PHASE 1: COMPUTING STATS & SAVING UNNORMALIZED TRAINING DATA")
                 self.logger.info("="*60)
 
                 train_sequences = splits['train']
-                train_spectrograms = []
-                train_processed_data = []  # Store full processed dictionaries
 
                 if not train_sequences:
                     raise ValueError("Training split is empty; cannot compute normalization statistics.")
 
-                self.logger.info(f"Processing {len(train_sequences)} training samples to compute normalization stats...")
+                # Stream-and-save: compute stats while saving unnormalized data to HDF5
+                n_saved = self.compute_stats_and_save_unnormalized(train_sequences)
 
-                # Group training sequences by file for efficient batch processing
-                file_groups = self.group_sequences_by_file(train_sequences)
-                total_files = len(file_groups)
-                self.logger.info(f"Processing {len(train_sequences)} sequences from {total_files} unique files")
+                if n_saved == 0:
+                    raise ValueError("Failed to process any training sequences!")
 
-                with tqdm(total=len(train_sequences), desc="Processing training data") as pbar:
-                    for (patient_id, filename), file_sequences in file_groups.items():
-                        # Process sequences WITHOUT normalization (apply_normalization=False)
-                        processed_file_sequences = self.preprocess_sequences_from_file(
-                            patient_id, filename, file_sequences, apply_normalization=False
-                        )
-
-                        # Collect spectrograms and full data for stats computation
-                        for sequence, processed in zip(file_sequences, processed_file_sequences):
-                            if processed:
-                                train_spectrograms.append(processed['spectrogram'])
-                                train_processed_data.append(processed)
-                                # Mark as processed
-                                sequence_id = f"{sequence['patient_id']}_{sequence['sequence_start_sec']}"
-                                self.checkpoint['processed_segments'].add(sequence_id)
-                                self.checkpoint['processed_count'] = self.checkpoint.get('processed_count', 0) + 1
-                            pbar.update(1)
-
-                if not train_spectrograms:
-                    raise ValueError("Failed to process any training sequences for normalization stats!")
-
-                # Compute normalization stats
-                self.compute_normalization_stats(train_spectrograms)
                 self.checkpoint['normalization_stats_computed'] = True
+                self.checkpoint['train_unnormalized_saved'] = True
                 self.save_checkpoint()
 
-                # Now apply normalization to the already-computed spectrograms and save
-                self.logger.info(f"Applying normalization and saving {len(train_processed_data)} training sequences...")
-                batch_sequences = []
-                for processed in tqdm(train_processed_data, desc="Normalizing and saving training data"):
-                    # Apply normalization in-place
-                    processed['spectrogram'] = (processed['spectrogram'] - self.global_mean) / (self.global_std + 1e-8)
-                    batch_sequences.append(processed)
+            # Phase 2: Apply normalization in-place to the saved HDF5 file
+            if not self.checkpoint.get('train_normalized', False):
+                self.logger.info("="*60)
+                self.logger.info("PHASE 2: APPLYING NORMALIZATION TO TRAINING DATA")
+                self.logger.info("="*60)
 
-                    # Save in batches
-                    if len(batch_sequences) >= 10:
-                        self.append_to_hdf5('train', batch_sequences)
-                        self.save_checkpoint()
-                        batch_sequences = []
+                # Load stats if not already loaded
+                if self.global_mean is None or self.global_std is None:
+                    if not self.load_normalization_stats():
+                        raise ValueError("Failed to load normalization statistics!")
 
-                # Save any remaining sequences
-                if batch_sequences:
-                    self.append_to_hdf5('train', batch_sequences)
-                    self.save_checkpoint()
+                # Apply normalization in-place on HDF5 file
+                self.apply_normalization_to_hdf5('train', chunk_size=100)
 
-                # Mark training split as completed
+                # Mark training as complete
                 if 'splits_completed' not in self.checkpoint:
                     self.checkpoint['splits_completed'] = []
-                self.checkpoint['splits_completed'].append('train')
+                if 'train' not in self.checkpoint['splits_completed']:
+                    self.checkpoint['splits_completed'].append('train')
+                self.checkpoint['train_normalized'] = True
                 self.save_checkpoint()
 
-                self.logger.info("Training data processing completed during stats computation phase")
+                self.logger.info("Training data processing completed")
 
             # Load normalization statistics before processing
             if not self.load_normalization_stats():
                 raise ValueError("Failed to load normalization statistics! Cannot proceed.")
 
             # Process each split
-            split_names = ['train', 'test']  # LOOCV mode only (2-split configuration)
+            split_names = ['train', 'test']  # LOPO mode: 2-split configuration (train/test only)
             for split_name in split_names:
                 if split_name in self.checkpoint.get('splits_completed', []):
                     self.logger.info(f"Split {split_name} already completed, skipping")
@@ -971,42 +1172,37 @@ class EEGPreprocessor:
             raise
 
 if __name__ == "__main__":
+    n_folds = len(LOPO_PATIENTS)
+    
     # Determine which folds to process
-    if LOOCV_FOLD_ID is None:
-        folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+    if LOPO_FOLD_ID is None:
+        folds_to_process = list(range(n_folds))
         print("="*60)
-        print("BATCH PROCESSING: ALL FOLDS")
-        print(f"Processing {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+        print(f"LOPO PREPROCESSING: ALL {n_folds} FOLDS")
         print("="*60)
     else:
-        folds_to_process = [LOOCV_FOLD_ID]
+        folds_to_process = [LOPO_FOLD_ID]
+        fold_cfg = get_fold_config(LOPO_FOLD_ID)
         print("="*60)
-        print("SINGLE FOLD PROCESSING")
-        print(f"Processing fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+        print(f"LOPO PREPROCESSING: Fold {LOPO_FOLD_ID} (test={fold_cfg['test_patient']})")
         print("="*60)
 
     # Process each fold
     for current_fold in folds_to_process:
         fold_config = get_fold_config(current_fold)
+        test_patient = fold_config['test_patient']
 
         print(f"\n{'='*60}")
-        print(f"PREPROCESSING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+        print(f"FOLD {current_fold}/{n_folds-1}: test={test_patient}")
         print(f"{'='*60}")
 
         try:
-            # Run preprocessing with fold-specific config
-            preprocessor = EEGPreprocessor(fold_config=fold_config)
+            preprocessor = EEGPreprocessor(fold_config)
             preprocessor.run_preprocessing()
-
-            print(f"✅ Fold {current_fold} preprocessing completed successfully!")
+            print(f"✅ Fold {current_fold} completed!")
         except Exception as e:
-            print(f"❌ Error processing fold {current_fold}: {e}")
+            print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
 
-    # Final summary
-    if LOOCV_FOLD_ID is None:
-        print("\n" + "="*60)
-        print(f"✅ BATCH PREPROCESSING COMPLETED!")
-        print(f"✅ Processed {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
-        print("="*60)
+    print(f"\n✅ Preprocessing completed for {len(folds_to_process)} fold(s)")

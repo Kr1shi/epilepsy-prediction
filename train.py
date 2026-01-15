@@ -19,7 +19,12 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
 
-from data_segmentation_helpers.config import *
+from data_segmentation_helpers.config import (
+    TASK_MODE, SEQUENCE_LENGTH, SEQUENCE_BATCH_SIZE, NUM_WORKERS,
+    LSTM_HIDDEN_DIM, LSTM_NUM_LAYERS, LSTM_DROPOUT,
+    TRAINING_EPOCHS, LEARNING_RATE, WEIGHT_DECAY,
+    LOPO_FOLD_ID, LOPO_PATIENTS, get_fold_config
+)
 
 class EEGDataset(Dataset):
     """Custom dataset for loading EEG spectrograms from HDF5 files"""
@@ -351,33 +356,34 @@ class MetricsTracker:
 class EEGCNNTrainer:
     """Main training class for EEG seizure prediction CNN"""
 
-    def __init__(self, fold_config: Dict = None):
-        # Use fold_config if provided, otherwise use global config
-        if fold_config is not None:
-            dataset_prefix = fold_config['output_prefix']
-            self.fold_id = fold_config['fold_id']
-        else:
-            dataset_prefix = OUTPUT_PREFIX
-            self.fold_id = LOOCV_FOLD_ID
+    def __init__(self, fold_config: Dict):
+        """Initialize trainer with fold-specific configuration.
+        
+        Args:
+            fold_config: Dictionary from get_fold_config()
+        """
+        self.fold_id = fold_config['fold_id']
+        self.test_patient = fold_config['test_patient']
+        self.train_patients = fold_config['train_patients']
+        dataset_prefix = fold_config['output_prefix']
 
-        # Setup directories (fold-specific)
+        # Setup directories
         self.model_dir = Path("model") / dataset_prefix
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_prefix = dataset_prefix
         self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
-        print(f"Using dataset prefix: {self.dataset_prefix}")
-        print(f"Loading datasets from: {self.dataset_dir}")
-        print(f"Saving models to: {self.model_dir}")
+        
+        print(f"Dataset: {self.dataset_prefix}")
+        print(f"Test patient: {self.test_patient}")
+        print(f"Train patients ({len(self.train_patients)}): {self.train_patients}")
 
-        # Device setup with MPS support for Apple Silicon
+        # Device setup
         self.device = self._get_device()
-        print(f"Using device: {self.device}")
+        print(f"Device: {self.device}")
 
-        # Load datasets
+        # Load training data (no validation in LOPO)
         self.train_loader = self._create_dataloader('train')
-        # LOOCV mode: no validation set
         self.val_loader = None
-        print(f"LOOCV Mode (Fold {self.fold_id}): No validation set, using training-only evaluation")
         
         # Initialize CNN-LSTM model with deep EEG-CNN backbone
         self.model = CNN_LSTM_Hybrid(
@@ -587,8 +593,9 @@ class EEGCNNTrainer:
                 'batch_size': SEQUENCE_BATCH_SIZE,
                 'learning_rate': LEARNING_RATE,
                 'weight_decay': WEIGHT_DECAY,
-                'loocv_fold': LOOCV_FOLD_ID,
-                'loocv_patient': SINGLE_PATIENT_ID
+                'lopo_fold': self.fold_id,
+                'lopo_test_patient': self.test_patient,
+                'lopo_train_patients': self.train_patients
             }
         }
 
@@ -627,8 +634,8 @@ class EEGCNNTrainer:
         plt.style.use('seaborn-v0_8')
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
 
-        # LOOCV mode: include fold information in title
-        title = f'EEG Seizure {TASK_MODE.capitalize()} - Fold {LOOCV_FOLD_ID} Training Progress ({self.positive_label} vs interictal)'
+        # LOPO mode: include fold and test patient information in title
+        title = f'EEG Seizure {TASK_MODE.capitalize()} - Fold {self.fold_id} (Test: {self.test_patient}) Training Progress'
         fig.suptitle(title, fontsize=16, fontweight='bold')
 
         epochs = range(1, len(self.train_metrics_history) + 1)
@@ -701,9 +708,9 @@ class EEGCNNTrainer:
         print("="*60)
         print(f"STARTING EEG SEIZURE {TASK_MODE.upper()} TRAINING")
         print("="*60)
+        n_folds = len(LOPO_PATIENTS)
         print(f"Task mode: {TASK_MODE.upper()} ({self.positive_label} vs interictal)")
-        print(f"LOOCV Mode: Fold {LOOCV_FOLD_ID}/{LOOCV_TOTAL_SEIZURES-1} (Test seizure: {LOOCV_FOLD_ID})")
-        print(f"Note: No validation set in LOOCV mode")
+        print(f"LOPO Fold {self.fold_id}/{n_folds-1}: test={self.test_patient}")
         print(f"Training for {TRAINING_EPOCHS} epochs")
         print(f"Batch size: {SEQUENCE_BATCH_SIZE}")
         print(f"Learning rate: {LEARNING_RATE}")
@@ -762,18 +769,23 @@ class EEGCNNTrainer:
 
 def main():
     """Main execution function"""
+    # =================================================================
+    # LOPO TRAINING
+    # =================================================================
+    
+    n_folds = len(LOPO_PATIENTS)
+    
     # Determine which folds to process
-    if LOOCV_FOLD_ID is None:
-        folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+    if LOPO_FOLD_ID is None:
+        folds_to_process = list(range(n_folds))
         print("="*60)
-        print("BATCH PROCESSING: ALL FOLDS")
-        print(f"Processing {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+        print(f"LOPO TRAINING: ALL {n_folds} FOLDS")
         print("="*60)
     else:
-        folds_to_process = [LOOCV_FOLD_ID]
+        folds_to_process = [LOPO_FOLD_ID]
+        fold_cfg = get_fold_config(LOPO_FOLD_ID)
         print("="*60)
-        print("SINGLE FOLD PROCESSING")
-        print(f"Processing fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+        print(f"LOPO TRAINING: Fold {LOPO_FOLD_ID} (test={fold_cfg['test_patient']})")
         print("="*60)
 
     # Process each fold
@@ -781,26 +793,19 @@ def main():
         fold_config = get_fold_config(current_fold)
 
         print(f"\n{'='*60}")
-        print(f"TRAINING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+        print(f"FOLD {current_fold}/{n_folds-1}: test={fold_config['test_patient']}")
         print(f"{'='*60}")
 
         try:
-            # Run training with fold-specific config
-            trainer = EEGCNNTrainer(fold_config=fold_config)
+            trainer = EEGCNNTrainer(fold_config)
             trainer.train()
-
-            print(f"✅ Fold {current_fold} training completed successfully!")
+            print(f"✅ Fold {current_fold} completed!")
         except Exception as e:
-            print(f"❌ Error training fold {current_fold}: {e}")
+            print(f"❌ Error: {e}")
             import traceback
             traceback.print_exc()
 
-    # Final summary
-    if LOOCV_FOLD_ID is None:
-        print("\n" + "="*60)
-        print(f"✅ BATCH TRAINING COMPLETED!")
-        print(f"✅ Trained models for {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
-        print("="*60)
+    print(f"\n✅ Training completed for {len(folds_to_process)} fold(s)")
 
 if __name__ == "__main__":
     main()

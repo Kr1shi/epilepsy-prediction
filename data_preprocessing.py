@@ -851,7 +851,7 @@ class EEGPreprocessor:
                     # LOOCV mode: 2-split configuration (train/test only)
                     splits = {split_name: [] for split_name in ["train", "test"]}
                     self.logger.info(
-                        f"LOOCV Mode: Using 2-split configuration (train/test only) for fold {LOOCV_FOLD_ID}"
+                        f"LOPO Mode: Using 2-split configuration (train/test only)"
                     )
                     ignored_sequences = {}
 

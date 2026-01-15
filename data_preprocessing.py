@@ -37,10 +37,8 @@ class EEGPreprocessor:
         # Use fold_config if provided, otherwise use global config
         if fold_config is not None:
             output_prefix = fold_config["output_prefix"]
-            balance_seed = fold_config["random_seed"]
         else:
             output_prefix = OUTPUT_PREFIX
-            balance_seed = SINGLE_PATIENT_RANDOM_SEED
 
         # Auto-generate input filename based on task mode if not provided
         if input_json_path is None:
@@ -52,7 +50,6 @@ class EEGPreprocessor:
         self.logs_dir = self.output_dir / "logs" / self.dataset_prefix
         self.checkpoint_dir = self.output_dir / "checkpoints" / self.dataset_prefix
         self.checkpoint_file = self.checkpoint_dir / "progress.json"
-        self.balance_seed = balance_seed
 
         # Processing settings
         self.checkpoint_interval = 50
@@ -1000,7 +997,7 @@ class EEGPreprocessor:
                 self.checkpoint["splits_completed"].append(split_name)
                 self.save_checkpoint()
 
-             # Final validation
+            # Final validation
             self.validate_hdf5_shapes()
 
             # Final statistics
@@ -1025,64 +1022,77 @@ if __name__ == "__main__":
     import argparse
     from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
     from data_segmentation_helpers.config import get_lopo_config
-    
-    parser = argparse.ArgumentParser(description="Preprocess sequences for LOPO cross-validation")
-    parser.add_argument('--test_patient', type=str, default=None,
-                        help='Patient ID to test on (None = process all patients)')
+
+    parser = argparse.ArgumentParser(
+        description="Preprocess sequences for LOPO cross-validation"
+    )
+    parser.add_argument(
+        "--test_patient",
+        type=str,
+        default=None,
+        help="Patient ID to test on (None = process all patients)",
+    )
     args = parser.parse_args()
-    
+
     try:
         if args.test_patient is None:
             # Process all patients
             all_patients = sorted(SEIZURE_COUNTS.keys())
-            
+
             print("=" * 60)
             print("BATCH PREPROCESSING: ALL PATIENTS (LOPO)")
             print(f"Processing {len(all_patients)} patients")
             print("=" * 60)
-            
+
             for test_patient_id in all_patients:
                 print(f"\n{'='*60}")
                 print(f"PREPROCESSING PATIENT {test_patient_id}")
                 print(f"{'='*60}")
-                
+
                 try:
                     lopo_config = get_lopo_config(test_patient_id)
                     preprocessor = EEGPreprocessor(fold_config=lopo_config)
                     preprocessor.run_preprocessing()
-                    
-                    print(f"✅ Patient {test_patient_id} preprocessing completed successfully!")
+
+                    print(
+                        f"✅ Patient {test_patient_id} preprocessing completed successfully!"
+                    )
                 except Exception as e:
                     print(f"❌ Error processing patient {test_patient_id}: {e}")
                     import traceback
+
                     traceback.print_exc()
-            
+
             print("\n" + "=" * 60)
             print(f"✅ BATCH PREPROCESSING COMPLETED!")
             print(f"✅ Processed {len(all_patients)} patients")
             print("=" * 60)
-        
+
         else:
             # Process single test patient
             test_patient_id = args.test_patient
-            
+
             print("=" * 60)
             print("LOPO PREPROCESSING: SINGLE PATIENT")
             print(f"Test patient: {test_patient_id}")
             print("=" * 60)
-            
+
             try:
                 lopo_config = get_lopo_config(test_patient_id)
                 preprocessor = EEGPreprocessor(fold_config=lopo_config)
                 preprocessor.run_preprocessing()
-                
-                print(f"✅ Patient {test_patient_id} preprocessing completed successfully!")
+
+                print(
+                    f"✅ Patient {test_patient_id} preprocessing completed successfully!"
+                )
             except Exception as e:
                 print(f"❌ Error processing patient {test_patient_id}: {e}")
                 import traceback
+
                 traceback.print_exc()
-    
+
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
+
         traceback.print_exc()

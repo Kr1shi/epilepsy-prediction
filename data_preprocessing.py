@@ -257,129 +257,21 @@ class EEGPreprocessor:
     # This ensures we fail fast and only create sequences for files with valid channels
     # The input JSON file already contains only validated sequences
 
-    def balance_and_split_data(self, sequences: List[Dict]) -> Dict[str, List[Dict]]:
-        """Patient-level split for sequences (no balancing to preserve patient distribution)"""
-        self.logger.info("Performing patient-level split for sequences...")
-
-        # Separate by class (using dynamic positive label)
-        positive_sequences = [s for s in sequences if s["type"] == self.positive_label]
-        interictal_sequences = [s for s in sequences if s["type"] == "interictal"]
-
-        self.logger.info(
-            f"Total sequences: {len(positive_sequences)} {self.positive_label}, {len(interictal_sequences)} interictal"
-        )
-
-        # Get unique patients
-        all_patients = sorted(set([s["patient_id"] for s in sequences]))
-        self.logger.info(f"Total patients: {len(all_patients)}")
-
-        # Split patients (not sequences) into train/val/test
-        rng = np.random.RandomState(42)
-        rng.shuffle(all_patients)
-
-        n_train = int(len(all_patients) * self.train_ratio)
-        n_val = int(len(all_patients) * self.val_ratio)
-
-        train_patients = set(all_patients[:n_train])
-        val_patients = set(all_patients[n_train : n_train + n_val])
-        test_patients = set(all_patients[n_train + n_val :])
-
-        self.logger.info(
-            f"Patient split: {len(train_patients)} train, {len(val_patients)} val, {len(test_patients)} test"
-        )
-        self.logger.info(f"Train patients: {sorted(train_patients)}")
-        self.logger.info(f"Val patients: {sorted(val_patients)}")
-        self.logger.info(f"Test patients: {sorted(test_patients)}")
-
-        # Assign sequences to splits based on patient
-        splits = {
-            "train": [s for s in sequences if s["patient_id"] in train_patients],
-            "val": [s for s in sequences if s["patient_id"] in val_patients],
-            "test": [s for s in sequences if s["patient_id"] in test_patients],
-        }
-
-        # Log split statistics
-        for split_name, split_seqs in splits.items():
-            positive_count = sum(
-                1 for s in split_seqs if s["type"] == self.positive_label
-            )
-            interictal_count = len(split_seqs) - positive_count
-            patients = set([s["patient_id"] for s in split_seqs])
-            self.logger.info(
-                f"{split_name}: {len(split_seqs)} sequences ({positive_count} {self.positive_label}, {interictal_count} interictal) from {len(patients)} patients"
-            )
-
-        return splits
-
-    def balance_split_sequences(
-        self, splits: Dict[str, List[Dict]]
-    ) -> Tuple[Dict[str, List[Dict]], Dict[str, Dict[str, int]]]:
-        """Downsample majority class within each split to enforce class balance.
-
-        Args:
-            splits: Dict mapping split name to list of sequence dictionaries.
-
-        Returns:
-            Tuple of (balanced_splits, balance_stats)
-        """
-        rng = random.Random(self.balance_seed)
-        balanced_splits = {}
-        balance_stats = {}
-
-        for split_name, split_sequences in splits.items():
-            positives = [
-                seq for seq in split_sequences if seq["type"] == self.positive_label
-            ]
-            interictals = [
-                seq for seq in split_sequences if seq["type"] == "interictal"
-            ]
-            others = [
-                seq
-                for seq in split_sequences
-                if seq["type"] not in (self.positive_label, "interictal")
-            ]
-
-            if not positives or not interictals:
-                balanced_splits[split_name] = split_sequences[:]
-                balance_stats[split_name] = {
-                    "positive_kept": len(positives),
-                    "positive_dropped": 0,
-                    "interictal_kept": len(interictals),
-                    "interictal_dropped": 0,
-                    "other_sequences": len(others),
-                    "balanced": False,
-                    "note": "Skipped balancing due to missing class",
-                }
+    def validate_hdf5_shapes(self):
+        """Validate HDF5 files have expected shape and contain data."""
+        for split_name in ["train", "test"]:
+            h5_path = self.data_dir / f"{split_name}_dataset.h5"
+            if not h5_path.exists():
                 continue
-
-            target_count = min(len(positives), len(interictals))
-            rng.shuffle(positives)
-            rng.shuffle(interictals)
-
-            kept_positive = positives[:target_count]
-            kept_interictal = interictals[:target_count]
-
-            dropped_positive = len(positives) - target_count
-            dropped_interictal = len(interictals) - target_count
-
-            combined = kept_positive + kept_interictal
-            rng.shuffle(combined)
-
-            if others:
-                combined.extend(others)
-
-            balanced_splits[split_name] = combined
-            balance_stats[split_name] = {
-                "positive_kept": len(kept_positive),
-                "positive_dropped": dropped_positive,
-                "interictal_kept": len(kept_interictal),
-                "interictal_dropped": dropped_interictal,
-                "other_sequences": len(others),
-                "balanced": True,
-                "target_per_class": target_count,
-            }
-
-        return balanced_splits, balance_stats
+            try:
+                with h5py.File(h5_path, "r") as f:
+                    n_samples = f["spectrograms"].shape[0]
+                    if n_samples == 0:
+                        raise ValueError(f"{split_name} dataset is empty")
+                    self.logger.info(f"{split_name}: {n_samples} samples")
+            except Exception as e:
+                self.logger.error(f"Error validating {split_name} HDF5: {e}")
+                raise
 
     def select_target_channels(self, raw, target_channels=TARGET_CHANNELS):
         """Select target channels, handling duplicates"""
@@ -444,13 +336,7 @@ class EEGPreprocessor:
         return normalized_data
 
     def apply_stft(self, data, sampling_rate):
-        """Apply STFT to create spectrograms
-
-        Returns:
-            stft_spectrograms: Complex STFT coefficients (n_channels, n_freqs, n_times)
-            frequencies: Frequency values for each bin
-            time_array: Time values for each STFT bin (centers of windows)
-        """
+        """Apply STFT to create spectrograms."""
         spectrograms = []
         time_array = None  # Same for all channels
 
@@ -484,21 +370,7 @@ class EEGPreprocessor:
         sequences: List[Dict],
         apply_normalization: bool = True,
     ) -> List[Optional[Dict]]:
-        """Process multiple sequences from the same EDF file efficiently.
-
-        This method reads and filters the file ONCE, computes STFT ONCE on the entire range,
-        then extracts all sequences by slicing the pre-computed spectrogram.
-        Major optimization: reduces redundant file I/O, filtering, and STFT operations.
-
-        Args:
-            patient_id: Patient identifier
-            filename: EDF filename
-            sequences: List of sequence dictionaries from this file
-            apply_normalization: Whether to apply z-score normalization (False when computing stats)
-
-        Returns:
-            List of processed sequence dictionaries (or None for failed sequences)
-        """
+        """Process sequences from EDF file with efficient batching."""
         try:
             edf_path = f"physionet.org/files/chbmit/1.0.0/{patient_id}/{filename}"
 
@@ -777,38 +649,6 @@ class EEGPreprocessor:
             self.logger.error(f"Error appending to HDF5 file {output_file}: {e}")
             raise
 
-    def validate_final_dataset(self):
-        """Validate the final datasets"""
-        self.logger.info("Validating final datasets...")
-
-        split_names = ["train", "test"]  # LOOCV mode only (2-split configuration)
-        for split_name in split_names:
-            dataset_file = self.data_dir / f"{split_name}_dataset.h5"
-
-            if not dataset_file.exists():
-                self.logger.error(f"Missing dataset file: {dataset_file}")
-                continue
-
-            try:
-                with h5py.File(dataset_file, "r") as f:
-                    n_segments = f["spectrograms"].shape[0]
-                    spec_shape = f["spectrograms"].shape[1:]
-                    n_positive = np.sum(f["labels"][:] == 1)
-                    n_interictal = np.sum(f["labels"][:] == 0)
-
-                    self.logger.info(f"{split_name} dataset validation:")
-                    self.logger.info(f"  - Segments: {n_segments}")
-                    self.logger.info(f"  - Spectrogram shape: {spec_shape}")
-                    self.logger.info(
-                        f"  - Classes: {n_positive} {self.positive_label}, {n_interictal} interictal"
-                    )
-                    self.logger.info(
-                        f"  - Balance: {n_positive/n_segments*100:.1f}% {self.positive_label}"
-                    )
-
-            except Exception as e:
-                self.logger.error(f"Error validating {split_name} dataset: {e}")
-
     def run_preprocessing(self):
         """Main preprocessing pipeline"""
         start_time = time.time()
@@ -891,53 +731,17 @@ class EEGPreprocessor:
                             f"Ignored {sum(ignored_sequences.values())} sequences with unknown splits: {ignored_sequences}"
                         )
                 else:
-                    self.logger.info(
-                        "No split metadata found; performing patient-level split."
+                    # LOPO requires splits to be in JSON
+                    raise AssertionError(
+                        "ERROR: Sequences missing 'split' field. Segmentation must assign splits in JSON."
                     )
-                    splits = self.balance_and_split_data(valid_sequences)
 
                 self.checkpoint["splits"] = splits
                 self.checkpoint["splits_created"] = True
-                self.checkpoint["splits_balanced"] = (
-                    False  # Force balancing on initial assignment
-                )
                 self.save_checkpoint()
             else:
                 self.logger.info("Using cached data splits")
                 splits = self.checkpoint["splits"]
-
-            # Ensure splits are balanced (positive vs interictal)
-            if not self.checkpoint.get("splits_balanced", False):
-                self.logger.info(
-                    "Balancing splits to enforce equal positive/interictal counts per split..."
-                )
-                splits, balance_stats = self.balance_split_sequences(splits)
-
-                split_names = [
-                    "train",
-                    "test",
-                ]  # LOOCV mode only (2-split configuration)
-                for split_name in split_names:
-                    stats = balance_stats.get(split_name, {})
-                    if not stats:
-                        continue
-                    if stats.get("balanced", False):
-                        self.logger.info(
-                            f"{split_name}: kept {stats['positive_kept']} {self.positive_label} "
-                            f"and {stats['interictal_kept']} interictal "
-                            f"(dropped {stats['positive_dropped']} {self.positive_label}, "
-                            f"{stats['interictal_dropped']} interictal)"
-                        )
-                    else:
-                        self.logger.warning(
-                            f"{split_name}: {stats.get('note', 'Balancing skipped due to missing class')}"
-                        )
-
-                self.checkpoint["splits"] = splits
-                self.checkpoint["split_balance_stats"] = balance_stats
-                self.checkpoint["splits_balanced"] = True
-                # Reset processed segments because the sequence list has changed
-                self.checkpoint["processed_segments"] = set()
 
             self.checkpoint["total_sequences"] = sum(
                 len(split_seqs) for split_seqs in splits.values()
@@ -1196,8 +1000,8 @@ class EEGPreprocessor:
                 self.checkpoint["splits_completed"].append(split_name)
                 self.save_checkpoint()
 
-            # Final validation
-            self.validate_final_dataset()
+             # Final validation
+            self.validate_hdf5_shapes()
 
             # Final statistics
             total_time = time.time() - start_time

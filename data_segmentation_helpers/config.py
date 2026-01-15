@@ -56,13 +56,17 @@ def get_lopo_config(test_patient_id):
     }
 
 # Compute values only when TEST_PATIENT_ID is set
+OUTPUT_PREFIX = None
+LOPO_OUTPUT_CONFIG = None
+
 if TEST_PATIENT_ID is not None:
-    OUTPUT_PREFIX = f"lopo_test_{TEST_PATIENT_ID}"
-    LOPO_OUTPUT_CONFIG = get_lopo_config(TEST_PATIENT_ID)
-else:
-    # Placeholder values when processing all patients
-    OUTPUT_PREFIX = None
-    LOPO_OUTPUT_CONFIG = None
+    if isinstance(TEST_PATIENT_ID, str):
+        OUTPUT_PREFIX = f"lopo_test_{TEST_PATIENT_ID}"
+        LOPO_OUTPUT_CONFIG = get_lopo_config(TEST_PATIENT_ID)
+    else:
+        raise TypeError(
+            f"TEST_PATIENT_ID must be a string (e.g., 'chb06'), got {type(TEST_PATIENT_ID).__name__}: {TEST_PATIENT_ID}"
+        )
 
 # STFT parameters
 STFT_NPERSEG = 256      # Window length for STFT

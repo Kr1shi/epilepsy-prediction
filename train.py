@@ -40,7 +40,7 @@ class EEGDataset(Dataset):
         
         # Load all data into memory for fastest training
         with h5py.File(h5_file_path, 'r') as f:
-            # Data is already normalized during preprocessing (z-score normalization)
+            # Data is loaded as-is (normalization happens per-sequence in preprocessing)
             self.spectrograms = torch.FloatTensor(f['spectrograms'][:])
             self.labels = torch.LongTensor(f['labels'][:])
             self.patient_ids = [pid.decode('utf-8') for pid in f['patient_ids'][:]]
@@ -48,11 +48,6 @@ class EEGDataset(Dataset):
             # Load metadata
             if 'metadata' in f:
                 self.metadata = dict(f['metadata'].attrs)
-                # Check if normalization info is available
-                if 'normalization' in self.metadata:
-                    norm_info = json.loads(self.metadata['normalization'])
-                    print(f"  - Normalization: {norm_info['method']}, "
-                          f"mean={norm_info['global_mean']:.4f}, std={norm_info['global_std']:.4f}")
             else:
                 self.metadata = {}
 

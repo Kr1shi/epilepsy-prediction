@@ -1,22 +1,15 @@
 """Sequence-based segmentation for CNN-LSTM model
+Extracts sequences of consecutive 30-second segments for temporal modeling.
 
-Leave-One-Patient-Out (LOPO) cross-validation:
-- Extracts sequences from all patients
-- One patient held out for testing, all others for training
-
-Channel validation happens here (not in preprocessing) to fail fast.
+This module creates sequence metadata AND validates that files have all required
+channels. Channel validation happens here (not in preprocessing) to fail fast
+and avoid creating sequences that cannot be processed later.
 """
 import os
 import json
 import mne
 import random
-from data_segmentation_helpers.config import (
-    TASK_MODE, SEGMENT_DURATION, SEQUENCE_LENGTH, SEQUENCE_STRIDE,
-    PREICTAL_WINDOW, INTERICTAL_BUFFER, BASE_PATH, ESTIMATED_FILE_DURATION,
-    VERBOSE_WARNINGS, TARGET_CHANNELS, SKIP_CHANNEL_VALIDATION,
-    LOPO_PATIENTS, LOPO_FOLD_ID, get_fold_config, SEIZURE_COUNTS, PREICTAL1_START_MIN, 
-    PREICTAL1_END_MIN, PREICTAL2_END_MIN, PREICTAL2_START_MIN
-)
+from data_segmentation_helpers.config import *
 from data_segmentation_helpers.segmentation import parse_summary_file
 from data_segmentation_helpers.channel_validation import (
     validate_patient_files,
@@ -348,109 +341,220 @@ def create_sequences_single_patient(patient_id):
         traceback.print_exc()
         return [], None
 
-def create_sequences_multi_patient(patient_ids):
-    """Extract sequences from multiple patients for LOPO cross-validation.
-    
-    Args:
-        patient_ids: List of patient IDs to process (e.g., ['chb01', 'chb02', ...])
-        
-    Returns:
-        Tuple of (all_sequences, validation_results_by_patient)
-            - all_sequences: List of all sequence dictionaries from all patients
-            - validation_results_by_patient: Dict mapping patient_id to validation results
-    """
-    all_sequences = []
-    validation_results_by_patient = {}
-    
-    print(f"\n{'='*60}")
-    print(f"Extracting sequences from {len(patient_ids)} patients")
-    print(f"{'='*60}")
-    
-    for patient_id in patient_ids:
-        print(f"\nProcessing {patient_id}...")
-        sequences, patient_validation = create_sequences_single_patient(patient_id)
-        
-        if sequences:
-            all_sequences.extend(sequences)
-            if patient_validation:
-                validation_results_by_patient[patient_id] = patient_validation
-            
-            # Count by type
-            positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
-            pos_count = sum(1 for s in sequences if s['type'] == positive_label)
-            int_count = len(sequences) - pos_count
-            print(f"  -> {len(sequences)} sequences ({pos_count} {positive_label}, {int_count} interictal)")
-        else:
-            print(f"  -> No sequences generated (check for missing files or channels)")
-    
-    # Summary
-    print(f"\n{'='*60}")
-    print(f"Total: {len(all_sequences)} sequences from {len(patient_ids)} patients")
-    print(f"{'='*60}")
-    
-    return all_sequences, validation_results_by_patient
+def create_sequences_all_patients():
+    """Process all patients and combine sequences
 
-def assign_multi_patient_splits(sequences, test_patient_id, random_seed=42):
-    """Assign sequences to train/test splits based on patient ID (LOPO).
-    
-    In Leave-One-Patient-Out cross-validation:
-    - Test set: All sequences from the held-out test patient
-    - Train set: All sequences from all other patients
-    
-    Args:
-        sequences: List of all sequence dictionaries from all patients
-        test_patient_id: Patient ID to hold out for testing
-        random_seed: Seed for deterministic balancing
-        
     Returns:
-        Tuple of (retained_sequences, split_counts, balance_stats)
+        Tuple of (all_sequences, all_validation_results)
     """
+
+    all_sequences = []
+    all_validation_results = []
+
+    # Process patients chb01 to chb24, skipping chb12 and chb24
+    for i in range(1, 25):
+        if i == 12:  # Skip patient 12 (insufficient data)
+            continue
+        if i == 24:  # Skip patient 24 (no interictal sequences due to missing file times)
+            continue
+
+        patient_id = f"chb{i:02d}"  # Format as chb01, chb02, etc.
+
+        print(f"\nProcessing {patient_id}...")
+        sequences, validation_results = create_sequences_single_patient(patient_id)
+        all_sequences.extend(sequences)
+
+        if validation_results:
+            all_validation_results.append(validation_results)
+
+    return all_sequences, all_validation_results
+
+def balance_sequences_per_patient(sequences, random_seed=42):
+    """Balance sequences per patient by downsampling interictal to match positive class
+
+    For each patient, randomly removes interictal sequences until the count
+    matches the positive class (preictal/ictal) count. This ensures 1:1 balance within each patient.
+
+    Args:
+        sequences: List of sequence dictionaries
+        random_seed: Random seed for reproducibility
+
+    Returns:
+        Tuple of (balanced_sequences, balancing_stats)
+    """
+    random.seed(random_seed)
+
+    # Determine positive class label based on mode
     positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
-    
-    # Split by patient ID
-    train_sequences = [s for s in sequences if s['patient_id'] != test_patient_id]
-    test_sequences = [s for s in sequences if s['patient_id'] == test_patient_id]
-    
-    # Get unique patients in each split
-    train_patients = sorted(set(s['patient_id'] for s in train_sequences))
-    
-    print(f"\nPatient-based split (LOPO):")
-    print(f"  Test patient: {test_patient_id}")
-    print(f"  Train patients ({len(train_patients)}): {train_patients}")
-    print(f"  Train sequences: {len(train_sequences)}")
-    print(f"  Test sequences: {len(test_sequences)}")
-    
-    # Assign split labels
-    for seq in train_sequences:
-        seq['split'] = 'train'
-    for seq in test_sequences:
-        seq['split'] = 'test'
-    
-    splits = {'train': train_sequences, 'test': test_sequences}
-    
-    # Balance each split by downsampling majority class
+
+    # Group sequences by patient
+    patient_sequences = {}
+    for seq in sequences:
+        patient_id = seq['patient_id']
+        if patient_id not in patient_sequences:
+            patient_sequences[patient_id] = {positive_label: [], 'interictal': []}
+        patient_sequences[patient_id][seq['type']].append(seq)
+
+    balanced_sequences = []
+    balancing_stats = {
+        'patients': {},
+        'total_original': len(sequences),
+        'total_balanced': 0,
+        'total_removed': 0,
+        'patients_processed': 0,
+        'positive_label': positive_label
+    }
+
+    # Balance each patient
+    for patient_id in sorted(patient_sequences.keys()):
+        positive = patient_sequences[patient_id].get(positive_label, [])
+        interictal = patient_sequences[patient_id].get('interictal', [])
+
+        n_positive = len(positive)
+        n_interictal = len(interictal)
+
+        # Keep all positive sequences
+        balanced_sequences.extend(positive)
+
+        # Randomly sample interictal to match positive count
+        if n_interictal > n_positive:
+            # Downsample interictal
+            sampled_interictal = random.sample(interictal, n_positive)
+            balanced_sequences.extend(sampled_interictal)
+            removed = n_interictal - n_positive
+        else:
+            # Keep all interictal if fewer than positive
+            balanced_sequences.extend(interictal)
+            removed = 0
+
+        # Track statistics
+        balancing_stats['patients'][patient_id] = {
+            f'{positive_label}_original': n_positive,
+            'interictal_original': n_interictal,
+            'interictal_kept': min(n_interictal, n_positive),
+            'interictal_removed': removed,
+            'total_balanced': n_positive + min(n_interictal, n_positive)
+        }
+        balancing_stats['total_removed'] += removed
+        balancing_stats['patients_processed'] += 1
+
+    balancing_stats['total_balanced'] = len(balanced_sequences)
+
+    return balanced_sequences, balancing_stats
+
+def assign_single_patient_splits(
+    sequences,
+    seizure_splits,
+    interictal_ratios,
+    fold_id,
+    random_seed=None
+):
+    """Assign sequences for a single patient experiment into train/val/test splits.
+
+    Args:
+        sequences: List of sequence dictionaries for a single patient.
+        seizure_splits: Dict mapping split names to lists of seizure_ids.
+        interictal_ratios: Dict with ratios for distributing interictal sequences.
+        fold_id: The fold ID for LOOCV (which seizure to hold out for testing)
+        random_seed: Seed for deterministic interictal shuffling.
+
+    Returns:
+        Tuple of (retained_sequences, split_counts, dropped_positive_sequences, balance_stats)
+    """
+    # LOOCV mode: compute splits by seizure index
+    required_splits = ['train', 'test']  # No validation in LOOCV mode
+    # Compute LOOCV splits: test=fold_id, train=all others
+    test_seizure = fold_id
+    train_seizures = [i for i in range(LOOCV_TOTAL_SEIZURES) if i != test_seizure]
+    seizure_splits = {
+        'train': train_seizures,
+        'test': [test_seizure]
+    }
+    print(f"LOOCV Fold {fold_id}: Test seizure={test_seizure}, Train seizures={train_seizures}")
+
+    positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
+    splits = {split_name: [] for split_name in required_splits}
+    interictal_pool = []
+    dropped_positive = 0
+
+    # Assign positive sequences based on seizure mapping
+    for sequence in sequences:
+        if sequence['type'] == positive_label:
+            seizure_id = sequence.get('seizure_id')
+            assigned_split = next(
+                (split_name for split_name, seizure_ids in seizure_splits.items() if seizure_id in seizure_ids),
+                None
+            )
+            if assigned_split is None:
+                dropped_positive += 1
+                continue
+
+            sequence['split'] = assigned_split
+            splits[assigned_split].append(sequence)
+        else:
+            interictal_pool.append(sequence)
+
+    # Distribute interictal sequences according to requested ratios
+    if interictal_pool:
+        rng = random.Random(random_seed)
+        rng.shuffle(interictal_pool)
+
+        ratio_sum = sum(max(interictal_ratios.get(split_name, 0.0), 0.0) for split_name in required_splits)
+        if ratio_sum <= 0:
+            normalized = {split_name: 1.0 / len(required_splits) for split_name in required_splits}
+        else:
+            normalized = {
+                split_name: max(interictal_ratios.get(split_name, 0.0), 0.0) / ratio_sum
+                for split_name in required_splits
+            }
+
+        total_interictal = len(interictal_pool)
+        counts = {}
+        assigned_so_far = 0
+        for idx, split_name in enumerate(required_splits):
+            if idx == len(required_splits) - 1:
+                count = total_interictal - assigned_so_far
+            else:
+                count = int(round(normalized[split_name] * total_interictal))
+                count = max(0, min(count, total_interictal - assigned_so_far))
+            counts[split_name] = count
+            assigned_so_far += count
+
+        start_idx = 0
+        for split_name in required_splits:
+            count = counts[split_name]
+            end_idx = start_idx + count
+            for sequence in interictal_pool[start_idx:end_idx]:
+                sequence['split'] = split_name
+                splits[split_name].append(sequence)
+            start_idx = end_idx
+
+        # Assign any leftover sequences (due to rounding) to the training split
+        for sequence in interictal_pool[start_idx:]:
+            sequence['split'] = required_splits[0]
+            splits[required_splits[0]].append(sequence)
+
+    # Balance each split by downsampling majority class (positive/interictal)
     balanced_splits, balance_stats = balance_sequences_across_splits(
         splits,
         positive_label,
         random_seed
     )
-    
-    # Flatten sequences
+
     retained_sequences = []
-    for split_name in ['train', 'test']:
+    for split_name in required_splits:
         retained_sequences.extend(balanced_splits[split_name])
-    
-    # Compute split counts
+
     split_counts = {
         split_name: {
-            'total': len(split_seqs),
-            positive_label: sum(1 for seq in split_seqs if seq['type'] == positive_label),
-            'interictal': sum(1 for seq in split_seqs if seq['type'] == 'interictal')
+            'total': len(split_sequences),
+            positive_label: sum(1 for seq in split_sequences if seq['type'] == positive_label),
+            'interictal': sum(1 for seq in split_sequences if seq['type'] == 'interictal')
         }
-        for split_name, split_seqs in balanced_splits.items()
+        for split_name, split_sequences in balanced_splits.items()
     }
-    
-    return retained_sequences, split_counts, balance_stats
+
+    return retained_sequences, split_counts, dropped_positive, balance_stats
 
 def balance_sequences_across_splits(splits, positive_label, random_seed=42):
     """Balance each split by downsampling the majority class to match the minority.
@@ -534,10 +638,10 @@ def save_sequences_to_file(
         extra_summary: Optional dict of additional summary fields
     """
 
-    # Determine positive class label
+    # Determine positive class label and auto-generate filename if needed
     positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
     if output_file is None:
-        raise ValueError("output_file must be specified")
+        output_file = f"{OUTPUT_PREFIX}_sequences_{TASK_MODE}.json"
 
     # Separate by type
     positive_sequences = [s for s in sequences if s['type'] == positive_label]
@@ -636,22 +740,25 @@ def print_summary(sequences):
 
 if __name__ == "__main__":
     try:
-        # =================================================================
-        # LEAVE-ONE-PATIENT-OUT (LOPO) CROSS-VALIDATION
-        # =================================================================
-        
-        # Validate configuration
-        if not LOPO_PATIENTS:
-            raise ValueError("LOPO_PATIENTS list is empty. Add patient IDs to config.py")
-        
-        print("="*60)
-        print("LEAVE-ONE-PATIENT-OUT (LOPO) CROSS-VALIDATION")
-        print("="*60)
+        # Determine which folds to process
+        if LOOCV_FOLD_ID is None:
+            folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
+            print("="*60)
+            print("BATCH PROCESSING: ALL FOLDS")
+            print(f"Processing {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+            print("="*60)
+        else:
+            folds_to_process = [LOOCV_FOLD_ID]
+            print("="*60)
+            print("SINGLE FOLD PROCESSING")
+            print(f"Processing fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
+            print("="*60)
+
         print(f"\nConfiguration:")
         print(f"  - Task mode: {TASK_MODE.upper()} ({'preictal' if TASK_MODE == 'prediction' else 'ictal'} vs interictal)")
-        print(f"  - Total patients: {len(LOPO_PATIENTS)}")
-        print(f"  - Patients: {LOPO_PATIENTS}")
-        print(f"  - Sequence length: {SEQUENCE_LENGTH} segments ({SEGMENT_DURATION * SEQUENCE_LENGTH}s)")
+        print(f"  - LOOCV Mode: ENABLED")
+        print(f"  - Sequence length: {SEQUENCE_LENGTH} segments")
+        print(f"  - Sequence duration: {SEGMENT_DURATION * SEQUENCE_LENGTH}s ({SEGMENT_DURATION * SEQUENCE_LENGTH / 60:.1f} min)")
         overlap_pct = ((SEQUENCE_LENGTH - SEQUENCE_STRIDE) / SEQUENCE_LENGTH) * 100
         print(f"  - Stride: {SEQUENCE_STRIDE} segments ({overlap_pct:.0f}% overlap)")
         print(f"  - Segment duration: {SEGMENT_DURATION}s")
@@ -660,148 +767,103 @@ if __name__ == "__main__":
         print(f"  - Interictal buffer: {INTERICTAL_BUFFER // 60} min")
         print(f"  - Channel validation: {'ENABLED' if not SKIP_CHANNEL_VALIDATION else 'DISABLED'}")
         print(f"  - Target channels: {len(TARGET_CHANNELS)} channels")
-        
-        # Determine which folds to process
-        n_folds = len(LOPO_PATIENTS)
-        if LOPO_FOLD_ID is None:
-            folds_to_process = list(range(n_folds))
-            print(f"\nProcessing ALL {len(folds_to_process)} folds")
-        else:
-            folds_to_process = [LOPO_FOLD_ID]
-            fold_cfg = get_fold_config(LOPO_FOLD_ID)
-            print(f"\nProcessing SINGLE fold {LOPO_FOLD_ID}: test patient = {fold_cfg['test_patient']}")
         print("="*60)
-        
-        # =================================================================
-        # UPFRONT VALIDATION
-        # =================================================================
-        if True:  # Always validate upfront
-            print(f"\nValidating all {len(LOPO_PATIENTS)} patients have required channels...")
-            validation_summary_upfront = {}
-            patients_with_issues = []
-            
-            for patient_id in LOPO_PATIENTS:
-                summary_path = f"{BASE_PATH}{patient_id}/{patient_id}-summary.txt"
-                if not os.path.exists(summary_path):
-                    print(f"  WARNING: {patient_id} - Summary file not found: {summary_path}")
-                    patients_with_issues.append(patient_id)
-                    continue
-                
-                try:
-                    seizures, all_files, _ = parse_summary_file(summary_path)
-                    patient_validation = validate_patient_files(patient_id, all_files, BASE_PATH)
-                    validation_summary_upfront[patient_id] = patient_validation
-                    
-                    valid_ratio = patient_validation['valid_files'] / max(patient_validation['total_files'], 1) * 100
-                    seizure_count = SEIZURE_COUNTS.get(patient_id, len(seizures))
-                    print(f"  {patient_id}: {patient_validation['valid_files']}/{patient_validation['total_files']} files valid ({valid_ratio:.0f}%), {seizure_count} seizures")
-                    
-                    if patient_validation['valid_files'] == 0:
-                        patients_with_issues.append(patient_id)
-                except Exception as e:
-                    print(f"  ERROR: {patient_id} - {e}")
-                    patients_with_issues.append(patient_id)
-            
-            if patients_with_issues:
-                print(f"\n⚠️ Warning: {len(patients_with_issues)} patients have issues: {patients_with_issues}")
-                print("  Consider removing these patients from LOPO_PATIENTS in config.py")
-            print()
-        
-        # =================================================================
-        # EXTRACT SEQUENCES FROM ALL PATIENTS (shared across all folds)
-        # =================================================================
-        sequences, validation_results_by_patient = create_sequences_multi_patient(LOPO_PATIENTS)
-        
+
+        # Extract sequences once (shared across all folds)
+        print(f"\nExtracting sequences from patient {SINGLE_PATIENT_ID}...")
+        sequences, validation_results = create_sequences_single_patient(SINGLE_PATIENT_ID)
+        validation_list = [validation_results] if validation_results else None
+
         if not sequences:
-            print("❌ No sequences generated from any patient!")
-            exit(1)
-        
-        # Convert validation results to list format for save_sequences_to_file
-        validation_list = list(validation_results_by_patient.values()) if validation_results_by_patient else None
-        
-        print(f"\n✓ Total: {len(sequences)} sequences extracted from {len(LOPO_PATIENTS)} patients")
-        
-        # =================================================================
-        # PROCESS EACH FOLD
-        # =================================================================
-        for current_fold in folds_to_process:
-            fold_config = get_fold_config(current_fold)
-            test_patient = fold_config['test_patient']
-            train_patients = fold_config['train_patients']
-            current_output_prefix = fold_config['output_prefix']
-            current_random_seed = fold_config['random_seed']
-            
-            print("\n" + "="*60)
-            print(f"FOLD {current_fold}/{n_folds-1}: Test patient = {test_patient}")
-            print("="*60)
-            print(f"  Train patients ({len(train_patients)}): {train_patients}")
-            print(f"  Output prefix: {current_output_prefix}")
-            
-            # Assign sequences to train/test based on patient ID
-            sequences_with_splits, split_counts, balance_stats = assign_multi_patient_splits(
-                sequences,
-                test_patient,
-                random_seed=current_random_seed
-            )
-            
-            if not sequences_with_splits:
-                print("❌ No sequences retained after split assignment!")
-                continue
-            
-            positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
-            
-            # Print fold summary
-            print(f"\n=== FOLD SPLIT SUMMARY ===")
-            for split_name in ['train', 'test']:
-                counts = split_counts.get(split_name, {})
-                print(f"  {split_name}: {counts.get('total', 0)} sequences "
-                      f"({counts.get(positive_label, 0)} {positive_label}, "
-                      f"{counts.get('interictal', 0)} interictal)")
-            
-            # Print balance stats
-            if balance_stats:
-                print(f"\n=== BALANCING SUMMARY ===")
-                for split_name in ['train', 'test']:
-                    stats = balance_stats.get(split_name, {})
-                    if stats.get('balanced', False):
-                        print(f"  {split_name}: kept {stats['positive_kept']} {positive_label}, "
-                              f"{stats['interictal_kept']} interictal "
-                              f"(dropped {stats['positive_dropped']} {positive_label}, "
-                              f"{stats['interictal_dropped']} interictal)")
-                    else:
-                        print(f"  {split_name}: {stats.get('note', 'Balancing skipped')}")
-            
-            # Save sequences to file
-            output_filename = f"{current_output_prefix}_sequences_{TASK_MODE}.json"
-            extra_summary = {
-                'fold_id': current_fold,
-                'test_patient': test_patient,
-                'train_patients': train_patients,
-                'split_balance': balance_stats
-            }
-            
-            save_sequences_to_file(
-                sequences_with_splits,
-                validation_list,
-                output_file=output_filename,
-                split_summary=split_counts,
-                extra_summary=extra_summary
-            )
-            
-            print(f"\n✅ Fold {current_fold} completed: {output_filename}")
-        
-        # =================================================================
-        # FINAL SUMMARY
-        # =================================================================
-        print("\n" + "="*60)
-        print(f"✅ LOPO CROSS-VALIDATION COMPLETE")
-        print(f"   Processed {len(folds_to_process)} fold(s)")
-        print(f"   Total patients: {len(LOPO_PATIENTS)}")
-        print(f"   Total sequences: {len(sequences)}")
-        print("="*60)
-        
+            print(f"❌ No sequences generated for patient {SINGLE_PATIENT_ID}!")
+        else:
+            # Process each fold
+            for current_fold in folds_to_process:
+                fold_config = get_fold_config(current_fold)
+                current_output_prefix = fold_config['output_prefix']
+                current_random_seed = fold_config['random_seed']
+
+                print("\n" + "="*60)
+                print(f"PROCESSING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+                print("="*60)
+                print(f"Output prefix: {current_output_prefix}")
+
+                sequences_with_splits, split_counts, dropped_positive, balance_stats = assign_single_patient_splits(
+                    sequences,
+                    {},  # Not used in LOOCV mode (seizure splits computed automatically)
+                    {},  # Not used in LOOCV mode (interictal ratios computed automatically)
+                    fold_id=current_fold,
+                    random_seed=current_random_seed
+                )
+
+                if not sequences_with_splits:
+                    print("❌ No sequences retained after applying single-patient split configuration!")
+                else:
+                    positive_label = 'preictal' if TASK_MODE == 'prediction' else 'ictal'
+                    print("\n" + "="*60)
+                    print("FOLD SPLIT SUMMARY")
+                    print("="*60)
+                    print_summary(sequences_with_splits)
+
+                    if dropped_positive:
+                        print(f"\n⚠️ Dropped {dropped_positive} positive sequences because their seizure_id was not assigned to a split.")
+
+                    if balance_stats:
+                        print(f"\n=== SPLIT BALANCING SUMMARY ===")
+                        split_names = ['train', 'test']  # LOOCV mode only (2-split configuration)
+                        for split_name in split_names:
+                            stats = balance_stats.get(split_name, {})
+                            if not stats:
+                                continue
+                            if stats.get('balanced', False):
+                                print(
+                                    f"{split_name}: {stats['positive_kept']} {positive_label}, "
+                                    f"{stats['interictal_kept']} interictal "
+                                    f"(dropped {stats['positive_dropped']} {positive_label}, "
+                                    f"{stats['interictal_dropped']} interictal)"
+                                )
+                            else:
+                                print(f"{split_name}: {stats.get('note', 'Balancing skipped')}")
+
+                    output_filename = f"{current_output_prefix}_sequences_{TASK_MODE}.json"
+                    extra_summary = {'dropped_positive_sequences': dropped_positive} if dropped_positive else {}
+                    if balance_stats:
+                        extra_summary['split_balance'] = balance_stats
+                    if not extra_summary:
+                        extra_summary = None
+
+                    save_sequences_to_file(
+                        sequences_with_splits,
+                        validation_list,
+                        output_file=output_filename,
+                        split_summary=split_counts,
+                        extra_summary=extra_summary
+                    )
+
+                    if validation_list:
+                        validation_summary = get_validation_summary(validation_list)
+                        print(f"\n=== CHANNEL VALIDATION SUMMARY ===")
+                        print(f"Validation enabled: {validation_summary['validation_enabled']}")
+                        print(f"Files checked: {validation_summary['total_files_checked']}")
+                        print(f"Files with valid channels: {validation_summary['files_with_valid_channels']}")
+                        print(f"Files with invalid channels: {validation_summary['files_with_invalid_channels']}")
+
+                        if validation_summary['files_with_invalid_channels'] > 0:
+                            print(f"\nMost common missing channels:")
+                            for channel, count in list(validation_summary['missing_channel_frequency'].items())[:5]:
+                                print(f"  - {channel}: missing in {count} files")
+
+                    print(f"\n✅ Fold {current_fold} completed successfully!")
+                    print(f"✅ Sequences saved to {output_filename}")
+
+            # Final summary
+            if LOOCV_FOLD_ID is None:
+                print("\n" + "="*60)
+                print(f"✅ BATCH PROCESSING COMPLETED!")
+                print(f"✅ Processed {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
+                print("="*60)
+
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
-

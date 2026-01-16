@@ -378,7 +378,8 @@ class EEGCNNTrainer:
 
         # Load training data (no validation in LOPO)
         self.train_loader = self._create_dataloader('train')
-        self.val_loader = None
+        # Use Test set as Validation to monitor LOPO performance in real-time
+        self.val_loader = self._create_dataloader('test')
         
         # Initialize CNN-LSTM model with deep EEG-CNN backbone
         self.model = CNN_LSTM_Hybrid(

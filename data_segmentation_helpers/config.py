@@ -24,6 +24,16 @@ LOW_FREQ_HZ = 0.5
 HIGH_FREQ_HZ = 50
 NOTCH_FREQ_HZ = 60
 
+# --- NEW WINDOW CONFIGURATION ---
+# True Class (Preictal): From X min before to Y min before
+PREICTAL1_START_MIN = 10   # X: Start looking for preictal here (e.g., 60 mins before)
+PREICTAL2_END_MIN = 0     # Y: Stop looking for preictal here (e.g., 10 mins before)
+
+# Negative Class (Interictal): From Z min before to J min before
+PREICTAL1_START_MIN = 10   # X: Start looking for preictal here (e.g., 60 mins before)
+PREICTAL2_END_MIN = 20     # Y: Stop looking for preictal here (e.g., 10 mins before)
+# -------------------------------
+
 # Single-patient configuration (LOOCV operates on single patients only)
 SINGLE_PATIENT_ID = "chb06"
 

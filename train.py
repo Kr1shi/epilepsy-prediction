@@ -722,12 +722,14 @@ class EEGCNNTrainer:
         for epoch in range(TRAINING_EPOCHS):
             epoch_start_time = time.time()
             
-            # Train (no validation in LOOCV mode)
+            # Train
             train_metrics = self.train_epoch(epoch)
-            val_metrics = None
+            # Use Test set as Validation to monitor LOPO performance in real-time
+            val_metrics = self.validate_epoch(epoch)
 
             # Store metrics
             self.train_metrics_history.append(train_metrics)
+            self.val_metrics_history.append(val_metrics)
 
             # Update learning rate (StepLR updates per-epoch)
             self.scheduler.step()

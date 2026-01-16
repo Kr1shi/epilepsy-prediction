@@ -569,8 +569,13 @@ def assign_multi_patient_splits(sequences, test_patient_id, random_seed=42):
     )
     num_seizures = len(patient_seizure_ids)
 
-    # 4. Determine split: 50/50, extra goes to Test if odd (e.g. 9 -> 4 train, 5 test)
-    n_train_seizures = num_seizures // 2
+    # 4. Determine split: Train on ALL seizures except the LAST one
+    # If there is only 1 seizure, n_train_seizures = 0 (standard LOPO for that seizure)
+    if num_seizures > 0:
+        n_train_seizures = num_seizures - 1
+    else:
+        n_train_seizures = 0
+        
     train_seizure_ids = set(patient_seizure_ids[:n_train_seizures])
 
     # 5. Find split point: where the first TEST seizure begins

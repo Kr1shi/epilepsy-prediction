@@ -116,14 +116,17 @@ class EEGPreprocessor:
             try:
                 with open(self.checkpoint_file, 'r') as f:
                     checkpoint = json.load(f)
-                if isinstance(checkpoint.get('processed_segments'), list):
-                    checkpoint['processed_segments'] = set(checkpoint['processed_segments'])
+                # Use completed_files instead of processed_segments for performance
+                if isinstance(checkpoint.get('completed_files'), list):
+                    checkpoint['completed_files'] = set(checkpoint['completed_files'])
+                elif 'completed_files' not in checkpoint:
+                    checkpoint['completed_files'] = set()
                 return checkpoint
             except Exception as e:
                 self.logger.warning(f"Could not load checkpoint: {e}")
         
         return {
-            "processed_segments": set(),
+            "completed_files": set(),
             "processed_count": 0,
             "start_time": datetime.now().isoformat()
         }
@@ -131,9 +134,13 @@ class EEGPreprocessor:
     def save_checkpoint(self):
         """Save current progress"""
         checkpoint_copy = self.checkpoint.copy()
-        if isinstance(checkpoint_copy.get('processed_segments'), set):
-            checkpoint_copy['processed_segments'] = list(checkpoint_copy['processed_segments'])
+        if isinstance(checkpoint_copy.get('completed_files'), set):
+            checkpoint_copy['completed_files'] = list(checkpoint_copy['completed_files'])
         
+        # Remove huge segment sets if they exist from legacy checkpoints
+        if 'processed_segments' in checkpoint_copy:
+            del checkpoint_copy['processed_segments']
+
         with open(self.checkpoint_file, 'w') as f:
             json.dump(checkpoint_copy, f, indent=2)
 
@@ -247,6 +254,12 @@ class EEGPreprocessor:
                 except Exception as e:
                     self.logger.error(f"Sequence error: {e}")
                     processed_sequences.append(None)
+            
+            # Clean up large objects immediately
+            del raw
+            del raw_selected
+            del raw_cropped
+            
             return processed_sequences
         except Exception as e:
             self.logger.error(f"File error {filename}: {e}")
@@ -294,18 +307,26 @@ class EEGPreprocessor:
         if not sequences: return
         self.logger.info(f"Processing {split_name} split: {len(sequences)} sequences")
         file_groups = self.group_sequences_by_file(sequences)
-        batch = []
+        
         for (pid, fname), f_seqs in tqdm(file_groups.items(), desc=f"Split: {split_name}"):
+            file_id = f"{pid}/{fname}"
+            
+            # Skip if already fully processed
+            if file_id in self.checkpoint.get('completed_files', set()):
+                continue
+                
             processed = self.preprocess_sequences_from_file(pid, fname, f_seqs)
-            for p in processed:
-                if p:
-                    batch.append(p)
-                    if len(batch) >= 50:
-                        self.append_to_hdf5(split_name, batch)
-                        self.checkpoint['processed_count'] += len(batch)
-                        batch = []
-                        self.save_checkpoint()
-        if batch: self.append_to_hdf5(split_name, batch)
+            
+            # Filter valid results
+            valid_batch = [p for p in processed if p is not None]
+            
+            if valid_batch:
+                self.append_to_hdf5(split_name, valid_batch)
+                self.checkpoint['processed_count'] += len(valid_batch)
+            
+            # Mark file as complete regardless of success to avoid infinite retries on bad files
+            self.checkpoint['completed_files'].add(file_id)
+            self.save_checkpoint()
 
     def run_preprocessing(self):
         """Main entry point: Process all splits."""

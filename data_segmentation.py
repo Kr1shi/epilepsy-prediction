@@ -952,7 +952,7 @@ if __name__ == "__main__":
 
             if patients_with_issues:
                 print(
-                    f"\n⚠️ Warning: {len(patients_with_issues)} patients have issues: {patients_with_issues}"
+                    f"\n[WARNING] {len(patients_with_issues)} patients have issues: {patients_with_issues}"
                 )
                 print(
                     "  Consider removing these patients from LOPO_PATIENTS in config.py"
@@ -967,7 +967,7 @@ if __name__ == "__main__":
         )
 
         if not sequences:
-            print("❌ No sequences generated from any patient!")
+            print("[ERROR] No sequences generated from any patient!")
             exit(1)
 
         # Convert validation results to list format for save_sequences_to_file
@@ -978,7 +978,7 @@ if __name__ == "__main__":
         )
 
         print(
-            f"\n✓ Total: {len(sequences)} sequences extracted from {len(LOPO_PATIENTS)} patients"
+            f"\n[OK] Total: {len(sequences)} sequences extracted from {len(LOPO_PATIENTS)} patients"
         )
 
         # =================================================================
@@ -1005,7 +1005,7 @@ if __name__ == "__main__":
             )
 
             if not sequences_with_splits:
-                print("❌ No sequences retained after split assignment!")
+                print("[ERROR] No sequences retained after split assignment!")
                 continue
 
             positive_label = "preictal" if TASK_MODE == "prediction" else "ictal"
@@ -1054,20 +1054,20 @@ if __name__ == "__main__":
                 extra_summary=extra_summary,
             )
 
-            print(f"\n✅ Fold {current_fold} completed: {output_filename}")
+            print(f"\n[SUCCESS] Fold {current_fold} completed: {output_filename}")
 
         # =================================================================
         # FINAL SUMMARY
         # =================================================================
         print("\n" + "=" * 60)
-        print(f"✅ LOPO CROSS-VALIDATION COMPLETE")
+        print(f"[SUCCESS] LOPO CROSS-VALIDATION COMPLETE")
         print(f"   Processed {len(folds_to_process)} fold(s)")
         print(f"   Total patients: {len(LOPO_PATIENTS)}")
         print(f"   Total sequences: {len(sequences)}")
         print("=" * 60)
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] {e}")
         import traceback
 
         traceback.print_exc()

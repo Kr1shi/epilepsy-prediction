@@ -1,0 +1,156 @@
+Starting pipeline at Sat 01/17/2026 16:25:46.14 
+---------------------------------------- 
+Cleaning up previous models and preprocessed data... 
+Running data segmentation... 
+============================================================
+LEAVE-ONE-PATIENT-OUT (LOPO) CROSS-VALIDATION
+============================================================
+
+Configuration:
+  - Task mode: PREDICTION (preictal vs interictal)
+  - Total patients: 6
+  - Patients: ['chb01', 'chb02', 'chb05', 'chb06', 'chb07', 'chb08']
+  - Sequence length: 30 segments (150s)
+  - Stride: 5 segments (83% overlap)
+  - Segment duration: 5s
+  - Preictal window: 10 min
+  - Interictal buffer: 120 min
+  - Channel validation: ENABLED
+  - Target channels: 18 channels
+
+Processing SINGLE fold 0: test patient = chb01
+============================================================
+
+Validating all 6 patients have required channels...
+  chb01: 42/42 files valid (100%), 7 seizures
+  chb02: 35/36 files valid (97%), 3 seizures
+  chb05: 39/39 files valid (100%), 5 seizures
+  chb06: 17/18 files valid (94%), 10 seizures
+  chb07: 18/19 files valid (95%), 3 seizures
+  chb08: 20/20 files valid (100%), 5 seizures
+
+
+============================================================
+Extracting sequences from 6 patients
+============================================================
+
+Processing chb01...
+Patient chb01: 671 sequences (153 preictal, 518 interictal)
+  -> 671 sequences (153 preictal, 518 interictal)
+
+Processing chb02...
+  Channel validation: 35/36 files valid
+Patient chb02: 688 sequences (21 preictal, 667 interictal)
+  -> 688 sequences (21 preictal, 667 interictal)
+
+Processing chb05...
+Patient chb05: 614 sequences (100 preictal, 514 interictal)
+  -> 614 sequences (100 preictal, 514 interictal)
+
+Processing chb06...
+  Channel validation: 17/18 files valid
+Patient chb06: 1146 sequences (162 preictal, 984 interictal)
+  -> 1146 sequences (162 preictal, 984 interictal)
+
+Processing chb07...
+  Channel validation: 18/19 files valid
+Patient chb07: 1331 sequences (67 preictal, 1264 interictal)
+  -> 1331 sequences (67 preictal, 1264 interictal)
+
+Processing chb08...
+Patient chb08: 250 sequences (109 preictal, 141 interictal)
+  -> 250 sequences (109 preictal, 141 interictal)
+
+============================================================
+Total: 4700 sequences from 6 patients
+============================================================
+Traceback (most recent call last):
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\data_segmentation.py", line 980, in <module>
+    print(
+    ~~~~~^
+        f"\n\u2713 Total: {len(sequences)} sequences extracted from {len(LOPO_PATIENTS)} patients"
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Aaron Lin\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 2: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\data_segmentation.py", line 1070, in <module>
+    print(f"\u274c Error: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Aaron Lin\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>
+Running data preprocessing... 
+2026-01-17 16:25:50,838 - INFO - ============================================================
+2026-01-17 16:25:50,838 - INFO - EEG PREPROCESSING PIPELINE STARTED
+2026-01-17 16:25:50,839 - INFO - ============================================================
+2026-01-17 16:25:50,839 - INFO - EEG Preprocessor initialized (Per-Sequence Zero-Centering Mode)
+2026-01-17 16:25:50,839 - INFO - Target channels: ['C3-P3', 'C4-P4', 'CZ-PZ', 'F3-C3', 'F4-C4', 'F7-T7', 'F8-T8', 'FP1-F3', 'FP1-F7', 'FP2-F4', 'FP2-F8', 'FZ-CZ', 'P3-O1', 'P4-O2', 'P7-O1', 'P8-O2', 'T7-P7', 'T8-P8']
+2026-01-17 16:25:50,839 - INFO - Filter settings: 0.5-50 Hz, notch: 60 Hz
+2026-01-17 16:25:50,840 - INFO - Segment duration: 5 seconds
+Traceback (most recent call last):
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\data_preprocessing.py", line 354, in <module>
+    preprocessor.run_preprocessing()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\data_preprocessing.py", line 334, in run_preprocessing
+    with open(self.input_json_path, 'r') as f:
+         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'lopo_fold00_sequences_prediction.json'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\data_preprocessing.py", line 357, in <module>
+    print(f"\u274c Error: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Aaron Lin\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>
+Running model training... 
+============================================================
+LOPO TRAINING: Fold 0 (test=chb01)
+============================================================
+
+============================================================
+FOLD 0/5: test=chb01
+============================================================
+Dataset: lopo_fold00
+Test patient: chb01
+Train patients (5): ['chb02', 'chb05', 'chb06', 'chb07', 'chb08']
+Traceback (most recent call last):
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\train.py", line 798, in main
+    trainer = EEGCNNTrainer(fold_config)
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\train.py", line 376, in __init__
+    self.device = self._get_device()
+                  ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\train.py", line 435, in _get_device
+    print(f"\U0001f680 CUDA detected: {torch.cuda.get_device_name()}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Aaron Lin\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680' in position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\train.py", line 809, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\Aaron Lin\CapstoneTest\epilepsy-prediction\train.py", line 802, in main
+    print(f"\u274c Error: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Aaron Lin\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>
+---------------------------------------- 
+Pipeline finished at Sat 01/17/2026 16:25:55.13 

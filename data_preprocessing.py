@@ -135,11 +135,20 @@ class EEGPreprocessor:
             try:
                 with open(self.checkpoint_file, "r") as f:
                     checkpoint = json.load(f)
-                # Use completed_files instead of processed_segments for performance
-                if isinstance(checkpoint.get("completed_files"), list):
-                    checkpoint["completed_files"] = set(checkpoint["completed_files"])
-                elif "completed_files" not in checkpoint:
+
+                # OPTIMIZATION: Use completed_files instead of processed_segments
+                if "completed_files" in checkpoint:
+                    if isinstance(checkpoint["completed_files"], list):
+                        checkpoint["completed_files"] = set(
+                            checkpoint["completed_files"]
+                        )
+                else:
                     checkpoint["completed_files"] = set()
+
+                # Cleanup legacy processed_segments to reduce memory/disk overhead
+                if "processed_segments" in checkpoint:
+                    del checkpoint["processed_segments"]
+
                 return checkpoint
             except Exception as e:
                 self.logger.warning(f"Could not load checkpoint: {e}")
@@ -153,12 +162,14 @@ class EEGPreprocessor:
     def save_checkpoint(self):
         """Save current progress"""
         checkpoint_copy = self.checkpoint.copy()
+
+        # Serialize completed_files set to list
         if isinstance(checkpoint_copy.get("completed_files"), set):
             checkpoint_copy["completed_files"] = list(
                 checkpoint_copy["completed_files"]
             )
 
-        # Remove huge segment sets if they exist from legacy checkpoints
+        # Ensure legacy key is gone
         if "processed_segments" in checkpoint_copy:
             del checkpoint_copy["processed_segments"]
 
@@ -306,10 +317,15 @@ class EEGPreprocessor:
                     self.logger.error(f"Sequence error: {e}")
                     processed_sequences.append(None)
 
-            # Clean up large objects immediately
-            del raw
-            del raw_selected
-            del raw_cropped
+            # Explicitly free memory
+            del (
+                raw,
+                raw_selected,
+                raw_cropped,
+                filtered_data_uv,
+                stft_coeffs,
+                full_power_spectrogram,
+            )
 
             return processed_sequences
         except Exception as e:
@@ -377,7 +393,7 @@ class EEGPreprocessor:
                 )
 
     def process_and_save_split(self, split_name: str, sequences: List[Dict]):
-        """Process and save a full data split."""
+        """Process and save a full data split with file-level checkpointing."""
         if not sequences:
             return
         self.logger.info(f"Processing {split_name} split: {len(sequences)} sequences")
@@ -386,10 +402,10 @@ class EEGPreprocessor:
         for (pid, fname), f_seqs in tqdm(
             file_groups.items(), desc=f"Split: {split_name}"
         ):
-            file_id = f"{pid}/{fname}"
+            # OPTIMIZATION: Checkpoint based on split and filename
+            file_id = f"{split_name}/{pid}/{fname}"
 
-            # Skip if already fully processed
-            if file_id in self.checkpoint.get("completed_files", set()):
+            if file_id in self.checkpoint["completed_files"]:
                 continue
 
             processed = self.preprocess_sequences_from_file(pid, fname, f_seqs)
@@ -401,7 +417,7 @@ class EEGPreprocessor:
                 self.append_to_hdf5(split_name, valid_batch)
                 self.checkpoint["processed_count"] += len(valid_batch)
 
-            # Mark file as complete regardless of success to avoid infinite retries on bad files
+            # Mark file as complete (even if processed results are empty, to prevent infinite retries)
             self.checkpoint["completed_files"].add(file_id)
             self.save_checkpoint()
 
@@ -437,7 +453,7 @@ if __name__ == "__main__":
             preprocessor.run_preprocessing()
             print(f"Fold {current_fold} completed!")
         except Exception as e:
-            print(f"Error: {e}")
+            print(f" Error: {e}")
             import traceback
 
             traceback.print_exc()

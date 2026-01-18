@@ -28,8 +28,15 @@ LOPO_PATIENTS = [
     "chb06",
     "chb07",
     "chb08",
-    # 'chb11', 'chb13', 'chb14', 'chb15', 'chb17', 'chb19',
-    # 'chb20', 'chb23', 'chb24'
+    "chb11",
+    "chb13",
+    "chb14",
+    "chb15",
+    "chb17",
+    "chb19",
+    "chb20",
+    "chb23",
+    "chb24",
 ]
 
 # Current fold to process (0 to len(LOPO_PATIENTS)-1, or None for all folds)

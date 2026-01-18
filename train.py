@@ -470,7 +470,7 @@ class EEGCNNTrainer:
             return device
         else:
             device = torch.device("cpu")
-            print(f"Using CPU (consider upgrading to GPU for faster training)")
+            print(f"💻 Using CPU (consider upgrading to GPU for faster training)")
             return device
 
     def _create_dataloader(self, split):

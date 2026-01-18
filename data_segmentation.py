@@ -565,7 +565,11 @@ def assign_multi_patient_splits(sequences, test_patient_id, random_seed=42):
 
     # 3. Identify unique seizures for this patient
     patient_seizure_ids = sorted(
-        list(set(s["seizure_id"] for s in patient_seqs if s.get("seizure_id") is not None))
+        list(
+            set(
+                s["seizure_id"] for s in patient_seqs if s.get("seizure_id") is not None
+            )
+        )
     )
     num_seizures = len(patient_seizure_ids)
 
@@ -575,7 +579,7 @@ def assign_multi_patient_splits(sequences, test_patient_id, random_seed=42):
         n_train_seizures = num_seizures - 1
     else:
         n_train_seizures = 0
-        
+
     train_seizure_ids = set(patient_seizure_ids[:n_train_seizures])
 
     # 5. Find split point: where the first TEST seizure begins
@@ -611,7 +615,9 @@ def assign_multi_patient_splits(sequences, test_patient_id, random_seed=42):
     train_patients = sorted(set(s["patient_id"] for s in train_sequences))
 
     print(f"\nFinal Split Configuration:")
-    print(f"  Train sequences: {len(train_sequences)} (from {len(train_patients)} patients)")
+    print(
+        f"  Train sequences: {len(train_sequences)} (from {len(train_patients)} patients)"
+    )
     print(f"  Test sequences: {len(test_sequences)} (from {test_patient_id})")
 
     # Assign split labels
@@ -636,7 +642,9 @@ def assign_multi_patient_splits(sequences, test_patient_id, random_seed=42):
     split_counts = {
         split_name: {
             "total": len(split_seqs),
-            positive_label: sum(1 for seq in split_seqs if seq["type"] == positive_label),
+            positive_label: sum(
+                1 for seq in split_seqs if seq["type"] == positive_label
+            ),
             "interictal": sum(1 for seq in split_seqs if seq["type"] == "interictal"),
         }
         for split_name, split_seqs in balanced_splits.items()

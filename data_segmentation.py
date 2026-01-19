@@ -25,6 +25,7 @@ from data_segmentation_helpers.config import (
     SKIP_CHANNEL_VALIDATION,
     LOPO_PATIENTS,
     LOPO_FOLD_ID,
+    LOPO_INCLUDE_OTHER_PATIENTS,
     get_fold_config,
     SEIZURE_COUNTS,
 )
@@ -557,8 +558,14 @@ def assign_multi_patient_splits(sequences, test_patient_id, random_seed=42):
     """
     positive_label = "preictal" if TASK_MODE == "prediction" else "ictal"
 
-    # 1. Separate other patients (always Train)
-    other_train_sequences = [s for s in sequences if s["patient_id"] != test_patient_id]
+    # 1. Separate other patients (based on LOPO_INCLUDE_OTHER_PATIENTS config)
+    if LOPO_INCLUDE_OTHER_PATIENTS:
+        other_train_sequences = [
+            s for s in sequences if s["patient_id"] != test_patient_id
+        ]
+    else:
+        # Single patient mode: no other patients in training
+        other_train_sequences = []
 
     # 2. Get Test Patient data (chronologically ordered)
     patient_seqs = [s for s in sequences if s["patient_id"] == test_patient_id]

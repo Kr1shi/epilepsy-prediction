@@ -40,7 +40,10 @@ LOPO_PATIENTS = [
 ]
 
 # Current fold to process (0 to len(LOPO_PATIENTS)-1, or None for all folds)
-LOPO_FOLD_ID = 0
+LOPO_FOLD_ID = None
+
+# Whether to include other patients in the training set (True = standard LOPO, False = single patient split)
+LOPO_INCLUDE_OTHER_PATIENTS = True
 
 # Precomputed seizure counts (for reference)
 from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
@@ -135,7 +138,10 @@ def get_fold_config(fold_id):
         raise ValueError(f"fold_id must be 0-{n_folds-1}, got {fold_id}")
 
     test_patient = LOPO_PATIENTS[fold_id]
-    train_patients = [p for p in LOPO_PATIENTS if p != test_patient]
+    if LOPO_INCLUDE_OTHER_PATIENTS:
+        train_patients = [p for p in LOPO_PATIENTS if p != test_patient]
+    else:
+        train_patients = []  # Single patient mode: no other patients in training
 
     return {
         "fold_id": fold_id,

@@ -32,7 +32,7 @@ from data_segmentation_helpers.config import *
 SMOOTHING_WINDOW_SIZE = 5  
 
 # N: Number of positives required in the window to trigger a detection
-SMOOTHING_REQUIRED_POSITIVES = 3  
+SMOOTHING_REQUIRED_POSITIVES = 2
 
 # Example: 3/5 means "Trigger alarm if 3 out of the last 5 segments were positive"
 # ==========================================

@@ -25,11 +25,11 @@ HIGH_FREQ_HZ = 50
 NOTCH_FREQ_HZ = 60
 
 # Single-patient configuration (LOOCV operates on single patients only)
-SINGLE_PATIENT_ID = "chb06"
+SINGLE_PATIENT_ID = "chb15"
 
 # Leave-One-Out Cross-Validation configuration (only supported mode)
 LOOCV_MODE = True  # LOOCV is the only supported mode
-LOOCV_FOLD_ID = 0  # Set to fold number or None to process all folds
+LOOCV_FOLD_ID = 1  # Set to fold number or None to process all folds
 
 # Load precomputed seizure counts
 from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
@@ -97,7 +97,7 @@ LSTM_NUM_LAYERS = 3        # Number of stacked LSTM layers (increased depth)
 LSTM_DROPOUT = 0.5         # Dropout between LSTM layers (increased regularization)
 
 # Training configuration
-TRAINING_EPOCHS = 5
+TRAINING_EPOCHS = 10
 SEQUENCE_BATCH_SIZE = 16  # Batch size for sequences
 LEARNING_RATE = 0.00001
 NUM_WORKERS = 4  # DataLoader workers

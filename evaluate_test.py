@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Evaluate trained model on test dataset
+Evaluate trained model on test dataset with Temporal Sorting and Smoothing.
 
-Usage:
-    python evaluate_test.py              # Evaluate final epoch (default)
-    python evaluate_test.py --epoch 10   # Evaluate specific epoch
+Features:
+1. Sorts test data chronologically (File -> Start Time).
+2. Applies "M-of-N" smoothing (N positives in last T frames).
 """
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 import numpy as np
+import h5py
 from pathlib import Path
+from collections import deque
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, confusion_matrix, classification_report
@@ -23,305 +25,308 @@ import argparse
 from train import EEGDataset, CNN_LSTM_Hybrid, MetricsTracker
 from data_segmentation_helpers.config import *
 
+# ==========================================
+# CONFIGURATION
+# ==========================================
+# T: Size of the rolling window
+SMOOTHING_WINDOW_SIZE = 5  
+
+# N: Number of positives required in the window to trigger a detection
+SMOOTHING_REQUIRED_POSITIVES = 3  
+
+# Example: 3/5 means "Trigger alarm if 3 out of the last 5 segments were positive"
+# ==========================================
+
 def get_positive_label():
     """Get positive class label based on task mode"""
     return 'preictal' if TASK_MODE == 'prediction' else 'ictal'
 
+def get_sorted_indices(h5_path):
+    """
+    Reads metadata from HDF5 and returns indices that sort the data
+    chronologically (grouped by file, then by start time).
+    """
+    print(f"Reading metadata for sorting from {h5_path}...")
+    with h5py.File(h5_path, 'r') as f:
+        # Check if segment_info exists
+        if 'segment_info' not in f:
+            print("⚠️ Warning: 'segment_info' not found in HDF5. Cannot sort by time. Using default order.")
+            return list(range(len(f['spectrograms'])))
+            
+        # Read metadata
+        start_times = f['segment_info']['start_times'][:]
+        file_names = [n.decode('utf-8') for n in f['segment_info']['file_names'][:]]
+        
+        # Create a list of tuples: (file_name, start_time, original_index)
+        meta_list = []
+        for i in range(len(start_times)):
+            meta_list.append({
+                'index': i,
+                'file': file_names[i],
+                'time': start_times[i]
+            })
+            
+    # Sort: Primary key = File Name, Secondary key = Start Time
+    print("Sorting test data chronologically...")
+    sorted_meta = sorted(meta_list, key=lambda x: (x['file'], x['time']))
+    
+    # Extract sorted indices
+    sorted_indices = [item['index'] for item in sorted_meta]
+    return sorted_indices
+
+def apply_smoothing(predictions, window_size, threshold):
+    """
+    Applies M-of-N smoothing to a sequence of predictions.
+    
+    Args:
+        predictions (list/array): Raw binary predictions (0 or 1)
+        window_size (int): T - size of looking back window
+        threshold (int): N - required positives
+    
+    Returns:
+        np.array: Smoothed binary predictions
+    """
+    smoothed_preds = []
+    # Queue to hold the history of the last T predictions
+    window = deque(maxlen=window_size)
+    
+    for p in predictions:
+        window.append(p)
+        # If the buffer isn't full yet, we can either be strict or loose.
+        # Here we check: do we have enough positives in the *current* buffer?
+        if sum(window) >= threshold:
+            smoothed_preds.append(1)
+        else:
+            smoothed_preds.append(0)
+            
+    return np.array(smoothed_preds)
+
 def evaluate_model(model_path, test_data_path, device):
     """
-    Load trained model and evaluate on test dataset
-
-    Args:
-        model_path: Path to saved model checkpoint (.pth file)
-        test_data_path: Path to test dataset HDF5 file
-        device: torch device to use
-
-    Returns:
-        Dictionary containing test metrics
+    Load model, sort data, evaluate, and smooth.
     """
-    # Load test dataset
+    # 1. Load Dataset
     print(f"Loading test dataset from {test_data_path}...")
-    test_dataset = EEGDataset(test_data_path, split='test')
+    full_dataset = EEGDataset(test_data_path, split='test')
+    
+    # 2. Get Sorted Indices
+    sorted_indices = get_sorted_indices(test_data_path)
+    
+    # 3. Create Sorted Subset
+    sorted_dataset = Subset(full_dataset, sorted_indices)
+    
     test_loader = DataLoader(
-        test_dataset,
+        sorted_dataset,
         batch_size=SEQUENCE_BATCH_SIZE,
-        shuffle=False,
+        shuffle=False, # STRICTLY FALSE to preserve sorted order
         num_workers=0,
         pin_memory=True if device.type == 'cuda' else False
     )
 
-    # Initialize Deep CNN-BiLSTM model
+    # 4. Initialize Model
     print(f"Initializing Deep CNN-BiLSTM model...")
     model = CNN_LSTM_Hybrid(
         num_input_channels=18,
         num_classes=2,
         sequence_length=SEQUENCE_LENGTH,
-        cnn_feature_dim=512,  # Deep EEG-CNN outputs 512 features (16 conv layers)
+        cnn_feature_dim=512,
         lstm_hidden_dim=LSTM_HIDDEN_DIM,
         lstm_num_layers=LSTM_NUM_LAYERS,
         dropout=LSTM_DROPOUT
     )
 
-    # Load trained weights with compatibility for PyTorch >= 2.6 safety defaults
+    # 5. Load Weights
     print(f"Loading model checkpoint from {model_path}...")
     try:
         checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     except TypeError:
         checkpoint = torch.load(model_path, map_location=device)
+        
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
 
-    # Get task info from checkpoint (with fallback to config)
+    # Get config
     checkpoint_task_mode = checkpoint.get('config', {}).get('task_mode', TASK_MODE)
     positive_class = checkpoint.get('config', {}).get('positive_class', get_positive_label())
 
     print(f"Model loaded from epoch {checkpoint['epoch']}")
-    print(f"Task mode: {checkpoint_task_mode.upper()} ({positive_class} vs interictal)")
-    print(f"Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)")
-    print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Smoothing Config: Require {SMOOTHING_REQUIRED_POSITIVES} positives in last {SMOOTHING_WINDOW_SIZE} frames ({SMOOTHING_REQUIRED_POSITIVES}/{SMOOTHING_WINDOW_SIZE})")
 
-    # Evaluate
-    print("\nEvaluating on test set...")
-    metrics_tracker = MetricsTracker()
+    # 6. Evaluate Loop
+    print("\nRunning inference...")
     criterion = nn.CrossEntropyLoss()
-
     total_loss = 0.0
     num_batches = 0
 
-    all_predictions = []
-    all_labels = []
+    all_raw_predictions = []
+    all_true_labels = []
     all_probabilities = []
 
     with torch.no_grad():
         pbar = tqdm(test_loader, desc='Testing')
-
         for spectrograms, labels in pbar:
             spectrograms, labels = spectrograms.to(device), labels.to(device)
 
             # Forward pass
             outputs = model(spectrograms)
             loss = criterion(outputs, labels)
-
-            # Track metrics
+            
             total_loss += loss.item()
             num_batches += 1
 
-            # Get predictions and probabilities
-            probabilities = torch.softmax(outputs, dim=1)[:, 1]
-            predictions = torch.argmax(outputs, dim=1)
+            # Get Raw Predictions
+            probs = torch.softmax(outputs, dim=1)[:, 1]
+            preds = torch.argmax(outputs, dim=1)
 
-            metrics_tracker.update(predictions, labels, probabilities)
+            # Store (CPU)
+            all_raw_predictions.extend(preds.cpu().numpy())
+            all_true_labels.extend(labels.cpu().numpy())
+            all_probabilities.extend(probs.cpu().numpy())
 
-            # Store for confusion matrix
-            all_predictions.extend(predictions.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-            all_probabilities.extend(probabilities.cpu().numpy())
+    # 7. Apply Smoothing
+    print("\nApplying temporal smoothing...")
+    all_smoothed_predictions = apply_smoothing(
+        all_raw_predictions, 
+        SMOOTHING_WINDOW_SIZE, 
+        SMOOTHING_REQUIRED_POSITIVES
+    )
 
-    # Compute metrics
+    # 8. Compute Metrics (Raw vs Smoothed)
     avg_loss = total_loss / num_batches
-    metrics = metrics_tracker.compute_metrics()
-    metrics['loss'] = avg_loss
+    
+    # Helper to compute dict of metrics
+    def compute_stats(y_true, y_pred, y_prob=None):
+        m = {
+            'accuracy': accuracy_score(y_true, y_pred),
+            'precision': precision_score(y_true, y_pred, zero_division=0),
+            'recall': recall_score(y_true, y_pred, zero_division=0),
+            'f1': f1_score(y_true, y_pred, zero_division=0),
+        }
+        if y_prob is not None:
+            try:
+                m['auc_roc'] = roc_auc_score(y_true, y_prob)
+            except:
+                m['auc_roc'] = 0.0
+        else:
+            m['auc_roc'] = 0.0 # AUC not applicable for smoothed binary preds usually
+        return m
 
-    # Compute confusion matrix
-    cm = confusion_matrix(all_labels, all_predictions)
+    raw_metrics = compute_stats(all_true_labels, all_raw_predictions, all_probabilities)
+    raw_metrics['loss'] = avg_loss
+    
+    smoothed_metrics = compute_stats(all_true_labels, all_smoothed_predictions)
+    smoothed_metrics['loss'] = avg_loss # Same loss
 
-    return metrics, cm, all_labels, all_predictions, all_probabilities, checkpoint_task_mode, positive_class
+    # Confusion Matrices
+    cm_raw = confusion_matrix(all_true_labels, all_raw_predictions)
+    cm_smoothed = confusion_matrix(all_true_labels, all_smoothed_predictions)
+
+    return (
+        raw_metrics, smoothed_metrics, 
+        cm_raw, cm_smoothed, 
+        all_true_labels, all_raw_predictions, all_smoothed_predictions,
+        checkpoint_task_mode, positive_class
+    )
 
 def main():
-    """Main evaluation function"""
-    # Parse command line arguments
     parser = argparse.ArgumentParser(description='Evaluate trained model on test dataset')
-    parser.add_argument(
-        '--epoch',
-        type=int,
-        default=TRAINING_EPOCHS,
-        help=f'Epoch number to evaluate (default: {TRAINING_EPOCHS}, the final epoch)'
-    )
+    parser.add_argument('--epoch', type=int, default=TRAINING_EPOCHS, help='Epoch number to evaluate')
     args = parser.parse_args()
 
-    # Determine which folds to process
+    # Determine folds
     if LOOCV_FOLD_ID is None:
         folds_to_process = list(range(LOOCV_TOTAL_SEIZURES))
-        print("="*60)
         print("BATCH EVALUATION: ALL FOLDS")
-        print(f"Evaluating {len(folds_to_process)} folds for patient {SINGLE_PATIENT_ID}")
-        print("="*60)
     else:
         folds_to_process = [LOOCV_FOLD_ID]
-        print("="*60)
-        print("SINGLE FOLD EVALUATION")
-        print(f"Evaluating fold {LOOCV_FOLD_ID} for patient {SINGLE_PATIENT_ID}")
-        print("="*60)
+        print(f"SINGLE FOLD EVALUATION: Fold {LOOCV_FOLD_ID}")
 
-    # Device setup
+    # Device
     if torch.cuda.is_available():
         device = torch.device("cuda")
-        print(f"Using CUDA: {torch.cuda.get_device_name()}")
     elif torch.backends.mps.is_available():
         device = torch.device("mps")
-        print("Using Apple Silicon GPU (MPS)")
     else:
         device = torch.device("cpu")
-        print("Using CPU")
+    print(f"Using device: {device}")
 
-    # Store results for all folds (for batch summary)
     batch_results = {}
 
-    # Evaluate each fold
     for current_fold in folds_to_process:
         fold_config = get_fold_config(current_fold)
         current_output_prefix = fold_config['output_prefix']
 
         print(f"\n{'='*60}")
-        print(f"EVALUATING FOLD {current_fold}/{LOOCV_TOTAL_SEIZURES-1}")
+        print(f"EVALUATING FOLD {current_fold}")
         print(f"{'='*60}")
 
         try:
-            # Setup fold-specific model and data
             model_path = Path(f"model/{current_output_prefix}/epoch_{args.epoch:03d}.pth")
-            dataset_dir = Path("preprocessing") / "data" / current_output_prefix
-            test_data_path = dataset_dir / "test_dataset.h5"
+            test_data_path = Path("preprocessing") / "data" / current_output_prefix / "test_dataset.h5"
 
-            # Check if files exist
-            if not model_path.exists():
-                print(f"❌ Model not found: {model_path}")
-                continue
-            if not test_data_path.exists():
-                print(f"❌ Test dataset not found: {test_data_path}")
+            if not model_path.exists() or not test_data_path.exists():
+                print(f"❌ Files missing for fold {current_fold}. Skipping.")
                 continue
 
-            print(f"Evaluating model from epoch {args.epoch}")
-            print(f"Dataset prefix: {current_output_prefix}")
-            print(f"Using test dataset: {test_data_path}")
+            # Run Evaluation
+            (raw, smoothed, cm_raw, cm_smoothed, 
+             y_true, y_raw, y_smooth, 
+             mode, pos_class) = evaluate_model(model_path, test_data_path, device)
 
-            metrics, cm, true_labels, predictions, probabilities, checkpoint_task_mode, positive_class = evaluate_model(
-                model_path, test_data_path, device
-            )
-
-            # Print results
+            # Print Comparison
             print("\n" + "="*60)
-            print("FOLD TEST RESULTS")
+            print("RESULTS COMPARISON")
             print("="*60)
-            print(f"Loss:      {metrics['loss']:.4f}")
-            print(f"Accuracy:  {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)")
-            print(f"Precision: {metrics['precision']:.4f}")
-            print(f"Recall:    {metrics['recall']:.4f}")
-            print(f"F1 Score:  {metrics['f1']:.4f}")
-            print(f"AUC-ROC:   {metrics['auc_roc']:.4f}")
+            print(f"{'METRIC':<12} | {'RAW':<10} | {'SMOOTHED (M-of-N)':<10}")
+            print("-" * 40)
+            print(f"{'Accuracy':<12} | {raw['accuracy']:.4f}     | {smoothed['accuracy']:.4f}")
+            print(f"{'Precision':<12} | {raw['precision']:.4f}     | {smoothed['precision']:.4f}")
+            print(f"{'Recall':<12} | {raw['recall']:.4f}     | {smoothed['recall']:.4f}")
+            print(f"{'F1 Score':<12} | {raw['f1']:.4f}     | {smoothed['f1']:.4f}")
+            print("-" * 40)
+            
+            print(f"\nConfiguration: {SMOOTHING_REQUIRED_POSITIVES} positives required in last {SMOOTHING_WINDOW_SIZE} frames.")
+            
+            print("\nSmoothed Confusion Matrix:")
+            print(f"                Predicted")
+            print(f"                Interictal  {pos_class.capitalize()}")
+            print(f"Actual Interictal    {cm_smoothed[0,0]:6d}    {cm_smoothed[0,1]:6d}")
+            print(f"       {pos_class.capitalize():9s}   {cm_smoothed[1,0]:6d}    {cm_smoothed[1,1]:6d}")
 
-            print("\nConfusion Matrix:")
-            print("                Predicted")
-            print(f"                Interictal  {positive_class.capitalize()}")
-            print(f"Actual Interictal    {cm[0,0]:6d}    {cm[0,1]:6d}")
-            print(f"       {positive_class.capitalize():9s}   {cm[1,0]:6d}    {cm[1,1]:6d}")
-
-            # Class-wise statistics
-            print("\nClass Distribution:")
-            true_np = np.array(true_labels)
-            pred_np = np.array(predictions)
-            print(f"True Interictal (0): {np.sum(true_np == 0)} samples")
-            print(f"True {positive_class.capitalize()} (1):   {np.sum(true_np == 1)} samples")
-            print(f"Pred Interictal (0): {np.sum(pred_np == 0)} samples")
-            print(f"Pred {positive_class.capitalize()} (1):   {np.sum(pred_np == 1)} samples")
-
-            # Detailed classification report
-            print("\nDetailed Classification Report:")
-            print(classification_report(
-                true_labels,
-                predictions,
-                target_names=['Interictal', positive_class.capitalize()],
-                digits=4
-            ))
-
-            # Save fold-specific results
+            # Save Results
             fold_results = {
                 'fold': current_fold,
-                'task_mode': checkpoint_task_mode,
-                'positive_class': positive_class,
-                'negative_class': 'interictal',
-                'test_metrics': metrics,
-                'confusion_matrix': cm.tolist(),
-                'model_path': str(model_path),
-                'test_data_path': str(test_data_path)
+                'config': {'window': SMOOTHING_WINDOW_SIZE, 'threshold': SMOOTHING_REQUIRED_POSITIVES},
+                'raw_metrics': raw,
+                'smoothed_metrics': smoothed,
+                'cm_smoothed': cm_smoothed.tolist()
             }
-
-            fold_results_path = Path(f"model/{current_output_prefix}/test_results.json")
-            fold_results_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(fold_results_path, 'w') as f:
+            
+            out_path = Path(f"model/{current_output_prefix}/test_results_smoothed.json")
+            with open(out_path, 'w') as f:
                 json.dump(fold_results, f, indent=2)
-
-            print(f"\n✅ Results saved to {fold_results_path}")
-
-            # Store for batch summary
-            batch_results[current_fold] = {
-                'fold': current_fold,
-                'output_prefix': current_output_prefix,
-                'metrics': metrics,
-                'confusion_matrix': cm.tolist()
-            }
+            
+            batch_results[current_fold] = fold_results
 
         except Exception as e:
-            print(f"❌ Error evaluating fold {current_fold}: {e}")
+            print(f"❌ Error in fold {current_fold}: {e}")
             import traceback
             traceback.print_exc()
 
-    # Save batch results summary if processing multiple folds
-    if LOOCV_FOLD_ID is None and batch_results:
+    # Batch Summary
+    if len(batch_results) > 0 and LOOCV_FOLD_ID is None:
         print("\n" + "="*60)
-        print("BATCH EVALUATION SUMMARY")
+        print("BATCH SUMMARY (SMOOTHED METRICS)")
         print("="*60)
-
-        # Compute aggregate metrics
-        accuracies = [res['metrics']['accuracy'] for res in batch_results.values()]
-        precisions = [res['metrics']['precision'] for res in batch_results.values()]
-        recalls = [res['metrics']['recall'] for res in batch_results.values()]
-        f1_scores = [res['metrics']['f1'] for res in batch_results.values()]
-        auc_rocs = [res['metrics']['auc_roc'] for res in batch_results.values()]
-
-        print(f"Folds evaluated: {len(batch_results)}/{len(folds_to_process)}")
-        print(f"\nMean metrics (across folds):")
-        print(f"  Accuracy:  {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
-        print(f"  Precision: {np.mean(precisions):.4f} (±{np.std(precisions):.4f})")
-        print(f"  Recall:    {np.mean(recalls):.4f} (±{np.std(recalls):.4f})")
-        print(f"  F1 Score:  {np.mean(f1_scores):.4f} (±{np.std(f1_scores):.4f})")
-        print(f"  AUC-ROC:   {np.mean(auc_rocs):.4f} (±{np.std(auc_rocs):.4f})")
-
-        # Save batch summary
-        batch_summary = {
-            'total_folds': LOOCV_TOTAL_SEIZURES,
-            'evaluated_folds': len(batch_results),
-            'fold_results': batch_results,
-            'aggregate_metrics': {
-                'accuracy': {
-                    'mean': float(np.mean(accuracies)),
-                    'std': float(np.std(accuracies))
-                },
-                'precision': {
-                    'mean': float(np.mean(precisions)),
-                    'std': float(np.std(precisions))
-                },
-                'recall': {
-                    'mean': float(np.mean(recalls)),
-                    'std': float(np.std(recalls))
-                },
-                'f1_score': {
-                    'mean': float(np.mean(f1_scores)),
-                    'std': float(np.std(f1_scores))
-                },
-                'auc_roc': {
-                    'mean': float(np.mean(auc_rocs)),
-                    'std': float(np.std(auc_rocs))
-                }
-            }
-        }
-
-        batch_results_path = Path("model/batch_test_results.json")
-        with open(batch_results_path, 'w') as f:
-            json.dump(batch_summary, f, indent=2)
-
-        print(f"\n✅ Batch results saved to {batch_results_path}")
-        print("="*60)
+        s_f1 = [r['smoothed_metrics']['f1'] for r in batch_results.values()]
+        s_acc = [r['smoothed_metrics']['accuracy'] for r in batch_results.values()]
+        
+        print(f"Mean Smoothed F1:       {np.mean(s_f1):.4f} (±{np.std(s_f1):.4f})")
+        print(f"Mean Smoothed Accuracy: {np.mean(s_acc):.4f} (±{np.std(s_acc):.4f})")
+        
+        with open("model/batch_test_results_smoothed.json", 'w') as f:
+            json.dump(batch_results, f, indent=2)
 
 if __name__ == "__main__":
     main()

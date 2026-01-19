@@ -439,6 +439,7 @@ class EEGCNNTrainer:
         # Metrics tracking
         self.train_metrics_history = []
         self.val_metrics_history = []
+        self.best_val_auc = 0.0
 
         print(
             f"Model initialized with {sum(p.numel() for p in self.model.parameters())} parameters"
@@ -624,8 +625,17 @@ class EEGCNNTrainer:
             },
         }
 
+        # Save regular epoch checkpoint
         model_path = self.model_dir / f"epoch_{epoch+1:03d}.pth"
         torch.save(checkpoint, model_path)
+
+        # Save best model if validation AUC improves
+        current_val_auc = val_metrics["auc_roc"]
+        if current_val_auc > self.best_val_auc:
+            self.best_val_auc = current_val_auc
+            best_model_path = self.model_dir / "best_model.pth"
+            torch.save(checkpoint, best_model_path)
+            print(f"⭐ New best model saved! (Val AUC: {self.best_val_auc:.4f})")
 
     def save_metrics(self):
         """Save training metrics to JSON"""

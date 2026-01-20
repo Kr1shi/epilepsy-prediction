@@ -242,7 +242,8 @@ class EEGPreprocessor:
         """Process sequences from one file with per-sequence zero-centering."""
         try:
             edf_path = f"physionet.org/files/chbmit/1.0.0/{patient_id}/{filename}"
-            raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
+            # Use preload=False for lazy loading to save memory
+            raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
             sampling_rate = raw.info["sfreq"]
             raw_selected, clean_channel_names = self.select_target_channels(raw)
 
@@ -257,15 +258,11 @@ class EEGPreprocessor:
             crop_tmin, crop_tmax = max(0, min_time - padding), min(
                 raw_selected.times[-1], max_time + padding
             )
-            raw_cropped = raw_selected.copy().crop(tmin=crop_tmin, tmax=crop_tmax)
 
-            raw_cropped.filter(
-                l_freq=LOW_FREQ_HZ,
-                h_freq=HIGH_FREQ_HZ,
-                fir_design="firwin",
-                n_jobs=MNE_N_JOBS,
-                verbose=False,
-            )
+            # Crop first, then load only the required data slice into memory
+            raw_cropped = raw_selected.copy().crop(tmin=crop_tmin, tmax=crop_tmax)
+            raw_cropped.load_data()
+
             raw_cropped.notch_filter(
                 freqs=NOTCH_FREQ_HZ, n_jobs=MNE_N_JOBS, verbose=False
             )
@@ -294,8 +291,14 @@ class EEGPreprocessor:
                                 power_spectrogram + LOG_TRANSFORM_EPSILON
                             )
 
-                        # Per-sequence Zero-Centering (Subtract Mean)
-                        power_spectrogram = power_spectrogram - power_spectrogram.mean()
+                        # Per-sequence Z-score Normalization (Mean=0, Std=1)
+                        mean = power_spectrogram.mean()
+                        std = power_spectrogram.std()
+                        if std > 1e-8:
+                            power_spectrogram = (power_spectrogram - mean) / std
+                        else:
+                            power_spectrogram = power_spectrogram - mean
+
                         sequence_spectrograms.append(power_spectrogram)
 
                     processed_sequences.append(

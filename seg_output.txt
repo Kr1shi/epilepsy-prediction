@@ -1,0 +1,527 @@
+(epilepsy-detection) ➜  epilepsy-prediction git:(main) ✗ python data_segmentation.py
+============================================================
+LEAVE-ONE-PATIENT-OUT (LOPO) CROSS-VALIDATION
+============================================================
+
+Configuration:
+  - Task mode: PREDICTION (preictal vs interictal)
+  - Total patients: 14
+  - Patients: ['chb01', 'chb02', 'chb05', 'chb06', 'chb07', 'chb08', 'chb11', 'chb13', 'chb14', 'chb15', 'chb17', 'chb19', 'chb20', 'chb23']
+  - Sequence length: 30 segments (150s)
+  - Stride: 5 segments (83% overlap)
+  - Segment duration: 5s
+  - Preictal window: 10 min
+  - Interictal buffer: 120 min
+  - Channel validation: ENABLED
+  - Target channels: 18 channels
+
+Processing ALL 14 folds
+============================================================
+
+Validating all 14 patients have required channels...
+  chb01: 42/42 files valid (100%), 7 seizures
+  chb02: 36/36 files valid (100%), 3 seizures
+  chb05: 39/39 files valid (100%), 5 seizures
+  chb06: 18/18 files valid (100%), 10 seizures
+  chb07: 19/19 files valid (100%), 3 seizures
+  chb08: 20/20 files valid (100%), 5 seizures
+  chb11: 35/35 files valid (100%), 3 seizures
+  chb13: 33/33 files valid (100%), 12 seizures
+/home/krishi/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
+  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
+  chb14: 26/26 files valid (100%), 8 seizures
+  chb15: 40/40 files valid (100%), 20 seizures
+  chb17: 21/21 files valid (100%), 3 seizures
+/home/krishi/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
+  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
+  chb19: 30/30 files valid (100%), 3 seizures
+  chb20: 29/29 files valid (100%), 8 seizures
+  chb23: 9/9 files valid (100%), 7 seizures
+
+
+============================================================
+Extracting sequences from 14 patients
+============================================================
+
+Processing chb01...
+Patient chb01: 671 sequences (153 preictal, 518 interictal)
+  -> 671 sequences (153 preictal, 518 interictal)
+
+Processing chb02...
+Patient chb02: 713 sequences (44 preictal, 669 interictal)
+  -> 713 sequences (44 preictal, 669 interictal)
+
+Processing chb05...
+Patient chb05: 614 sequences (100 preictal, 514 interictal)
+  -> 614 sequences (100 preictal, 514 interictal)
+
+Processing chb06...
+Patient chb06: 1132 sequences (195 preictal, 937 interictal)
+  -> 1132 sequences (195 preictal, 937 interictal)
+
+Processing chb07...
+Patient chb07: 1426 sequences (67 preictal, 1359 interictal)
+  -> 1426 sequences (67 preictal, 1359 interictal)
+
+Processing chb08...
+Patient chb08: 250 sequences (109 preictal, 141 interictal)
+  -> 250 sequences (109 preictal, 141 interictal)
+
+Processing chb11...
+Patient chb11: 751 sequences (59 preictal, 692 interictal)
+  -> 751 sequences (59 preictal, 692 interictal)
+
+Processing chb13...
+Patient chb13: 690 sequences (236 preictal, 454 interictal)
+  -> 690 sequences (236 preictal, 454 interictal)
+
+Processing chb14...
+/home/krishi/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
+  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
+/home/krishi/Projects/epilepsy-prediction/data_segmentation.py:46: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
+  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
+Patient chb14: 467 sequences (172 preictal, 295 interictal)
+  -> 467 sequences (172 preictal, 295 interictal)
+
+Processing chb15...
+Patient chb15: 597 sequences (412 preictal, 185 interictal)
+  -> 597 sequences (412 preictal, 185 interictal)
+
+Processing chb17...
+Patient chb17: 407 sequences (63 preictal, 344 interictal)
+  -> 407 sequences (63 preictal, 344 interictal)
+
+Processing chb19...
+/home/krishi/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
+  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
+/home/krishi/Projects/epilepsy-prediction/data_segmentation.py:46: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
+  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
+Patient chb19: 668 sequences (48 preictal, 620 interictal)
+  -> 668 sequences (48 preictal, 620 interictal)
+
+Processing chb20...
+Patient chb20: 590 sequences (145 preictal, 445 interictal)
+  -> 590 sequences (145 preictal, 445 interictal)
+
+Processing chb23...
+Patient chb23: 526 sequences (142 preictal, 384 interictal)
+  -> 526 sequences (142 preictal, 384 interictal)
+
+============================================================
+Total: 9502 sequences from 14 patients
+============================================================
+
+[OK] Total: 9502 sequences extracted from 14 patients
+
+============================================================
+FOLD 0/13: Test patient = chb01
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold00
+
+Test Patient chb01 Split (Semi-LOPO):
+  Total Seizures: 7
+  Train Seizures: 6 (IDs: [0, 1, 2, 3, 4, 5])
+  Test Seizures: 1 (IDs: [6])
+  Sequences: 346 Train / 325 Test
+
+Final Split Configuration:
+  Train sequences: 346 (from 1 patients)
+  Test sequences: 325 (from chb01)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 264 sequences (132 preictal, 132 interictal)
+  test: 42 sequences (21 preictal, 21 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 132 preictal, 132 interictal (dropped 0 preictal, 82 interictal)
+  test: kept 21 preictal, 21 interictal (dropped 0 preictal, 283 interictal)
+
+Sequences saved to lopo_fold00_sequences_prediction.json
+File size: 0.49 MB
+
+[SUCCESS] Fold 0 completed: lopo_fold00_sequences_prediction.json
+
+============================================================
+FOLD 1/13: Test patient = chb02
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold01
+
+Test Patient chb02 Split (Semi-LOPO):
+  Total Seizures: 2
+  Train Seizures: 1 (IDs: [1])
+  Test Seizures: 1 (IDs: [2])
+  Sequences: 370 Train / 343 Test
+
+Final Split Configuration:
+  Train sequences: 370 (from 1 patients)
+  Test sequences: 343 (from chb02)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 46 sequences (23 preictal, 23 interictal)
+  test: 42 sequences (21 preictal, 21 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 23 preictal, 23 interictal (dropped 0 preictal, 324 interictal)
+  test: kept 21 preictal, 21 interictal (dropped 0 preictal, 301 interictal)
+
+Sequences saved to lopo_fold01_sequences_prediction.json
+File size: 0.14 MB
+
+[SUCCESS] Fold 1 completed: lopo_fold01_sequences_prediction.json
+
+============================================================
+FOLD 2/13: Test patient = chb05
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold02
+
+Test Patient chb05 Split (Semi-LOPO):
+  Total Seizures: 5
+  Train Seizures: 4 (IDs: [0, 1, 2, 3])
+  Test Seizures: 1 (IDs: [4])
+  Sequences: 241 Train / 373 Test
+
+Final Split Configuration:
+  Train sequences: 241 (from 1 patients)
+  Test sequences: 373 (from chb05)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 156 sequences (78 preictal, 78 interictal)
+  test: 44 sequences (22 preictal, 22 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 78 preictal, 78 interictal (dropped 0 preictal, 85 interictal)
+  test: kept 22 preictal, 22 interictal (dropped 0 preictal, 329 interictal)
+
+Sequences saved to lopo_fold02_sequences_prediction.json
+File size: 0.32 MB
+
+[SUCCESS] Fold 2 completed: lopo_fold02_sequences_prediction.json
+
+============================================================
+FOLD 3/13: Test patient = chb06
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold03
+
+Test Patient chb06 Split (Semi-LOPO):
+  Total Seizures: 10
+  Train Seizures: 9 (IDs: [0, 1, 2, 3, 4, 5, 6, 7, 8])
+  Test Seizures: 1 (IDs: [9])
+  Sequences: 1110 Train / 22 Test
+
+Final Split Configuration:
+  Train sequences: 1110 (from 1 patients)
+  Test sequences: 22 (from chb06)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 346 sequences (173 preictal, 173 interictal)
+  test: 22 sequences (22 preictal, 0 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 173 preictal, 173 interictal (dropped 0 preictal, 764 interictal)
+  test: Skipped balancing due to missing class
+
+Sequences saved to lopo_fold03_sequences_prediction.json
+File size: 0.60 MB
+
+[SUCCESS] Fold 3 completed: lopo_fold03_sequences_prediction.json
+
+============================================================
+FOLD 4/13: Test patient = chb07
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold04
+
+Test Patient chb07 Split (Semi-LOPO):
+  Total Seizures: 3
+  Train Seizures: 2 (IDs: [0, 1])
+  Test Seizures: 1 (IDs: [2])
+  Sequences: 1406 Train / 20 Test
+
+Final Split Configuration:
+  Train sequences: 1406 (from 1 patients)
+  Test sequences: 20 (from chb07)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 94 sequences (47 preictal, 47 interictal)
+  test: 20 sequences (20 preictal, 0 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 47 preictal, 47 interictal (dropped 0 preictal, 1312 interictal)
+  test: Skipped balancing due to missing class
+
+Sequences saved to lopo_fold04_sequences_prediction.json
+File size: 0.19 MB
+
+[SUCCESS] Fold 4 completed: lopo_fold04_sequences_prediction.json
+
+============================================================
+FOLD 5/13: Test patient = chb08
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold05
+
+Test Patient chb08 Split (Semi-LOPO):
+  Total Seizures: 5
+  Train Seizures: 4 (IDs: [0, 1, 2, 3])
+  Test Seizures: 1 (IDs: [4])
+  Sequences: 172 Train / 78 Test
+
+Final Split Configuration:
+  Train sequences: 172 (from 1 patients)
+  Test sequences: 78 (from chb08)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 170 sequences (85 preictal, 85 interictal)
+  test: 48 sequences (24 preictal, 24 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 85 preictal, 85 interictal (dropped 0 preictal, 2 interictal)
+  test: kept 24 preictal, 24 interictal (dropped 0 preictal, 30 interictal)
+
+Sequences saved to lopo_fold05_sequences_prediction.json
+File size: 0.35 MB
+
+[SUCCESS] Fold 5 completed: lopo_fold05_sequences_prediction.json
+
+============================================================
+FOLD 6/13: Test patient = chb11
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold06
+
+Test Patient chb11 Split (Semi-LOPO):
+  Total Seizures: 3
+  Train Seizures: 2 (IDs: [0, 1])
+  Test Seizures: 1 (IDs: [2])
+  Sequences: 728 Train / 23 Test
+
+Final Split Configuration:
+  Train sequences: 728 (from 1 patients)
+  Test sequences: 23 (from chb11)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 72 sequences (36 preictal, 36 interictal)
+  test: 23 sequences (23 preictal, 0 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 36 preictal, 36 interictal (dropped 0 preictal, 656 interictal)
+  test: Skipped balancing due to missing class
+
+Sequences saved to lopo_fold06_sequences_prediction.json
+File size: 0.15 MB
+
+[SUCCESS] Fold 6 completed: lopo_fold06_sequences_prediction.json
+
+============================================================
+FOLD 7/13: Test patient = chb13
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold07
+
+Test Patient chb13 Split (Semi-LOPO):
+  Total Seizures: 12
+  Train Seizures: 11 (IDs: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  Test Seizures: 1 (IDs: [11])
+  Sequences: 666 Train / 24 Test
+
+Final Split Configuration:
+  Train sequences: 666 (from 1 patients)
+  Test sequences: 24 (from chb13)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 424 sequences (212 preictal, 212 interictal)
+  test: 24 sequences (24 preictal, 0 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 212 preictal, 212 interictal (dropped 0 preictal, 242 interictal)
+  test: Skipped balancing due to missing class
+
+Sequences saved to lopo_fold07_sequences_prediction.json
+File size: 0.71 MB
+
+[SUCCESS] Fold 7 completed: lopo_fold07_sequences_prediction.json
+
+============================================================
+FOLD 8/13: Test patient = chb14
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold08
+
+Test Patient chb14 Split (Semi-LOPO):
+  Total Seizures: 8
+  Train Seizures: 7 (IDs: [0, 1, 2, 3, 4, 5, 6])
+  Test Seizures: 1 (IDs: [7])
+  Sequences: 328 Train / 139 Test
+
+Final Split Configuration:
+  Train sequences: 328 (from 1 patients)
+  Test sequences: 139 (from chb14)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 296 sequences (148 preictal, 148 interictal)
+  test: 48 sequences (24 preictal, 24 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 148 preictal, 148 interictal (dropped 0 preictal, 32 interictal)
+  test: kept 24 preictal, 24 interictal (dropped 0 preictal, 91 interictal)
+
+Sequences saved to lopo_fold08_sequences_prediction.json
+File size: 0.55 MB
+
+[SUCCESS] Fold 8 completed: lopo_fold08_sequences_prediction.json
+
+============================================================
+FOLD 9/13: Test patient = chb15
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold09
+
+Test Patient chb15 Split (Semi-LOPO):
+  Total Seizures: 20
+  Train Seizures: 19 (IDs: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18])
+  Test Seizures: 1 (IDs: [19])
+  Sequences: 573 Train / 24 Test
+
+Final Split Configuration:
+  Train sequences: 573 (from 1 patients)
+  Test sequences: 24 (from chb15)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 370 sequences (185 preictal, 185 interictal)
+  test: 24 sequences (24 preictal, 0 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 185 preictal, 185 interictal (dropped 203 preictal, 0 interictal)
+  test: Skipped balancing due to missing class
+
+Sequences saved to lopo_fold09_sequences_prediction.json
+File size: 0.62 MB
+
+[SUCCESS] Fold 9 completed: lopo_fold09_sequences_prediction.json
+
+============================================================
+FOLD 10/13: Test patient = chb17
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold10
+
+Test Patient chb17 Split (Semi-LOPO):
+  Total Seizures: 3
+  Train Seizures: 2 (IDs: [0, 1])
+  Test Seizures: 1 (IDs: [2])
+  Sequences: 130 Train / 277 Test
+
+Final Split Configuration:
+  Train sequences: 130 (from 1 patients)
+  Test sequences: 277 (from chb17)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 78 sequences (39 preictal, 39 interictal)
+  test: 48 sequences (24 preictal, 24 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 39 preictal, 39 interictal (dropped 0 preictal, 52 interictal)
+  test: kept 24 preictal, 24 interictal (dropped 0 preictal, 229 interictal)
+
+Sequences saved to lopo_fold10_sequences_prediction.json
+File size: 0.20 MB
+
+[SUCCESS] Fold 10 completed: lopo_fold10_sequences_prediction.json
+
+============================================================
+FOLD 11/13: Test patient = chb19
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold11
+
+Test Patient chb19 Split (Semi-LOPO):
+  Total Seizures: 3
+  Train Seizures: 2 (IDs: [0, 1])
+  Test Seizures: 1 (IDs: [2])
+  Sequences: 649 Train / 19 Test
+
+Final Split Configuration:
+  Train sequences: 649 (from 1 patients)
+  Test sequences: 19 (from chb19)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 58 sequences (29 preictal, 29 interictal)
+  test: 19 sequences (19 preictal, 0 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 29 preictal, 29 interictal (dropped 0 preictal, 591 interictal)
+  test: Skipped balancing due to missing class
+
+Sequences saved to lopo_fold11_sequences_prediction.json
+File size: 0.12 MB
+
+[SUCCESS] Fold 11 completed: lopo_fold11_sequences_prediction.json
+
+============================================================
+FOLD 12/13: Test patient = chb20
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold12
+
+Test Patient chb20 Split (Semi-LOPO):
+  Total Seizures: 7
+  Train Seizures: 6 (IDs: [1, 2, 3, 4, 5, 6])
+  Test Seizures: 1 (IDs: [7])
+  Sequences: 570 Train / 20 Test
+
+Final Split Configuration:
+  Train sequences: 570 (from 1 patients)
+  Test sequences: 20 (from chb20)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 250 sequences (125 preictal, 125 interictal)
+  test: 20 sequences (20 preictal, 0 interictal)
+
+=== BALANCING SUMMARY ===
+  train: kept 125 preictal, 125 interictal (dropped 0 preictal, 320 interictal)
+  test: Skipped balancing due to missing class
+
+Sequences saved to lopo_fold12_sequences_prediction.json
+File size: 0.43 MB
+
+[SUCCESS] Fold 12 completed: lopo_fold12_sequences_prediction.json
+
+============================================================
+FOLD 13/13: Test patient = chb23
+============================================================
+  Train patients (0): []
+  Output prefix: lopo_fold13
+
+Test Patient chb23 Split (Semi-LOPO):
+  Total Seizures: 7
+  Train Seizures: 6 (IDs: [0, 1, 2, 3, 4, 5])
+  Test Seizures: 1 (IDs: [6])
+  Sequences: 123 Train / 403 Test
+
+Final Split Configuration:
+  Train sequences: 123 (from 1 patients)
+  Test sequences: 403 (from chb23)
+
+=== FOLD SPLIT SUMMARY ===
+  train: 123 sequences (123 preictal, 0 interictal)
+  test: 38 sequences (19 preictal, 19 interictal)
+
+=== BALANCING SUMMARY ===
+  train: Skipped balancing due to missing class
+  test: kept 19 preictal, 19 interictal (dropped 0 preictal, 365 interictal)
+
+Sequences saved to lopo_fold13_sequences_prediction.json
+File size: 0.26 MB
+
+[SUCCESS] Fold 13 completed: lopo_fold13_sequences_prediction.json
+
+============================================================
+[SUCCESS] LOPO CROSS-VALIDATION COMPLETE
+   Processed 14 fold(s)
+   Total patients: 14
+   Total sequences: 9502
+============================================================

@@ -35,9 +35,9 @@ from data_segmentation_helpers.config import (
     LSTM_NUM_LAYERS,
     LSTM_DROPOUT,
     TRAINING_EPOCHS,
-    LOPO_FOLD_ID,
-    LOPO_PATIENTS,
-    get_fold_config,
+    PATIENTS,
+    PATIENT_INDEX,
+    get_patient_config,
 )
 
 
@@ -194,19 +194,19 @@ def main():
     )
     args = parser.parse_args()
 
-    n_folds = len(LOPO_PATIENTS)
+    n_patients = len(PATIENTS)
 
-    # Determine which folds to process
-    if LOPO_FOLD_ID is None:
-        folds_to_process = list(range(n_folds))
+    # Determine which patients to process
+    if PATIENT_INDEX is None:
+        patients_to_process = list(range(n_patients))
         print("=" * 60)
-        print(f"LOPO EVALUATION: ALL {n_folds} FOLDS")
+        print(f"EVALUATION: ALL {n_patients} PATIENTS")
         print("=" * 60)
     else:
-        folds_to_process = [LOPO_FOLD_ID]
-        fold_cfg = get_fold_config(LOPO_FOLD_ID)
+        patients_to_process = [PATIENT_INDEX]
+        patient_cfg = get_patient_config(PATIENT_INDEX)
         print("=" * 60)
-        print(f"LOPO EVALUATION: Fold {LOPO_FOLD_ID} (test={fold_cfg['test_patient']})")
+        print(f"EVALUATION: Patient {PATIENT_INDEX} ({patient_cfg['patient_id']})")
         print("=" * 60)
 
     # Device setup
@@ -224,13 +224,13 @@ def main():
     batch_results = {}
 
     # Evaluate each fold
-    for current_fold in folds_to_process:
-        fold_config = get_fold_config(current_fold)
-        current_output_prefix = fold_config["output_prefix"]
-        test_patient = fold_config["test_patient"]
+    for current_idx in patients_to_process:
+        patient_config = get_patient_config(current_idx)
+        current_output_prefix = patient_config["output_prefix"]
+        patient_id = patient_config["patient_id"]
 
         print(f"\n{'='*60}")
-        print(f"FOLD {current_fold}/{n_folds-1}: test={test_patient}")
+        print(f"PATIENT {current_idx}/{n_patients-1}: {patient_id}")
         print(f"{'='*60}")
 
         try:
@@ -265,7 +265,7 @@ def main():
 
             # Print results
             print("\n" + "=" * 60)
-            print("FOLD TEST RESULTS")
+            print("PATIENT TEST RESULTS")
             print("=" * 60)
             print(f"Loss:      {metrics['loss']:.4f}")
             print(
@@ -318,8 +318,8 @@ def main():
             )
 
             # Save fold-specific results
-            fold_results = {
-                "fold": current_fold,
+            patient_results = {
+                "patient_id": patient_id,
                 "task_mode": checkpoint_task_mode,
                 "positive_class": positive_class,
                 "negative_class": "interictal",
@@ -329,29 +329,31 @@ def main():
                 "test_data_path": str(test_data_path),
             }
 
-            fold_results_path = Path(f"model/{current_output_prefix}/test_results.json")
-            fold_results_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(fold_results_path, "w") as f:
-                json.dump(fold_results, f, indent=2)
+            patient_results_path = Path(
+                f"model/{current_output_prefix}/test_results.json"
+            )
+            patient_results_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(patient_results_path, "w") as f:
+                json.dump(patient_results, f, indent=2)
 
-            print(f"\n✅ Results saved to {fold_results_path}")
+            print(f"\n✅ Results saved to {patient_results_path}")
 
             # Store for batch summary
-            batch_results[current_fold] = {
-                "fold": current_fold,
+            batch_results[current_idx] = {
+                "patient_id": patient_id,
                 "output_prefix": current_output_prefix,
                 "metrics": metrics,
                 "confusion_matrix": cm.tolist(),
             }
 
         except Exception as e:
-            print(f"❌ Error evaluating fold {current_fold}: {e}")
+            print(f"❌ Error evaluating patient {patient_id}: {e}")
             import traceback
 
             traceback.print_exc()
 
     # Save batch results summary if processing multiple folds
-    if LOPO_FOLD_ID is None and batch_results:
+    if PATIENT_INDEX is None and batch_results:
         print("\n" + "=" * 60)
         print("BATCH EVALUATION SUMMARY")
         print("=" * 60)
@@ -363,8 +365,8 @@ def main():
         f1_scores = [res["metrics"]["f1"] for res in batch_results.values()]
         auc_rocs = [res["metrics"]["auc_roc"] for res in batch_results.values()]
 
-        print(f"Folds evaluated: {len(batch_results)}/{len(folds_to_process)}")
-        print(f"\nMean metrics (across folds):")
+        print(f"Patients evaluated: {len(batch_results)}/{len(patients_to_process)}")
+        print(f"\nMean metrics (across patients):")
         print(f"  Accuracy:  {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
         print(f"  Precision: {np.mean(precisions):.4f} (±{np.std(precisions):.4f})")
         print(f"  Recall:    {np.mean(recalls):.4f} (±{np.std(recalls):.4f})")
@@ -373,9 +375,9 @@ def main():
 
         # Save batch summary
         batch_summary = {
-            "total_folds": n_folds,
-            "evaluated_folds": len(batch_results),
-            "fold_results": batch_results,
+            "total_patients": n_patients,
+            "evaluated_patients": len(batch_results),
+            "patient_results": batch_results,
             "aggregate_metrics": {
                 "accuracy": {
                     "mean": float(np.mean(accuracies)),

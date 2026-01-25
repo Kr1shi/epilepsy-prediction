@@ -29,9 +29,9 @@ from data_segmentation_helpers.config import (
     APPLY_LOG_TRANSFORM,
     PREPROCESSING_WORKERS,
     MNE_N_JOBS,
-    LOPO_FOLD_ID,
-    LOPO_PATIENTS,
-    get_fold_config,
+    PATIENTS,
+    PATIENT_INDEX,
+    get_patient_config,
 )
 
 # Suppress MNE warnings that don't affect processing
@@ -49,14 +49,14 @@ mne.set_log_level("ERROR")
 
 
 class EEGPreprocessor:
-    def __init__(self, fold_config: Dict):
-        """Initialize preprocessor with fold-specific configuration.
+    def __init__(self, patient_config: Dict):
+        """Initialize preprocessor with patient-specific configuration.
 
         Args:
-            fold_config: Dictionary from get_fold_config() with output_prefix, random_seed, etc.
+            patient_config: Dictionary from get_patient_config() with output_prefix, random_seed, etc.
         """
-        output_prefix = fold_config["output_prefix"]
-        balance_seed = fold_config["random_seed"]
+        output_prefix = patient_config["output_prefix"]
+        balance_seed = patient_config["random_seed"]
 
         # Input JSON from segmentation
         self.input_json_path = f"{output_prefix}_sequences_{TASK_MODE}.json"
@@ -443,18 +443,24 @@ class EEGPreprocessor:
 
 
 if __name__ == "__main__":
-    n_folds = len(LOPO_PATIENTS)
-    if LOPO_FOLD_ID is None:
-        folds_to_process = list(range(n_folds))
+    n_patients = len(PATIENTS)
+    if PATIENT_INDEX is None:
+        patients_to_process = list(range(n_patients))
+        print("BATCH PROCESSING: ALL PATIENTS")
     else:
-        folds_to_process = [LOPO_FOLD_ID]
+        patients_to_process = [PATIENT_INDEX]
+        print(f"SINGLE PATIENT PROCESSING: {PATIENTS[PATIENT_INDEX]}")
 
-    for current_fold in folds_to_process:
-        fold_config = get_fold_config(current_fold)
+    for current_idx in patients_to_process:
+        patient_config = get_patient_config(current_idx)
+        patient_id = patient_config["patient_id"]
+
+        print(f"\nPREPROCESSING PATIENT {current_idx}/{n_patients-1}: {patient_id}")
+
         try:
-            preprocessor = EEGPreprocessor(fold_config)
+            preprocessor = EEGPreprocessor(patient_config)
             preprocessor.run_preprocessing()
-            print(f"Fold {current_fold} completed!")
+            print(f"Patient {patient_id} completed!")
         except Exception as e:
             print(f" Error: {e}")
             import traceback

@@ -1,8 +1,8 @@
 """Configuration for seizure prediction pipeline
 
-Leave-One-Patient-Out (LOPO) cross-validation:
-- One patient is held out for testing
-- All other patients are used for training
+Single Patient Training:
+- Each patient is trained/tested on their own data
+- Split strategy: Train on past seizures, test on future (last) seizure
 """
 
 # =============================================================================
@@ -20,8 +20,8 @@ INTERICTAL_BUFFER = 120 * 60  # 2 hours buffer from seizures
 BASE_PATH = "physionet.org/files/chbmit/1.0.0/"
 ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
 
-# Patients to include in cross-validation (one fold per patient)
-LOPO_PATIENTS = [
+# Patients to include in processing
+PATIENTS = [
     "chb01",
     "chb02",
     # "chb05",
@@ -36,14 +36,10 @@ LOPO_PATIENTS = [
     # "chb19",
     # "chb20",
     # "chb23",
-    # "chb24",
 ]
 
-# Current fold to process (0 to len(LOPO_PATIENTS)-1, or None for all folds)
-LOPO_FOLD_ID = None
-
-# Whether to include other patients in the training set (True = standard LOPO, False = single patient split)
-LOPO_INCLUDE_OTHER_PATIENTS = True
+# Current patient index to process (0 to len(PATIENTS)-1, or None for all)
+PATIENT_INDEX = None
 
 # Precomputed seizure counts (for reference)
 from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
@@ -124,29 +120,23 @@ SKIP_CHANNEL_VALIDATION = False
 # =============================================================================
 
 
-def get_fold_config(fold_id):
-    """Get configuration for a specific LOPO fold.
+def get_patient_config(patient_index):
+    """Get configuration for a specific patient.
 
     Args:
-        fold_id: Fold number (0 to len(LOPO_PATIENTS)-1)
+        patient_index: Index in PATIENTS list (0 to len(PATIENTS)-1)
 
     Returns:
-        dict with: fold_id, test_patient, train_patients, random_seed, output_prefix
+        dict with: patient_id, random_seed, output_prefix
     """
-    n_folds = len(LOPO_PATIENTS)
-    if fold_id < 0 or fold_id >= n_folds:
-        raise ValueError(f"fold_id must be 0-{n_folds-1}, got {fold_id}")
+    n_patients = len(PATIENTS)
+    if patient_index < 0 or patient_index >= n_patients:
+        raise ValueError(f"patient_index must be 0-{n_patients-1}, got {patient_index}")
 
-    test_patient = LOPO_PATIENTS[fold_id]
-    if LOPO_INCLUDE_OTHER_PATIENTS:
-        train_patients = [p for p in LOPO_PATIENTS if p != test_patient]
-    else:
-        train_patients = []  # Single patient mode: no other patients in training
+    patient_id = PATIENTS[patient_index]
 
     return {
-        "fold_id": fold_id,
-        "test_patient": test_patient,
-        "train_patients": train_patients,
-        "random_seed": 42 + fold_id,
-        "output_prefix": f"lopo_fold{fold_id:02d}",
+        "patient_id": patient_id,
+        "random_seed": 42 + patient_index,
+        "output_prefix": f"{patient_id}",
     }

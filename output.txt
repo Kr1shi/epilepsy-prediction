@@ -1,0 +1,857 @@
+(epilepsy-detection) ➜  epilepsy-prediction git:(main) ✗ python evaluate_test.py    
+============================================================
+LOPO EVALUATION: ALL 14 FOLDS
+============================================================
+Using CUDA: NVIDIA GeForce RTX 3060 Laptop GPU
+
+============================================================
+FOLD 0/13: test=chb01
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold00
+Using test dataset: preprocessing/data/lopo_fold00/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold00/test_dataset.h5...
+Loaded test dataset: 42 samples
+  - Spectrogram shape: torch.Size([42, 30, 18, 50, 10])
+  - Value range: [-6.9526, 4.3739]
+  - Class distribution: tensor([21, 21])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold00/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 3/3 [00:00<00:00,  5.25it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.5270
+Accuracy:  0.8571 (85.71%)
+Precision: 0.7778
+Recall:    1.0000
+F1 Score:  0.8750
+AUC-ROC:   0.8844
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: 0.9218
+Accuracy:  0.9048 (90.48%)
+Precision: 0.8400
+Recall:    1.0000
+F1 Score:  0.9130
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal        15         6
+       Preictal         0        21
+
+Class Distribution:
+True Interictal (0): 21 samples
+True Preictal (1):   21 samples
+Pred Interictal (0): 15 samples
+Pred Preictal (1):   27 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     1.0000    0.7143    0.8333        21
+    Preictal     0.7778    1.0000    0.8750        21
+
+    accuracy                         0.8571        42
+   macro avg     0.8889    0.8571    0.8542        42
+weighted avg     0.8889    0.8571    0.8542        42
+
+
+✅ Results saved to model/lopo_fold00/test_results.json
+
+============================================================
+FOLD 1/13: test=chb02
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold01
+Using test dataset: preprocessing/data/lopo_fold01/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold01/test_dataset.h5...
+Loaded test dataset: 42 samples
+  - Spectrogram shape: torch.Size([42, 30, 18, 50, 10])
+  - Value range: [-6.8904, 4.0960]
+  - Class distribution: tensor([21, 21])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold01/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 12.98it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.6900
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.9524
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: 0.4873
+Accuracy:  0.8810 (88.10%)
+Precision: 0.9000
+Recall:    0.8571
+F1 Score:  0.8780
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal        21         0
+       Preictal        21         0
+
+Class Distribution:
+True Interictal (0): 21 samples
+True Preictal (1):   21 samples
+Pred Interictal (0): 42 samples
+Pred Preictal (1):   0 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.5000    1.0000    0.6667        21
+    Preictal     0.0000    0.0000    0.0000        21
+
+    accuracy                         0.5000        42
+   macro avg     0.2500    0.5000    0.3333        42
+weighted avg     0.2500    0.5000    0.3333        42
+
+
+✅ Results saved to model/lopo_fold01/test_results.json
+
+============================================================
+FOLD 2/13: test=chb05
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold02
+Using test dataset: preprocessing/data/lopo_fold02/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold02/test_dataset.h5...
+Loaded test dataset: 44 samples
+  - Spectrogram shape: torch.Size([44, 30, 18, 50, 10])
+  - Value range: [-5.9109, 3.6645]
+  - Class distribution: tensor([22, 22])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold02/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 12.33it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.7123
+Accuracy:  0.3409 (34.09%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.1736
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: 0.4617
+Accuracy:  0.5227 (52.27%)
+Precision: 0.5122
+Recall:    0.9545
+F1 Score:  0.6667
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal        15         7
+       Preictal        22         0
+
+Class Distribution:
+True Interictal (0): 22 samples
+True Preictal (1):   22 samples
+Pred Interictal (0): 37 samples
+Pred Preictal (1):   7 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.4054    0.6818    0.5085        22
+    Preictal     0.0000    0.0000    0.0000        22
+
+    accuracy                         0.3409        44
+   macro avg     0.2027    0.3409    0.2542        44
+weighted avg     0.2027    0.3409    0.2542        44
+
+
+✅ Results saved to model/lopo_fold02/test_results.json
+
+============================================================
+FOLD 3/13: test=chb06
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold03
+Using test dataset: preprocessing/data/lopo_fold03/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold03/test_dataset.h5...
+Loaded test dataset: 22 samples
+  - Spectrogram shape: torch.Size([22, 30, 18, 50, 10])
+  - Value range: [-6.3920, 3.7151]
+  - Class distribution: tensor([ 0, 22])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold03/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 15.17it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      1.0630
+Accuracy:  0.3182 (31.82%)
+Precision: 1.0000
+Recall:    0.3182
+F1 Score:  0.4828
+AUC-ROC:   0.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         0         0
+       Preictal        15         7
+
+Class Distribution:
+True Interictal (0): 0 samples
+True Preictal (1):   22 samples
+Pred Interictal (0): 15 samples
+Pred Preictal (1):   7 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.0000    0.0000    0.0000         0
+    Preictal     1.0000    0.3182    0.4828        22
+
+    accuracy                         0.3182        22
+   macro avg     0.5000    0.1591    0.2414        22
+weighted avg     1.0000    0.3182    0.4828        22
+
+
+✅ Results saved to model/lopo_fold03/test_results.json
+
+============================================================
+FOLD 4/13: test=chb07
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold04
+Using test dataset: preprocessing/data/lopo_fold04/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold04/test_dataset.h5...
+Loaded test dataset: 20 samples
+  - Spectrogram shape: torch.Size([20, 30, 18, 50, 10])
+  - Value range: [-6.8140, 4.6229]
+  - Class distribution: tensor([ 0, 20])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold04/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 17.32it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.7280
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         0         0
+       Preictal        20         0
+
+Class Distribution:
+True Interictal (0): 0 samples
+True Preictal (1):   20 samples
+Pred Interictal (0): 20 samples
+Pred Preictal (1):   0 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.0000    0.0000    0.0000       0.0
+    Preictal     0.0000    0.0000    0.0000      20.0
+
+    accuracy                         0.0000      20.0
+   macro avg     0.0000    0.0000    0.0000      20.0
+weighted avg     0.0000    0.0000    0.0000      20.0
+
+
+✅ Results saved to model/lopo_fold04/test_results.json
+
+============================================================
+FOLD 5/13: test=chb08
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold05
+Using test dataset: preprocessing/data/lopo_fold05/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold05/test_dataset.h5...
+Loaded test dataset: 48 samples
+  - Spectrogram shape: torch.Size([48, 30, 18, 50, 10])
+  - Value range: [-6.6351, 4.0356]
+  - Class distribution: tensor([24, 24])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold05/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 11.40it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      1.0069
+Accuracy:  0.6042 (60.42%)
+Precision: 0.5581
+Recall:    1.0000
+F1 Score:  0.7164
+AUC-ROC:   0.9861
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: 0.9361
+Accuracy:  0.9375 (93.75%)
+Precision: 1.0000
+Recall:    0.8750
+F1 Score:  0.9333
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         5        19
+       Preictal         0        24
+
+Class Distribution:
+True Interictal (0): 24 samples
+True Preictal (1):   24 samples
+Pred Interictal (0): 5 samples
+Pred Preictal (1):   43 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     1.0000    0.2083    0.3448        24
+    Preictal     0.5581    1.0000    0.7164        24
+
+    accuracy                         0.6042        48
+   macro avg     0.7791    0.6042    0.5306        48
+weighted avg     0.7791    0.6042    0.5306        48
+
+
+✅ Results saved to model/lopo_fold05/test_results.json
+
+============================================================
+FOLD 6/13: test=chb11
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold06
+Using test dataset: preprocessing/data/lopo_fold06/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold06/test_dataset.h5...
+Loaded test dataset: 23 samples
+  - Spectrogram shape: torch.Size([23, 30, 18, 50, 10])
+  - Value range: [-6.6209, 3.8982]
+  - Class distribution: tensor([ 0, 23])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold06/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 15.21it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.7138
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         0         0
+       Preictal        23         0
+
+Class Distribution:
+True Interictal (0): 0 samples
+True Preictal (1):   23 samples
+Pred Interictal (0): 23 samples
+Pred Preictal (1):   0 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.0000    0.0000    0.0000       0.0
+    Preictal     0.0000    0.0000    0.0000      23.0
+
+    accuracy                         0.0000      23.0
+   macro avg     0.0000    0.0000    0.0000      23.0
+weighted avg     0.0000    0.0000    0.0000      23.0
+
+
+✅ Results saved to model/lopo_fold06/test_results.json
+
+============================================================
+FOLD 7/13: test=chb13
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold07
+Using test dataset: preprocessing/data/lopo_fold07/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold07/test_dataset.h5...
+Loaded test dataset: 24 samples
+  - Spectrogram shape: torch.Size([24, 30, 18, 50, 10])
+  - Value range: [-5.5797, 3.5590]
+  - Class distribution: tensor([ 0, 24])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold07/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 14.70it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.0410
+Accuracy:  1.0000 (100.00%)
+Precision: 1.0000
+Recall:    1.0000
+F1 Score:  1.0000
+AUC-ROC:   0.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+❌ Error evaluating fold 7: index 1 is out of bounds for axis 1 with size 1
+Traceback (most recent call last):
+  File "/home/krishi/Projects/epilepsy-prediction/evaluate_test.py", line 291, in main
+    print(f"Actual Interictal    {cm[0,0]:6d}    {cm[0,1]:6d}")
+                                                  ~~^^^^^
+IndexError: index 1 is out of bounds for axis 1 with size 1
+
+============================================================
+FOLD 8/13: test=chb14
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold08
+Using test dataset: preprocessing/data/lopo_fold08/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold08/test_dataset.h5...
+Loaded test dataset: 48 samples
+  - Spectrogram shape: torch.Size([48, 30, 18, 50, 10])
+  - Value range: [-5.7900, 4.3585]
+  - Class distribution: tensor([24, 24])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold08/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 11.43it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      1.5194
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0747
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal        24         0
+       Preictal        24         0
+
+Class Distribution:
+True Interictal (0): 24 samples
+True Preictal (1):   24 samples
+Pred Interictal (0): 48 samples
+Pred Preictal (1):   0 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.5000    1.0000    0.6667        24
+    Preictal     0.0000    0.0000    0.0000        24
+
+    accuracy                         0.5000        48
+   macro avg     0.2500    0.5000    0.3333        48
+weighted avg     0.2500    0.5000    0.3333        48
+
+
+✅ Results saved to model/lopo_fold08/test_results.json
+
+============================================================
+FOLD 9/13: test=chb15
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold09
+Using test dataset: preprocessing/data/lopo_fold09/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold09/test_dataset.h5...
+Loaded test dataset: 24 samples
+  - Spectrogram shape: torch.Size([24, 30, 18, 50, 10])
+  - Value range: [-7.1125, 3.6095]
+  - Class distribution: tensor([ 0, 24])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold09/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 14.95it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.7896
+Accuracy:  0.0833 (8.33%)
+Precision: 1.0000
+Recall:    0.0833
+F1 Score:  0.1538
+AUC-ROC:   0.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         0         0
+       Preictal        22         2
+
+Class Distribution:
+True Interictal (0): 0 samples
+True Preictal (1):   24 samples
+Pred Interictal (0): 22 samples
+Pred Preictal (1):   2 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.0000    0.0000    0.0000         0
+    Preictal     1.0000    0.0833    0.1538        24
+
+    accuracy                         0.0833        24
+   macro avg     0.5000    0.0417    0.0769        24
+weighted avg     1.0000    0.0833    0.1538        24
+
+
+✅ Results saved to model/lopo_fold09/test_results.json
+
+============================================================
+FOLD 10/13: test=chb17
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold10
+Using test dataset: preprocessing/data/lopo_fold10/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold10/test_dataset.h5...
+Loaded test dataset: 48 samples
+  - Spectrogram shape: torch.Size([48, 30, 18, 50, 10])
+  - Value range: [-6.6736, 6.9695]
+  - Class distribution: tensor([24, 24])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold10/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 11.42it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.6778
+Accuracy:  0.6458 (64.58%)
+Precision: 0.5854
+Recall:    1.0000
+F1 Score:  0.7385
+AUC-ROC:   1.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: 0.5160
+Accuracy:  1.0000 (100.00%)
+Precision: 1.0000
+Recall:    1.0000
+F1 Score:  1.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         7        17
+       Preictal         0        24
+
+Class Distribution:
+True Interictal (0): 24 samples
+True Preictal (1):   24 samples
+Pred Interictal (0): 7 samples
+Pred Preictal (1):   41 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     1.0000    0.2917    0.4516        24
+    Preictal     0.5854    1.0000    0.7385        24
+
+    accuracy                         0.6458        48
+   macro avg     0.7927    0.6458    0.5950        48
+weighted avg     0.7927    0.6458    0.5950        48
+
+
+✅ Results saved to model/lopo_fold10/test_results.json
+
+============================================================
+FOLD 11/13: test=chb19
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold11
+Using test dataset: preprocessing/data/lopo_fold11/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold11/test_dataset.h5...
+Loaded test dataset: 19 samples
+  - Spectrogram shape: torch.Size([19, 30, 18, 50, 10])
+  - Value range: [-4.6987, 3.5453]
+  - Class distribution: tensor([ 0, 19])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold11/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 17.25it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.6400
+Accuracy:  1.0000 (100.00%)
+Precision: 1.0000
+Recall:    1.0000
+F1 Score:  1.0000
+AUC-ROC:   0.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+❌ Error evaluating fold 11: index 1 is out of bounds for axis 1 with size 1
+Traceback (most recent call last):
+  File "/home/krishi/Projects/epilepsy-prediction/evaluate_test.py", line 291, in main
+    print(f"Actual Interictal    {cm[0,0]:6d}    {cm[0,1]:6d}")
+                                                  ~~^^^^^
+IndexError: index 1 is out of bounds for axis 1 with size 1
+
+============================================================
+FOLD 12/13: test=chb20
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold12
+Using test dataset: preprocessing/data/lopo_fold12/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold12/test_dataset.h5...
+Loaded test dataset: 20 samples
+  - Spectrogram shape: torch.Size([20, 30, 18, 50, 10])
+  - Value range: [-5.5102, 3.8517]
+  - Class distribution: tensor([ 0, 20])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold12/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 17.51it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.1746
+Accuracy:  1.0000 (100.00%)
+Precision: 1.0000
+Recall:    1.0000
+F1 Score:  1.0000
+AUC-ROC:   0.0000
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: inf
+Accuracy:  0.0000 (0.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+❌ Error evaluating fold 12: index 1 is out of bounds for axis 1 with size 1
+Traceback (most recent call last):
+  File "/home/krishi/Projects/epilepsy-prediction/evaluate_test.py", line 291, in main
+    print(f"Actual Interictal    {cm[0,0]:6d}    {cm[0,1]:6d}")
+                                                  ~~^^^^^
+IndexError: index 1 is out of bounds for axis 1 with size 1
+
+============================================================
+FOLD 13/13: test=chb23
+============================================================
+Evaluating model from epoch 5
+Dataset prefix: lopo_fold13
+Using test dataset: preprocessing/data/lopo_fold13/test_dataset.h5
+Loading test dataset from preprocessing/data/lopo_fold13/test_dataset.h5...
+Loaded test dataset: 38 samples
+  - Spectrogram shape: torch.Size([38, 30, 18, 50, 10])
+  - Value range: [-7.3049, 4.2656]
+  - Class distribution: tensor([19, 19])
+Initializing Deep CNN-BiLSTM model...
+Loading model checkpoint from model/lopo_fold13/epoch_005.pth...
+Model loaded from epoch 4
+Task mode: PREDICTION (preictal vs interictal)
+Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)
+Total parameters: 41,286,914
+
+Evaluating on test set...
+Testing: 100%|█████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 14.08it/s]
+
+============================================================
+FOLD TEST RESULTS
+============================================================
+Loss:      0.9777
+Accuracy:  0.5000 (50.00%)
+Precision: 0.5000
+Recall:    1.0000
+F1 Score:  0.6667
+AUC-ROC:   0.4238
+
+Optimal Threshold Analysis (Youden's J):
+Threshold: 0.7588
+Accuracy:  0.5789 (57.89%)
+Precision: 0.5429
+Recall:    1.0000
+F1 Score:  0.7037
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         0        19
+       Preictal         0        19
+
+Class Distribution:
+True Interictal (0): 19 samples
+True Preictal (1):   19 samples
+Pred Interictal (0): 0 samples
+Pred Preictal (1):   38 samples
+
+Detailed Classification Report:
+              precision    recall  f1-score   support
+
+  Interictal     0.0000    0.0000    0.0000        19
+    Preictal     0.5000    1.0000    0.6667        19
+
+    accuracy                         0.5000        38
+   macro avg     0.2500    0.5000    0.3333        38
+weighted avg     0.2500    0.5000    0.3333        38
+
+
+✅ Results saved to model/lopo_fold13/test_results.json
+
+============================================================
+BATCH EVALUATION SUMMARY
+============================================================
+Folds evaluated: 11/14
+
+Mean metrics (across folds):
+  Accuracy:  0.3954 (±0.2648)
+  Precision: 0.4019 (±0.3968)
+  Recall:    0.4001 (±0.4619)
+  F1 Score:  0.3303 (±0.3471)
+  AUC-ROC:   0.4086 (±0.4307)
+
+✅ Batch results saved to model/batch_test_results.json
+============================================================

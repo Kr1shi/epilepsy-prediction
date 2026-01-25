@@ -38,9 +38,9 @@ from data_segmentation_helpers.config import (
     TRAINING_EPOCHS,
     LEARNING_RATE,
     WEIGHT_DECAY,
-    LOPO_FOLD_ID,
-    LOPO_PATIENTS,
-    get_fold_config,
+    PATIENTS,
+    PATIENT_INDEX,
+    get_patient_config,
 )
 
 
@@ -153,9 +153,6 @@ class EEG_CNN(nn.Module):
 
         # Block 4: Deep high-level features (no pooling - maintain spatial dimensions)
         self.block4 = nn.Sequential(
-            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
@@ -381,16 +378,14 @@ class MetricsTracker:
 class EEGCNNTrainer:
     """Main training class for EEG seizure prediction CNN"""
 
-    def __init__(self, fold_config: Dict):
-        """Initialize trainer with fold-specific configuration.
+    def __init__(self, patient_config: Dict):
+        """Initialize trainer with patient-specific configuration.
 
         Args:
-            fold_config: Dictionary from get_fold_config()
+            patient_config: Dictionary from get_patient_config()
         """
-        self.fold_id = fold_config["fold_id"]
-        self.test_patient = fold_config["test_patient"]
-        self.train_patients = fold_config["train_patients"]
-        dataset_prefix = fold_config["output_prefix"]
+        self.patient_id = patient_config["patient_id"]
+        dataset_prefix = patient_config["output_prefix"]
 
         # Setup directories
         self.model_dir = Path("model") / dataset_prefix
@@ -399,16 +394,15 @@ class EEGCNNTrainer:
         self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
 
         print(f"Dataset: {self.dataset_prefix}")
-        print(f"Test patient: {self.test_patient}")
-        print(f"Train patients ({len(self.train_patients)}): {self.train_patients}")
+        print(f"Patient: {self.patient_id}")
 
         # Device setup
         self.device = self._get_device()
         print(f"Device: {self.device}")
 
-        # Load training data (no validation in LOPO)
+        # Load training data
         self.train_loader = self._create_dataloader("train")
-        # Use Test set as Validation to monitor LOPO performance in real-time
+        # Use Test set as Validation to monitor performance in real-time
         self.val_loader = self._create_dataloader("test")
 
         # Initialize CNN-LSTM model with deep EEG-CNN backbone
@@ -604,7 +598,7 @@ class EEGCNNTrainer:
         return metrics
 
     def save_model(self, epoch, train_metrics, val_metrics):
-        """Save model checkpoint (fold-specific)"""
+        """Save model checkpoint"""
         checkpoint = {
             "epoch": epoch,
             "model_state_dict": self.model.state_dict(),
@@ -619,9 +613,7 @@ class EEGCNNTrainer:
                 "batch_size": SEQUENCE_BATCH_SIZE,
                 "learning_rate": LEARNING_RATE,
                 "weight_decay": WEIGHT_DECAY,
-                "lopo_fold": self.fold_id,
-                "lopo_test_patient": self.test_patient,
-                "lopo_train_patients": self.train_patients,
+                "patient_id": self.patient_id,
             },
         }
 
@@ -669,8 +661,7 @@ class EEGCNNTrainer:
         plt.style.use("seaborn-v0_8")
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
 
-        # LOPO mode: include fold and test patient information in title
-        title = f"EEG Seizure {TASK_MODE.capitalize()} - Fold {self.fold_id} (Test: {self.test_patient}) Training Progress"
+        title = f"EEG Seizure {TASK_MODE.capitalize()} - Patient {self.patient_id} Training Progress"
         fig.suptitle(title, fontsize=16, fontweight="bold")
 
         epochs = range(1, len(self.train_metrics_history) + 1)
@@ -758,9 +749,8 @@ class EEGCNNTrainer:
         print("=" * 60)
         print(f"STARTING EEG SEIZURE {TASK_MODE.upper()} TRAINING")
         print("=" * 60)
-        n_folds = len(LOPO_PATIENTS)
         print(f"Task mode: {TASK_MODE.upper()} ({self.positive_label} vs interictal)")
-        print(f"LOPO Fold {self.fold_id}/{n_folds-1}: test={self.test_patient}")
+        print(f"Patient: {self.patient_id}")
         print(f"Training for {TRAINING_EPOCHS} epochs")
         print(f"Batch size: {SEQUENCE_BATCH_SIZE}")
         print(f"Learning rate: {LEARNING_RATE}")
@@ -829,43 +819,43 @@ class EEGCNNTrainer:
 def main():
     """Main execution function"""
     # =================================================================
-    # LOPO TRAINING
+    # TRAINING
     # =================================================================
 
-    n_folds = len(LOPO_PATIENTS)
+    n_patients = len(PATIENTS)
 
-    # Determine which folds to process
-    if LOPO_FOLD_ID is None:
-        folds_to_process = list(range(n_folds))
+    # Determine which patients to process
+    if PATIENT_INDEX is None:
+        patients_to_process = list(range(n_patients))
         print("=" * 60)
-        print(f"LOPO TRAINING: ALL {n_folds} FOLDS")
+        print(f"TRAINING: ALL {n_patients} PATIENTS")
         print("=" * 60)
     else:
-        folds_to_process = [LOPO_FOLD_ID]
-        fold_cfg = get_fold_config(LOPO_FOLD_ID)
+        patients_to_process = [PATIENT_INDEX]
+        patient_cfg = get_patient_config(PATIENT_INDEX)
         print("=" * 60)
-        print(f"LOPO TRAINING: Fold {LOPO_FOLD_ID} (test={fold_cfg['test_patient']})")
+        print(f"TRAINING: Patient {PATIENT_INDEX} ({patient_cfg['patient_id']})")
         print("=" * 60)
 
-    # Process each fold
-    for current_fold in folds_to_process:
-        fold_config = get_fold_config(current_fold)
+    # Process each patient
+    for current_idx in patients_to_process:
+        patient_config = get_patient_config(current_idx)
 
         print(f"\n{'='*60}")
-        print(f"FOLD {current_fold}/{n_folds-1}: test={fold_config['test_patient']}")
+        print(f"PATIENT {current_idx}/{n_patients-1}: {patient_config['patient_id']}")
         print(f"{'='*60}")
 
         try:
-            trainer = EEGCNNTrainer(fold_config)
+            trainer = EEGCNNTrainer(patient_config)
             trainer.train()
-            print(f"Fold {current_fold} completed!")
+            print(f"Patient {patient_config['patient_id']} completed!")
         except Exception as e:
             print(f"Error: {e}")
             import traceback
 
             traceback.print_exc()
 
-    print(f"\n✅ Training completed for {len(folds_to_process)} fold(s)")
+    print(f"\n✅ Training completed for {len(patients_to_process)} patient(s)")
 
 
 if __name__ == "__main__":

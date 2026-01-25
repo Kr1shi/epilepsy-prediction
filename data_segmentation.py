@@ -499,8 +499,8 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     """Assign sequences to train/test splits for a single patient.
 
     Strategy:
-    - Train set: First ~50% of patient's seizures (past)
-    - Test set: Remaining ~50% of patient's seizures (future)
+    - Train set: All seizures except the last one (past)
+    - Test set: The last seizure (future)
 
     Args:
         sequences: List of all sequence dictionaries for the patient

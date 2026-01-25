@@ -1,168 +1,0 @@
-Starting pipeline at Sun Jan 18 15:48:48 EST 2026
-----------------------------------------
-Cleaning up previous models and preprocessed data...
-Running data segmentation...
-/Users/ksaikia/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
-  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
-/Users/ksaikia/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
-  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
-/Users/ksaikia/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
-  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
-/Users/ksaikia/Projects/epilepsy-prediction/data_segmentation.py:45: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
-  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
-/Users/ksaikia/Projects/epilepsy-prediction/data_segmentation_helpers/channel_validation.py:78: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
-  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
-/Users/ksaikia/Projects/epilepsy-prediction/data_segmentation.py:45: RuntimeWarning: Number of records from the header does not match the file size (perhaps the recording was not stopped before exiting). Inferring from the file size.
-  raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
-============================================================
-LEAVE-ONE-PATIENT-OUT (LOPO) CROSS-VALIDATION
-============================================================
-
-Configuration:
-  - Task mode: PREDICTION (preictal vs interictal)
-  - Total patients: 15
-  - Patients: ['chb01', 'chb02', 'chb05', 'chb06', 'chb07', 'chb08', 'chb11', 'chb13', 'chb14', 'chb15', 'chb17', 'chb19', 'chb20', 'chb23', 'chb24']
-  - Sequence length: 30 segments (150s)
-  - Stride: 5 segments (83% overlap)
-  - Segment duration: 5s
-  - Preictal window: 10 min
-  - Interictal buffer: 120 min
-  - Channel validation: ENABLED
-  - Target channels: 18 channels
-
-Processing SINGLE fold 0: test patient = chb01
-============================================================
-
-Validating all 15 patients have required channels...
-  chb01: 42/42 files valid (100%), 7 seizures
-  chb02: 36/36 files valid (100%), 3 seizures
-  chb05: 39/39 files valid (100%), 5 seizures
-  chb06: 18/18 files valid (100%), 10 seizures
-  chb07: 19/19 files valid (100%), 3 seizures
-  chb08: 20/20 files valid (100%), 5 seizures
-  chb11: 35/35 files valid (100%), 3 seizures
-  chb13: 33/33 files valid (100%), 12 seizures
-  chb14: 26/26 files valid (100%), 8 seizures
-  chb15: 40/40 files valid (100%), 20 seizures
-  chb17: 21/21 files valid (100%), 3 seizures
-  chb19: 30/30 files valid (100%), 3 seizures
-  chb20: 29/29 files valid (100%), 8 seizures
-  chb23: 9/9 files valid (100%), 7 seizures
-  chb24: 12/12 files valid (100%), 16 seizures
-
-
-============================================================
-Extracting sequences from 15 patients
-============================================================
-
-Processing chb01...
-Patient chb01: 671 sequences (153 preictal, 518 interictal)
-  -> 671 sequences (153 preictal, 518 interictal)
-
-Processing chb02...
-Patient chb02: 713 sequences (44 preictal, 669 interictal)
-  -> 713 sequences (44 preictal, 669 interictal)
-
-Processing chb05...
-Patient chb05: 614 sequences (100 preictal, 514 interictal)
-  -> 614 sequences (100 preictal, 514 interictal)
-
-Processing chb06...
-Patient chb06: 1132 sequences (195 preictal, 937 interictal)
-  -> 1132 sequences (195 preictal, 937 interictal)
-
-Processing chb07...
-Patient chb07: 1426 sequences (67 preictal, 1359 interictal)
-  -> 1426 sequences (67 preictal, 1359 interictal)
-
-Processing chb08...
-Patient chb08: 250 sequences (109 preictal, 141 interictal)
-  -> 250 sequences (109 preictal, 141 interictal)
-
-Processing chb11...
-Patient chb11: 751 sequences (59 preictal, 692 interictal)
-  -> 751 sequences (59 preictal, 692 interictal)
-
-Processing chb13...
-Patient chb13: 690 sequences (236 preictal, 454 interictal)
-  -> 690 sequences (236 preictal, 454 interictal)
-
-Processing chb14...
-Patient chb14: 467 sequences (172 preictal, 295 interictal)
-  -> 467 sequences (172 preictal, 295 interictal)
-
-Processing chb15...
-Patient chb15: 597 sequences (412 preictal, 185 interictal)
-  -> 597 sequences (412 preictal, 185 interictal)
-
-Processing chb17...
-Patient chb17: 407 sequences (63 preictal, 344 interictal)
-  -> 407 sequences (63 preictal, 344 interictal)
-
-Processing chb19...
-Patient chb19: 668 sequences (48 preictal, 620 interictal)
-  -> 668 sequences (48 preictal, 620 interictal)
-
-Processing chb20...
-Patient chb20: 590 sequences (145 preictal, 445 interictal)
-  -> 590 sequences (145 preictal, 445 interictal)
-
-Processing chb23...
-Patient chb23: 526 sequences (142 preictal, 384 interictal)
-  -> 526 sequences (142 preictal, 384 interictal)
-
-Processing chb24...
-Patient chb24: 321 sequences (321 preictal, 0 interictal)
-  -> 321 sequences (321 preictal, 0 interictal)
-
-============================================================
-Total: 9823 sequences from 15 patients
-============================================================
-
-[OK] Total: 9823 sequences extracted from 15 patients
-
-============================================================
-FOLD 0/14: Test patient = chb01
-============================================================
-  Train patients (14): ['chb02', 'chb05', 'chb06', 'chb07', 'chb08', 'chb11', 'chb13', 'chb14', 'chb15', 'chb17', 'chb19', 'chb20', 'chb23', 'chb24']
-  Output prefix: lopo_fold00
-
-Test Patient chb01 Split (Semi-LOPO):
-  Total Seizures: 7
-  Train Seizures: 6 (IDs: [0, 1, 2, 3, 4, 5])
-  Test Seizures: 1 (IDs: [6])
-  Sequences: 346 Train / 325 Test
-
-Final Split Configuration:
-  Train sequences: 9498 (from 15 patients)
-  Test sequences: 325 (from chb01)
-
-=== FOLD SPLIT SUMMARY ===
-  train: 4490 sequences (2245 preictal, 2245 interictal)
-  test: 42 sequences (21 preictal, 21 interictal)
-
-=== BALANCING SUMMARY ===
-  train: kept 2245 preictal, 2245 interictal (dropped 0 preictal, 5008 interictal)
-  test: kept 21 preictal, 21 interictal (dropped 0 preictal, 283 interictal)
-
-Sequences saved to lopo_fold00_sequences_prediction.json
-File size: 7.23 MB
-
-[SUCCESS] Fold 0 completed: lopo_fold00_sequences_prediction.json
-
-============================================================
-[SUCCESS] LOPO CROSS-VALIDATION COMPLETE
-   Processed 1 fold(s)
-   Total patients: 15
-   Total sequences: 9823
-============================================================
-Running data preprocessing...
-2026-01-18 15:48:52,822 - INFO - ============================================================
-2026-01-18 15:48:52,822 - INFO - EEG PREPROCESSING PIPELINE STARTED
-2026-01-18 15:48:52,822 - INFO - ============================================================
-2026-01-18 15:48:52,822 - INFO - EEG Preprocessor initialized (Per-Sequence Zero-Centering Mode)
-2026-01-18 15:48:52,822 - INFO - Target channels: ['C3-P3', 'C4-P4', 'CZ-PZ', 'F3-C3', 'F4-C4', 'F7-T7', 'F8-T8', 'FP1-F3', 'FP1-F7', 'FP2-F4', 'FP2-F8', 'FZ-CZ', 'P3-O1', 'P4-O2', 'P7-O1', 'P8-O2', 'T7-P7', 'T8-P8']
-2026-01-18 15:48:52,822 - INFO - Filter settings: 0.5-50 Hz, notch: 60 Hz
-2026-01-18 15:48:52,822 - INFO - Segment duration: 5 seconds
-2026-01-18 15:48:52,852 - INFO - Processing train split: 4490 sequences
-Split: train:   0%|          | 0/336 [00:00<?, ?it/s]Split: train:   0%|          | 1/336 [00:02<11:13,  2.01s/it]Split: train:   1%|          | 2/336 [00:03<09:48,  1.76s/it]Split: train:   1%|          | 3/336 [00:09<20:16,  3.65s/it]Split: train:   1%|          | 4/336 [00:10<14:11,  2.57s/it]Split: train:   1%|▏         | 5/336 [00:11<11:16,  2.04s/it]Split: train:   2%|▏         | 6/336 [00:16<17:22,  3.16s/it]Split: train:   2%|▏         | 7/336 [00:17<13:05,  2.39s/it]Split: train:   2%|▏         | 8/336 [00:18<10:45,  1.97s/it]Split: train:   3%|▎         | 9/336 [00:19<08:28,  1.56s/it]Split: train:   3%|▎         | 10/336 [00:24<14:20,  2.64s/it]Split: train:   3%|▎         | 11/336 [00:25<12:31,  2.31s/it]Split: train:   4%|▎         | 12/336 [00:27<10:56,  2.02s/it]Split: train:   4%|▍         | 13/336 [00:32<16:42,  3.10s/it]Split: train:   4%|▍         | 14/336 [00:35<15:27,  2.88s/it]Split: train:   4%|▍         | 15/336 [00:41<20:41,  3.87s/it]Split: train:   5%|▍         | 16/336 [00:42<15:47,  2.96s/it]Split: train:   5%|▌         | 17/336 [00:44<13:52,  2.61s/it]Split: train:   5%|▌         | 18/336 [00:45<11:50,  2.23s/it]Split: train:   6%|▌         | 19/336 [00:46<10:27,  1.98s/it]Split: train:   6%|▌         | 20/336 [00:47<08:04,  1.53s/it]Split: train:   6%|▋         | 21/336 [00:48<07:06,  1.36s/it]Split: train:   7%|▋         | 22/336 [00:55<15:36,  2.98s/it]Split: train:   7%|▋         | 23/336 [00:58<16:03,  3.08s/it]Split: train:   7%|▋         | 24/336 [00:59<13:05,  2.52s/it]Split: train:   7%|▋         | 25/336 [01:00<10:52,  2.10s/it]Split: train:   8%|▊         | 26/336 [01:07<17:29,  3.38s/it]Split: train:   8%|▊         | 27/336 [01:09<16:22,  3.18s/it]Split: train:   8%|▊         | 28/336 [01:10<13:13,  2.58s/it]Split: train:   9%|▊         | 29/336 [01:11<10:34,  2.07s/it]Split: train:   9%|▉         | 30/336 [01:13<09:39,  1.89s/it]Split: train:   9%|▉         | 31/336 [01:14<08:12,  1.61s/it]Split: train:  10%|▉         | 32/336 [01:15<08:05,  1.60s/it]Split: train:  10%|▉         | 33/336 [01:16<07:05,  1.41s/it]Split: train:  10%|█         | 34/336 [01:17<06:16,  1.25s/it]Split: train:  10%|█         | 35/336 [01:18<05:00,  1.00it/s]Split: train:  11%|█         | 36/336 [01:19<05:05,  1.02s/it]Split: train:  11%|█         | 37/336 [01:20<04:56,  1.01it/s]Split: train:  11%|█▏        | 38/336 [01:21<05:40,  1.14s/it]Split: train:  12%|█▏        | 39/336 [01:22<05:42,  1.15s/it]Split: train:  12%|█▏        | 40/336 [01:29<13:29,  2.73s/it]Split: train:  12%|█▏        | 41/336 [01:30<11:53,  2.42s/it]Split: train:  12%|█▎        | 42/336 [01:35<15:06,  3.08s/it]Split: train:  13%|█▎        | 43/336 [01:40<18:19,  3.75s/it]Split: train:  13%|█▎        | 44/336 [01:46<20:27,  4.21s/it]Split: train:  13%|█▎        | 45/336 [01:46<15:21,  3.17s/it]Split: train:  14%|█▎        | 46/336 [01:52<18:30,  3.83s/it]Split: train:  14%|█▍        | 47/336 [01:56<19:49,  4.12s/it]Split: train:  14%|█▍        | 48/336 [01:57<15:07,  3.15s/it]Split: train:  15%|█▍        | 49/336 [02:00<14:05,  2.94s/it]Split: train:  15%|█▍        | 50/336 [02:01<11:49,  2.48s/it]Split: train:  15%|█▌        | 51/336 [02:08<17:43,  3.73s/it]Split: train:  15%|█▌        | 52/336 [02:09<13:26,  2.84s/it]Split: train:  16%|█▌        | 53/336 [02:10<11:04,  2.35s/it]Split: train:  16%|█▌        | 54/336 [02:11<09:40,  2.06s/it]Split: train:  16%|█▋        | 55/336 [02:12<08:06,  1.73s/it]Split: train:  17%|█▋        | 56/336 [02:13<07:24,  1.59s/it]Split: train:  17%|█▋        | 57/336 [02:20<13:40,  2.94s/it]Split: train:  17%|█▋        | 58/336 [02:20<10:41,  2.31s/it]Split: train:  18%|█▊        | 59/336 [02:21<08:47,  1.90s/it]Split: train:  18%|█▊        | 60/336 [02:25<11:01,  2.40s/it]Split: train:  18%|█▊        | 61/336 [02:26<09:02,  1.97s/it]Split: train:  18%|█▊        | 62/336 [02:27<08:22,  1.83s/it]Split: train:  19%|█▉        | 63/336 [02:29<07:28,  1.64s/it]Split: train:  19%|█▉        | 64/336 [02:30<06:57,  1.53s/it]Split: train:  19%|█▉        | 65/336 [02:31<06:55,  1.53s/it]Split: train:  20%|█▉        | 66/336 [02:35<09:34,  2.13s/it]Split: train:  20%|█▉        | 67/336 [02:41<14:44,  3.29s/it]Split: train:  20%|██        | 68/336 [02:46<17:39,  3.96s/it]Split: train:  21%|██        | 69/336 [02:47<13:21,  3.00s/it]Split: train:  21%|██        | 70/336 [02:49<12:05,  2.73s/it]Split: train:  21%|██        | 71/336 [02:51<10:05,  2.28s/it]Split: train:  21%|██▏       | 72/336 [02:51<08:06,  1.84s/it]Split: train:  22%|██▏       | 73/336 [02:53<07:58,  1.82s/it]Split: train:  22%|██▏       | 74/336 [02:55<08:24,  1.92s/it]Split: train:  22%|██▏       | 75/336 [02:56<06:46,  1.56s/it]Split: train:  23%|██▎       | 76/336 [02:58<06:46,  1.56s/it]Split: train:  23%|██▎       | 77/336 [02:59<06:35,  1.53s/it]Split: train:  23%|██▎       | 78/336 [03:00<05:53,  1.37s/it]Split: train:  24%|██▎       | 79/336 [03:02<06:10,  1.44s/it]Split: train:  24%|██▍       | 80/336 [03:08<12:20,  2.89s/it]Split: train:  24%|██▍       | 81/336 [03:09<10:13,  2.41s/it]Split: train:  24%|██▍       | 82/336 [03:10<08:46,  2.07s/it]Split: train:  25%|██▍       | 83/336 [03:12<07:30,  1.78s/it]Split: train:  25%|██▌       | 84/336 [03:13<06:53,  1.64s/it]Split: train:  25%|██▌       | 85/336 [03:14<06:47,  1.62s/it]Split: train:  26%|██▌       | 86/336 [03:16<06:36,  1.58s/it]Split: train:  26%|██▌       | 87/336 [03:17<05:47,  1.39s/it]Split: train:  26%|██▌       | 88/336 [03:18<05:17,  1.28s/it]Split: train:  26%|██▋       | 89/336 [03:19<05:01,  1.22s/it]Split: train:  27%|██▋       | 90/336 [03:20<05:02,  1.23s/it]Split: train:  27%|██▋       | 91/336 [03:22<05:17,  1.30s/it]Split: train:  27%|██▋       | 92/336 [03:23<04:54,  1.21s/it]Split: train:  28%|██▊       | 93/336 [03:24<05:35,  1.38s/it]Split: train:  28%|██▊       | 94/336 [03:26<05:38,  1.40s/it]Split: train:  28%|██▊       | 95/336 [03:27<05:21,  1.34s/it]Split: train:  29%|██▊       | 96/336 [03:28<05:03,  1.26s/it]Split: train:  29%|██▉       | 97/336 [03:34<10:09,  2.55s/it]Split: train:  29%|██▉       | 98/336 [03:37<10:27,  2.64s/it]Split: train:  29%|██▉       | 99/336 [03:43<15:16,  3.87s/it]Split: train:  30%|██▉       | 100/336 [03:44<11:44,  2.98s/it]Split: train:  30%|███       | 101/336 [03:46<09:49,  2.51s/it]Split: train:  30%|███       | 102/336 [03:47<07:54,  2.03s/it]Split: train:  31%|███       | 103/336 [03:48<06:37,  1.70s/it]Split: train:  31%|███       | 104/336 [03:49<05:57,  1.54s/it]Split: train:  31%|███▏      | 105/336 [03:50<05:25,  1.41s/it]Split: train:  32%|███▏      | 106/336 [03:57<11:50,  3.09s/it]Split: train:  32%|███▏      | 107/336 [03:57<08:41,  2.28s/it]Split: train:  32%|███▏      | 108/336 [03:58<07:09,  1.88s/it]Split: train:  32%|███▏      | 109/336 [04:00<07:30,  1.98s/it]Split: train:  33%|███▎      | 110/336 [04:01<06:29,  1.72s/it]Split: train:  33%|███▎      | 111/336 [04:02<05:39,  1.51s/it]Split: train:  33%|███▎      | 112/336 [04:03<04:58,  1.33s/it]Split: train:  34%|███▎      | 113/336 [04:05<05:00,  1.35s/it]Split: train:  34%|███▍      | 114/336 [04:06<04:56,  1.34s/it]Split: train:  34%|███▍      | 115/336 [04:07<04:33,  1.24s/it]Split: train:  35%|███▍      | 116/336 [04:08<04:41,  1.28s/it]Split: train:  35%|███▍      | 117/336 [04:09<04:13,  1.16s/it]Split: train:  35%|███▌      | 118/336 [04:11<04:30,  1.24s/it]Split: train:  35%|███▌      | 119/336 [04:12<04:13,  1.17s/it]Split: train:  36%|███▌      | 120/336 [04:13<03:54,  1.09s/it]Split: train:  36%|███▌      | 121/336 [04:13<03:35,  1.00s/it]Split: train:  36%|███▋      | 122/336 [04:17<06:23,  1.79s/it]Split: train:  37%|███▋      | 123/336 [04:18<05:30,  1.55s/it]Split: train:  37%|███▋      | 124/336 [04:19<04:57,  1.40s/it]Split: train:  37%|███▋      | 125/336 [04:26<10:45,  3.06s/it]Split: train:  38%|███▊      | 126/336 [04:27<08:01,  2.29s/it]Split: train:  38%|███▊      | 127/336 [04:28<07:07,  2.05s/it]Split: train:  38%|███▊      | 128/336 [04:30<06:33,  1.89s/it]Split: train:  38%|███▊      | 129/336 [04:30<05:27,  1.58s/it]Split: train:  39%|███▊      | 130/336 [04:32<05:15,  1.53s/it]Split: train:  39%|███▉      | 131/336 [04:33<05:04,  1.48s/it]Split: train:  39%|███▉      | 132/336 [04:40<10:24,  3.06s/it]Split: train:  40%|███▉      | 133/336 [04:46<13:37,  4.02s/it]Split: train:  40%|███▉      | 134/336 [04:47<10:25,  3.10s/it]Split: train:  40%|████      | 135/336 [04:48<08:08,  2.43s/it]Split: train:  40%|████      | 136/336 [04:49<07:02,  2.11s/it]Split: train:  41%|████      | 137/336 [04:50<05:50,  1.76s/it]Split: train:  41%|████      | 138/336 [04:51<04:42,  1.43s/it]Split: train:  41%|████▏     | 139/336 [04:52<04:15,  1.30s/it]Split: train:  42%|████▏     | 140/336 [04:58<09:14,  2.83s/it]Split: train:  42%|████▏     | 141/336 [04:59<07:11,  2.21s/it]Split: train:  42%|████▏     | 142/336 [05:01<06:20,  1.96s/it]Split: train:  43%|████▎     | 143/336 [05:02<05:36,  1.74s/it]Split: train:  43%|████▎     | 144/336 [05:03<05:11,  1.62s/it]Split: train:  43%|████▎     | 145/336 [05:04<04:28,  1.41s/it]Split: train:  43%|████▎     | 146/336 [05:05<04:29,  1.42s/it]Split: train:  44%|████▍     | 147/336 [05:07<04:12,  1.34s/it]Split: train:  44%|████▍     | 148/336 [05:08<04:15,  1.36s/it]Split: train:  44%|████▍     | 149/336 [05:09<03:52,  1.24s/it]Split: train:  45%|████▍     | 150/336 [05:10<03:53,  1.26s/it]Split: train:  45%|████▍     | 151/336 [05:11<03:40,  1.19s/it]Split: train:  45%|████▌     | 152/336 [05:17<07:25,  2.42s/it]Split: train:  46%|████▌     | 153/336 [05:17<05:57,  1.95s/it]Split: train:  46%|████▌     | 154/336 [05:18<05:00,  1.65s/it]Split: train:  46%|████▌     | 155/336 [05:19<04:17,  1.42s/it]Split: train:  46%|████▋     | 156/336 [05:20<03:44,  1.25s/it]Split: train:  47%|████▋     | 157/336 [05:21<03:09,  1.06s/it]Split: train:  47%|████▋     | 158/336 [05:22<03:03,  1.03s/it]Split: train:  47%|████▋     | 159/336 [05:23<02:54,  1.01it/s]Split: train:  48%|████▊     | 160/336 [05:24<03:04,  1.05s/it]Split: train:  48%|████▊     | 161/336 [05:24<02:28,  1.18it/s]Split: train:  48%|████▊     | 162/336 [05:25<02:06,  1.38it/s]Split: train:  49%|████▊     | 163/336 [05:32<07:34,  2.63s/it]Split: train:  49%|████▉     | 164/336 [05:33<06:06,  2.13s/it]Split: train:  49%|████▉     | 165/336 [05:33<04:55,  1.73s/it]Split: train:  49%|████▉     | 166/336 [05:34<04:14,  1.50s/it]Split: train:  50%|████▉     | 167/336 [05:36<03:53,  1.38s/it]Split: train:  50%|█████     | 168/336 [05:37<03:51,  1.38s/it]Split: train:  50%|█████     | 169/336 [05:38<03:24,  1.23s/it]Split: train:  51%|█████     | 170/336 [05:39<03:35,  1.30s/it]Split: train:  51%|█████     | 171/336 [05:46<07:53,  2.87s/it]Split: train:  51%|█████     | 172/336 [05:47<06:34,  2.41s/it]Split: train:  51%|█████▏    | 173/336 [05:48<05:26,  2.00s/it]Split: train:  52%|█████▏    | 174/336 [05:49<04:41,  1.74s/it]Split: train:  52%|█████▏    | 175/336 [05:50<03:56,  1.47s/it]Split: train:  52%|█████▏    | 176/336 [05:56<07:49,  2.93s/it]Split: train:  53%|█████▎    | 177/336 [05:57<06:03,  2.29s/it]Split: train:  53%|█████▎    | 178/336 [06:02<07:50,  2.98s/it]Split: train:  53%|█████▎    | 179/336 [06:03<06:35,  2.52s/it]Split: train:  54%|█████▎    | 180/336 [06:05<05:38,  2.17s/it]

@@ -59,6 +59,24 @@ class EEGPreprocessor:
         self.logger.info(f"EEG Preprocessor initialized for {self.patient_id}")
         self.logger.info("Strategy: 3-Pass Global Normalization (Efficient)")
 
+    @property
+    def positive_label(self):
+        """Get positive class label based on task mode"""
+        return "preictal" if TASK_MODE == "prediction" else "ictal"
+
+    @staticmethod
+    def group_sequences_by_file(
+        sequences: List[Dict],
+    ) -> Dict[Tuple[str, str], List[Dict]]:
+        """Group sequences by (patient_id, filename) for efficient batch processing."""
+        from collections import defaultdict
+
+        file_groups = defaultdict(list)
+        for sequence in sequences:
+            key = (sequence["patient_id"], sequence["file"])
+            file_groups[key].append(sequence)
+        return dict(file_groups)
+
     def setup_logging_and_directories(self):
         for dir_path in [
             self.data_dir,

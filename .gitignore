@@ -212,6 +212,7 @@ mario/
 physionet.org/
 model/
 papers/
+result_plot/
 
 # Data files
 *.json

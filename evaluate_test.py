@@ -40,10 +40,36 @@ from data_segmentation_helpers.config import (
     get_patient_config,
 )
 
+# Smoothing parameters
+SMOOTHING_T = 10  # Window size for smoothing
+SMOOTHING_X = 6   # Minimum number of positive predictions in the window
+
 
 def get_positive_label():
     """Get positive class label based on task mode"""
     return "preictal" if TASK_MODE == "prediction" else "ictal"
+
+
+def apply_smoothing(all_predictions, t, x):
+    """
+    Apply smoothing to a list of predictions.
+
+    Args:
+        all_predictions: List of predictions.
+        t: Window size for smoothing.
+        x: Minimum number of positive predictions in the window.
+
+    Returns:
+        List of smoothed predictions.
+    """
+    smoothed_predictions = []
+    for i in range(len(all_predictions) - t + 1):
+        window = all_predictions[i : i + t]
+        if sum(window) >= x:
+            smoothed_predictions.append(1)
+        else:
+            smoothed_predictions.append(0)
+    return smoothed_predictions
 
 
 def evaluate_model(model_path, test_data_path, device):
@@ -298,7 +324,7 @@ def main():
             if cm.shape[0] > 1:
                 print(f"       {positive_class.capitalize():9s}   {cm[1,0]:6d}    {cm[1,1]:6d}")
 
-            # Save fold-specific results
+           # Save fold-specific results
             patient_results = {
                 "patient_id": patient_id,
                 "task_mode": checkpoint_task_mode,
@@ -306,6 +332,28 @@ def main():
                 "confusion_matrix": cm.tolist(),
                 "model_path": str(model_path),
             }
+
+            # Apply smoothing
+            if SMOOTHING_T > 1:
+                print(f"\nApplying smoothing with window size {SMOOTHING_T} and threshold {SMOOTHING_X}...")
+                smoothed_predictions = apply_smoothing(predictions, SMOOTHING_T, SMOOTHING_X)
+                smoothed_true_labels = true_labels[SMOOTHING_T - 1:]
+
+                smoothed_metrics = {
+                    "accuracy": accuracy_score(smoothed_true_labels, smoothed_predictions),
+                    "precision": precision_score(smoothed_true_labels, smoothed_predictions, zero_division=0),
+                    "recall": recall_score(smoothed_true_labels, smoothed_predictions, zero_division=0),
+                    "f1": f1_score(smoothed_true_labels, smoothed_predictions, zero_division=0),
+                }
+                patient_results["smoothed_metrics"] = smoothed_metrics
+
+                print("\n" + "=" * 60)
+                print("SMOOTHED PREDICTIONS RESULTS")
+                print("=" * 60)
+                print(f"Smoothed_Accuracy:  {smoothed_metrics['accuracy']:.4f} ({smoothed_metrics['accuracy']*100:.2f}%)")
+                print(f"Smoothed_Precision: {smoothed_metrics['precision']:.4f}")
+                print(f"Smoothed_Recall:    {smoothed_metrics['recall']:.4f}")
+                print(f"Smoothed_F1 Score:  {smoothed_metrics['f1']:.4f}")
 
             patient_results_path = Path(f"model/{current_output_prefix}/test_results.json")
             with open(patient_results_path, "w") as f:
@@ -318,6 +366,8 @@ def main():
                 "patient_id": patient_id,
                 "metrics": metrics,
             }
+            if "smoothed_metrics" in patient_results:
+                batch_results[current_idx]["smoothed_metrics"] = patient_results["smoothed_metrics"]
 
         except Exception as e:
             print(f"❌ Error evaluating patient {patient_id}: {e}")
@@ -337,12 +387,18 @@ def main():
         print(f"Mean Accuracy: {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
         print(f"Mean AUC-ROC:  {np.mean(auc_rocs):.4f} (±{np.std(auc_rocs):.4f})")
 
+        smoothed_accuracies = [res["smoothed_metrics"]["accuracy"] for res in batch_results.values() if "smoothed_metrics" in res]
+        if smoothed_accuracies:
+            print(f"Mean Smoothed Accuracy: {np.mean(smoothed_accuracies):.4f} (±{np.std(smoothed_accuracies):.4f})")
+
         batch_summary = {
             "total_patients": n_patients,
             "patient_results": batch_results,
             "mean_accuracy": float(np.mean(accuracies)),
             "mean_auc": float(np.mean(auc_rocs)),
         }
+        if smoothed_accuracies:
+            batch_summary["mean_smoothed_accuracy"] = float(np.mean(smoothed_accuracies))
 
         with open("model/batch_test_results.json", "w") as f:
             json.dump(batch_summary, f, indent=2)

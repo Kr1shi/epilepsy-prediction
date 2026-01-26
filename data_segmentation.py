@@ -524,9 +524,14 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     )
     num_seizures = len(patient_seizure_ids)
 
-    # 3. Determine split: Train on ALL seizures except the LAST one
+    # 3. Determine split: 70% Train, 30% Test (Chronological split)
     if num_seizures > 0:
-        n_train_seizures = num_seizures - 1
+        n_train_seizures = int(num_seizures * 0.7)
+        # Ensure we don't have 0 training seizures if we have enough (e.g. 4+ seizures)
+        # But for small counts (1, 2, 3), int(0.7) logic holds:
+        # 1 -> 0 (0 train, 1 test)
+        # 2 -> 1 (1 train, 1 test)
+        # 3 -> 2 (2 train, 1 test)
     else:
         n_train_seizures = 0
 

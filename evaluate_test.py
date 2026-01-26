@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 
 # Import from train.py
 from train import EEGDataset, CNN_LSTM_Hybrid_Dual, MetricsTracker
+from total_accuracy import calculate_per_seizure_accuracy
 from data_segmentation_helpers.config import (
     TASK_MODE,
     SEQUENCE_LENGTH,
@@ -39,10 +40,18 @@ from data_segmentation_helpers.config import (
     PATIENTS,
     PATIENT_INDEX,
     get_patient_config,
+    SEGMENT_DURATION,
 )
 
 # Smoothing parameters
 SMOOTHING_T = 20  # Window size for smoothing (heuristic fallback)
+
+# --- Manual Smoothing Override ---
+# Set these values to manually control smoothing.
+# If both are integers, they will override any other settings.
+# Set to None to use parameters from the model checkpoint or heuristics.
+MANUAL_SMOOTHING_WINDOW = 10  # e.g., 15
+MANUAL_SMOOTHING_COUNT =  9  # e.g., 5
 
 
 def get_positive_label():
@@ -464,7 +473,16 @@ def main():
             }
 
             # Apply smoothing
-            if ckpt_window is not None and ckpt_count is not None:
+            if (
+                MANUAL_SMOOTHING_WINDOW is not None
+                and MANUAL_SMOOTHING_COUNT is not None
+            ):
+                window_size = MANUAL_SMOOTHING_WINDOW
+                threshold_x = MANUAL_SMOOTHING_COUNT
+                print(f"Applying smoothing using MANUAL parameters:")
+                print(f"  - Window Size: {window_size}")
+                print(f"  - Threshold Count: {threshold_x}")
+            elif ckpt_window is not None and ckpt_count is not None:
                 window_size = ckpt_window
                 threshold_x = ckpt_count
                 print(f"\nApplying smoothing using TRAINED parameters:")
@@ -517,6 +535,31 @@ def main():
                 print(f"Smoothed_Recall:    {smoothed_metrics['recall']:.4f}")
                 print(f"Smoothed_F1 Score:  {smoothed_metrics['f1']:.4f}")
 
+                # Load dataset for chronological analysis
+                test_dataset = EEGDataset(test_data_path, split="test")
+
+                # Calculate per-seizure accuracy
+                seizure_accuracy_metrics = calculate_per_seizure_accuracy(
+                    true_labels,
+                    predictions,
+                    test_dataset,
+                    SEGMENT_DURATION,
+                    window_size,
+                    threshold_x,
+                )
+                patient_results["seizure_accuracy_metrics"] = seizure_accuracy_metrics
+
+                print("\n" + "=" * 60)
+                print("PER-SEIZURE ACCURACY RESULTS")
+                print("=" * 60)
+                print(f"Total Seizures: {seizure_accuracy_metrics['total_seizures']}")
+                print(
+                    f"Per-Seizure Accuracy: {seizure_accuracy_metrics['per_seizure_accuracy']:.4f} "
+                    f"({seizure_accuracy_metrics['correctly_predicted_seizures']}/{seizure_accuracy_metrics['total_seizures']})"
+                )
+                print(f"False Positive Rate: {seizure_accuracy_metrics['fp_rate_per_hour']:.4f} per hour")
+
+
             patient_results_path = Path(
                 f"model/{current_output_prefix}/test_results.json"
             )
@@ -547,7 +590,8 @@ def main():
             loaded_threshold = checkpoint.get("config", {}).get("optimal_threshold", 0.5)
             
             # Load dataset for plotting
-            test_dataset = EEGDataset(test_data_path, split="test")
+            if 'test_dataset' not in locals():
+                test_dataset = EEGDataset(test_data_path, split="test")
             
             plot_preictal_dynamics(
                 model=model, 
@@ -564,6 +608,10 @@ def main():
             if "smoothed_metrics" in patient_results:
                 batch_results[current_idx]["smoothed_metrics"] = patient_results[
                     "smoothed_metrics"
+                ]
+            if "seizure_accuracy_metrics" in patient_results:
+                batch_results[current_idx]["seizure_accuracy_metrics"] = patient_results[
+                    "seizure_accuracy_metrics"
                 ]
 
         except Exception as e:
@@ -594,6 +642,27 @@ def main():
             print(
                 f"Mean Smoothed Accuracy: {np.mean(smoothed_accuracies):.4f} (±{np.std(smoothed_accuracies):.4f})"
             )
+        
+        per_seizure_accuracies = [
+            res["seizure_accuracy_metrics"]["per_seizure_accuracy"]
+            for res in batch_results.values()
+            if "seizure_accuracy_metrics" in res and res["seizure_accuracy_metrics"]["total_seizures"] > 0
+        ]
+        if per_seizure_accuracies:
+            print(
+                f"Mean Per-Seizure Accuracy: {np.mean(per_seizure_accuracies):.4f} (±{np.std(per_seizure_accuracies):.4f})"
+            )
+
+        fp_rates = [
+            res["seizure_accuracy_metrics"]["fp_rate_per_hour"]
+            for res in batch_results.values()
+            if "seizure_accuracy_metrics" in res
+        ]
+        if fp_rates:
+            print(
+                f"Mean False Positive Rate: {np.mean(fp_rates):.4f} per hour (±{np.std(fp_rates):.4f})"
+            )
+
 
         batch_summary = {
             "total_patients": n_patients,
@@ -605,6 +674,12 @@ def main():
             batch_summary["mean_smoothed_accuracy"] = float(
                 np.mean(smoothed_accuracies)
             )
+        if per_seizure_accuracies:
+            batch_summary["mean_per_seizure_accuracy"] = float(
+                np.mean(per_seizure_accuracies)
+            )
+        if fp_rates:
+            batch_summary["mean_fp_rate_per_hour"] = float(np.mean(fp_rates))
 
         with open("model/batch_test_results.json", "w") as f:
             json.dump(batch_summary, f, indent=2)

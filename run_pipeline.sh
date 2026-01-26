@@ -20,6 +20,9 @@ LOG_FILE="pipeline_log.txt"
 
     echo "Running model training..."
     python train.py
+    
+    echo "Evaluating..."
+    python evaluate_train.pys
 
     echo "----------------------------------------"
     echo "Pipeline finished at $(date)"

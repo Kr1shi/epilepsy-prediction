@@ -22,9 +22,9 @@ ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
 
 # Patients to include in processing
 PATIENTS = [
-    "chb01",
-    "chb02",
-    "chb03",
+    # "chb01",
+    # "chb02",
+    # "chb03",
     # "chb04",
     # "chb05",
     # "chb06",
@@ -39,7 +39,7 @@ PATIENTS = [
     # "chb16",
     # "chb17",
     # "chb18",
-    # "chb19",
+    "chb19",
     # "chb20",
     # "chb21",
     # "chb22",

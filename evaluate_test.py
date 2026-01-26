@@ -539,11 +539,15 @@ def main():
                 test_dataset = EEGDataset(test_data_path, split="test")
 
                 # Calculate per-seizure accuracy
+                # Note: Interictal sequences are non-overlapping, so their stride is the full sequence duration.
+                # We pass this interictal stride for accurate FPR calculation (duration & refractory steps).
+                interictal_stride = SEGMENT_DURATION * SEQUENCE_LENGTH
+                
                 seizure_accuracy_metrics = calculate_per_seizure_accuracy(
                     true_labels,
                     predictions,
                     test_dataset,
-                    SEGMENT_DURATION,
+                    interictal_stride,
                     window_size,
                     threshold_x,
                 )

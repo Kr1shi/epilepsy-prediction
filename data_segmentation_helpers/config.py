@@ -19,6 +19,7 @@ INTERICTAL_BUFFER = 30 * 60
 
 BASE_PATH = "physionet.org/files/chbmit/1.0.0/"
 ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
+INTERICTAL_TO_PREICTAL_RATIO = 2.0  # Ratio of interictal to preictal sequences (e.g., 1.0 = 50/50, 2.0 = 67/33)
 
 # Patients to include in processing
 PATIENTS = [

@@ -27,6 +27,7 @@ from data_segmentation_helpers.config import (
     PATIENT_INDEX,
     get_patient_config,
     SEIZURE_COUNTS,
+    INTERICTAL_TO_PREICTAL_RATIO,
 )
 from data_segmentation_helpers.segmentation import parse_summary_file
 from data_segmentation_helpers.channel_validation import (
@@ -686,15 +687,23 @@ def balance_sequences_across_splits(splits, positive_label, random_seed=42):
             }
             continue
 
-        target_count = min(len(positives), len(interictals))
+        # Determine target counts based on ratio
+        # We want to keep all positives if possible
+        target_positive = len(positives)
+        
+        # Calculate target interictals based on ratio
+        target_interictal = int(len(positives) * INTERICTAL_TO_PREICTAL_RATIO)
+        
+        # Cap at available interictals
+        target_interictal = min(target_interictal, len(interictals))
 
         rng.shuffle(positives)
         rng.shuffle(interictals)
 
-        kept_positive = positives[:target_count]
-        kept_interictal = interictals[:target_count]
-        dropped_positive = max(0, len(positives) - target_count)
-        dropped_interictal = max(0, len(interictals) - target_count)
+        kept_positive = positives[:target_positive]
+        kept_interictal = interictals[:target_interictal]
+        dropped_positive = max(0, len(positives) - target_positive) # Should be 0
+        dropped_interictal = max(0, len(interictals) - target_interictal)
 
         combined = kept_positive + kept_interictal
         rng.shuffle(combined)
@@ -711,7 +720,8 @@ def balance_sequences_across_splits(splits, positive_label, random_seed=42):
             "interictal_dropped": dropped_interictal,
             "other_sequences": len(others),
             "balanced": True,
-            "target_per_class": target_count,
+            "target_per_class": target_interictal, # recording interictal target as ref
+            "ratio": INTERICTAL_TO_PREICTAL_RATIO
         }
 
     return balanced_splits, balance_stats

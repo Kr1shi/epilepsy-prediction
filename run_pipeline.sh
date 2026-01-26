@@ -22,7 +22,7 @@ LOG_FILE="pipeline_log.txt"
     python train.py
     
     echo "Evaluating..."
-    python evaluate_train.py
+    python evaluate_test.py
 
     echo "----------------------------------------"
     echo "Pipeline finished at $(date)"

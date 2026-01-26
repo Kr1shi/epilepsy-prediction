@@ -51,7 +51,7 @@ SMOOTHING_T = 20  # Window size for smoothing (heuristic fallback)
 # If both are integers, they will override any other settings.
 # Set to None to use parameters from the model checkpoint or heuristics.
 MANUAL_SMOOTHING_WINDOW = 10  # e.g., 15
-MANUAL_SMOOTHING_COUNT =  9  # e.g., 5
+MANUAL_SMOOTHING_COUNT =  6  # e.g., 5
 
 
 def get_positive_label():

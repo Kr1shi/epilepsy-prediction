@@ -112,7 +112,7 @@ LSTM_DROPOUT = 0.5  # Reduced from 0.6 back to 0.5
 # Training Configuration
 # =============================================================================
 
-TRAINING_EPOCHS = 10
+TRAINING_EPOCHS = 5
 SEQUENCE_BATCH_SIZE = 16
 LEARNING_RATE = 0.0001  # Increased from 1e-5 to 1e-4
 WEIGHT_DECAY = 1e-4  # Reduced from 1e-3 back to 1e-4

@@ -16,6 +16,7 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     roc_auc_score,
+    roc_curve,
 )
 from tqdm import tqdm
 import time
@@ -272,8 +273,13 @@ class MetricsTracker:
         # Handle edge case where only one class is present in batch
         if len(np.unique(true_np)) > 1:
             auc = roc_auc_score(true_np, prob_np)
+            # Compute optimal threshold using Youden's J statistic
+            fpr, tpr, thresholds = roc_curve(true_np, prob_np)
+            j_scores = tpr - fpr
+            best_threshold = thresholds[np.argmax(j_scores)]
         else:
             auc = 0.5
+            best_threshold = 0.5
 
         return {
             "accuracy": accuracy_score(true_np, pred_np),
@@ -283,7 +289,54 @@ class MetricsTracker:
             "recall": recall_score(true_np, pred_np, average="binary", zero_division=0),
             "f1": f1_score(true_np, pred_np, average="binary", zero_division=0),
             "auc_roc": auc,
+            "optimal_threshold": float(best_threshold),
         }
+
+
+def optimize_running_average(predictions, labels, max_window=30):
+    """
+    Finds the optimal Window Size and Count Threshold for smoothing hard predictions.
+
+    Args:
+        predictions: Binary predictions (0 or 1) from the model
+        labels: True labels (0 or 1)
+        max_window: Maximum window size to test
+
+    Returns:
+        Tuple (best_window_size, best_count_threshold)
+    """
+    best_f1 = 0
+    best_params = (1, 1)  # Defaults
+
+    preds_np = np.array(predictions)
+    labels_np = np.array(labels)
+
+    # Grid Search for Window Size
+    # Range: 5 to max_window (step 2 to keep odd windows, though even is fine for count)
+    for window_size in range(5, max_window + 1):
+        # Calculate moving sum of positive predictions
+        kernel = np.ones(window_size)
+        # mode='same' keeps output size same as input
+        smoothed_sums = np.convolve(preds_np, kernel, mode="same")
+
+        # Grid Search for Count Threshold (X out of N)
+        # Check thresholds from 1 up to window_size
+        # We can step by 1 or more. Stepping by 1 is thorough.
+        for count_threshold in range(1, window_size + 1):
+
+            # Apply threshold
+            final_preds = (smoothed_sums >= count_threshold).astype(int)
+
+            current_f1 = f1_score(labels_np, final_preds, zero_division=0)
+
+            if current_f1 > best_f1:
+                best_f1 = current_f1
+                best_params = (window_size, count_threshold)
+
+    print(
+        f"  Best Smoothing Params (Train): Window={best_params[0]}, Threshold={best_params[1]}, F1={best_f1:.4f}"
+    )
+    return best_params
 
 
 class EEGCNNTrainer:
@@ -395,11 +448,16 @@ class EEGCNNTrainer:
         metrics["loss"] = total_loss / len(self.train_loader)
         return metrics
 
-    def validate_epoch(self, epoch):
+    def validate_epoch(self, epoch, loader=None):
         self.model.eval()
         tracker = MetricsTracker()
         total_loss = 0.0
-        pbar = tqdm(self.val_loader, desc=f"Epoch {epoch+1} Val")
+
+        target_loader = loader if loader is not None else self.val_loader
+
+        # Handle both integer epochs and string descriptions
+        desc = f"Epoch {epoch+1} Val" if isinstance(epoch, int) else f"{epoch}"
+        pbar = tqdm(target_loader, desc=desc)
 
         with torch.no_grad():
             for x_phase, x_amp, labels in pbar:
@@ -418,8 +476,8 @@ class EEGCNNTrainer:
                 tracker.update(preds, labels, probs)
 
         metrics = tracker.compute_metrics()
-        metrics["loss"] = total_loss / len(self.val_loader)
-        return metrics
+        metrics["loss"] = total_loss / len(target_loader)
+        return metrics, tracker
 
     def save_model(self, epoch, train_metrics, val_metrics):
         checkpoint = {
@@ -483,7 +541,7 @@ class EEGCNNTrainer:
         start_time = time.time()
         for epoch in range(TRAINING_EPOCHS):
             train_m = self.train_epoch(epoch)
-            val_m = self.validate_epoch(epoch)
+            val_m, _ = self.validate_epoch(epoch)
             self.scheduler.step()
 
             self.save_model(epoch, train_m, val_m)
@@ -501,7 +559,53 @@ class EEGCNNTrainer:
 
         self.save_metrics()
         self.plot_training_curves()
+        self.tune_best_model_threshold()
         print(f"Total time: {(time.time() - start_time)/60:.1f} min")
+
+    def tune_best_model_threshold(self):
+        best_path = self.model_dir / "best_model.pth"
+        if not best_path.exists():
+            return
+
+        print(
+            f"\nPerforming final threshold tuning on best model (using Training Set)..."
+        )
+        # Load best model
+        checkpoint = torch.load(best_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+
+        # Run validation pass on TRAIN set to find optimal threshold without leakage
+        train_metrics, tracker = self.validate_epoch(
+            "Final Tuning (Train Set)", loader=self.train_loader
+        )
+
+        optimal_threshold = train_metrics["optimal_threshold"]
+
+        # Now, apply this optimal threshold to get "hard" predictions for smoothing optimization
+        # The tracker stores raw probabilities, so we can re-threshold them easily
+        all_probs = np.array(tracker.probabilities)
+        all_labels = np.array(tracker.true_labels)
+
+        # Generate predictions using the optimal threshold
+        optimized_preds = (all_probs >= optimal_threshold).astype(int)
+
+        # Find best smoothing parameters using these optimized predictions
+        best_window, best_count = optimize_running_average(optimized_preds, all_labels)
+
+        # Update checkpoint config
+        if "config" not in checkpoint:
+            checkpoint["config"] = {}
+
+        checkpoint["config"]["optimal_threshold"] = optimal_threshold
+        checkpoint["config"]["smoothing_window"] = best_window
+        checkpoint["config"]["smoothing_count"] = best_count
+        checkpoint["config"]["task_mode"] = TASK_MODE
+
+        torch.save(checkpoint, best_path)
+        print(f"✅ Best model checkpoint updated:")
+        print(f"   - Optimal Threshold: {optimal_threshold:.4f}")
+        print(f"   - Smoothing Window: {best_window}")
+        print(f"   - Smoothing Count: {best_count}")
 
 
 def main():

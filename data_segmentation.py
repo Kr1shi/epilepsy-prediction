@@ -193,8 +193,7 @@ def create_sequences_from_file(
                 )
 
                 if (
-                    preictal_window_start_global
-                    <= last_segment_start_global
+                    preictal_window_start_global <= last_segment_start_global
                     and last_segment_end_global <= seizure_start_global
                 ):
                     sequence_type = "preictal"
@@ -557,6 +556,60 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
             f"  Test Seizures: {num_seizures - n_train_seizures} (IDs: {patient_seizure_ids[n_train_seizures:]})"
         )
         print(f"  Sequences: {len(train_sequences)} Train / {len(test_sequences)} Test")
+
+    # Check if test set has no interictal data and move from train if necessary
+    test_interictal_count = sum(
+        1 for seq in test_sequences if seq["type"] == "interictal"
+    )
+
+    if test_interictal_count == 0:
+        print(
+            f"  Warning: Test set has 0 interictal sequences. Moving sequences from train set..."
+        )
+
+        # Identify available interictal sequences in train
+        train_interictal_indices = [
+            i for i, seq in enumerate(train_sequences) if seq["type"] == "interictal"
+        ]
+
+        if train_interictal_indices:
+            # Determine how many to move: match the number of positive sequences in test
+            test_positive_count = sum(
+                1 for seq in test_sequences if seq["type"] == positive_label
+            )
+            # Default to a small number if no positives (unlikely) or just 10
+            num_to_move = (
+                test_positive_count
+                if test_positive_count > 0
+                else min(10, len(train_interictal_indices))
+            )
+
+            # Don't take more than available
+            num_to_move = min(num_to_move, len(train_interictal_indices))
+
+            if num_to_move > 0:
+                # Take from the end of the train set (closest to test set time-wise)
+                indices_to_move = train_interictal_indices[-num_to_move:]
+                indices_to_move_set = set(indices_to_move)
+
+                # Extract sequences to move
+                moved_sequences = [train_sequences[i] for i in indices_to_move]
+
+                # Update lists: Remove from train, Add to test
+                train_sequences = [
+                    s
+                    for i, s in enumerate(train_sequences)
+                    if i not in indices_to_move_set
+                ]
+                test_sequences.extend(moved_sequences)
+
+                print(
+                    f"  Moved {len(moved_sequences)} interictal sequences from train to test."
+                )
+            else:
+                print("  Warning: Not enough interictal data in train to move.")
+        else:
+            print("  Warning: Train set also has no interictal data!")
 
     # Assign split labels
     for seq in train_sequences:

@@ -195,7 +195,7 @@ def create_sequences_from_file(
                 if (
                     preictal_window_start_global
                     <= last_segment_start_global
-                    < seizure_start_global
+                    and last_segment_end_global <= seizure_start_global
                 ):
                     sequence_type = "preictal"
                     time_to_seizure = seizure_start_global - last_segment_end_global

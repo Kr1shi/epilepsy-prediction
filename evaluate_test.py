@@ -3,7 +3,7 @@
 Evaluate trained model on test dataset
 
 Usage:
-    python evaluate_test.py              # Evaluate final epoch (default)
+    python evaluate_test.py              # Evaluate best model (default)
     python evaluate_test.py --epoch 10   # Evaluate specific epoch
 """
 import torch
@@ -26,7 +26,7 @@ import json
 import argparse
 
 # Import from train.py
-from train import EEGDataset, CNN_LSTM_Hybrid, MetricsTracker
+from train import EEGDataset, CNN_LSTM_Hybrid_Dual, MetricsTracker
 from data_segmentation_helpers.config import (
     TASK_MODE,
     SEQUENCE_LENGTH,
@@ -69,39 +69,36 @@ def evaluate_model(model_path, test_data_path, device):
         pin_memory=True if device.type == "cuda" else False,
     )
 
-    # Initialize Deep CNN-BiLSTM model
-    print(f"Initializing Deep CNN-BiLSTM model...")
-    model = CNN_LSTM_Hybrid(
+    # Initialize Dual-Stream Model
+    print(f"Initializing Dual-Stream CNN-BiLSTM model...")
+    model = CNN_LSTM_Hybrid_Dual(
         num_input_channels=18,
         num_classes=2,
         sequence_length=SEQUENCE_LENGTH,
-        cnn_feature_dim=512,  # Deep EEG-CNN outputs 512 features (16 conv layers)
         lstm_hidden_dim=LSTM_HIDDEN_DIM,
         lstm_num_layers=LSTM_NUM_LAYERS,
         dropout=LSTM_DROPOUT,
     )
 
-    # Load trained weights with compatibility for PyTorch >= 2.6 safety defaults
+    # Load trained weights
     print(f"Loading model checkpoint from {model_path}...")
     try:
         checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     except TypeError:
         checkpoint = torch.load(model_path, map_location=device)
+        
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     model.eval()
 
-    # Get task info from checkpoint (with fallback to config)
+    # Get task info from checkpoint
     checkpoint_task_mode = checkpoint.get("config", {}).get("task_mode", TASK_MODE)
     positive_class = checkpoint.get("config", {}).get(
         "positive_class", get_positive_label()
     )
 
-    print(f"Model loaded from epoch {checkpoint['epoch']}")
+    print(f"Model loaded from epoch {checkpoint.get('epoch', 'Best')}")
     print(f"Task mode: {checkpoint_task_mode.upper()} ({positive_class} vs interictal)")
-    print(
-        f"Architecture: Deep CNN (16 layers, 512 features) + Bi-LSTM (3 layers, 512 hidden)"
-    )
     print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Evaluate
@@ -119,11 +116,16 @@ def evaluate_model(model_path, test_data_path, device):
     with torch.no_grad():
         pbar = tqdm(test_loader, desc="Testing")
 
-        for spectrograms, labels in pbar:
-            spectrograms, labels = spectrograms.to(device), labels.to(device)
+        # Unpack 3 items: Phase, Amp, Labels
+        for x_phase, x_amp, labels in pbar:
+            x_phase, x_amp, labels = (
+                x_phase.to(device),
+                x_amp.to(device),
+                labels.to(device)
+            )
 
             # Forward pass
-            outputs = model(spectrograms)
+            outputs = model(x_phase, x_amp)
             loss = criterion(outputs, labels)
 
             # Track metrics
@@ -142,7 +144,7 @@ def evaluate_model(model_path, test_data_path, device):
             all_probabilities.extend(probabilities.cpu().numpy())
 
     # Compute metrics
-    avg_loss = total_loss / num_batches
+    avg_loss = total_loss / num_batches if num_batches > 0 else 0
     metrics = metrics_tracker.compute_metrics()
     metrics["loss"] = avg_loss
 
@@ -150,12 +152,14 @@ def evaluate_model(model_path, test_data_path, device):
     labels_np = np.array(all_labels)
     probs_np = np.array(all_probabilities)
 
-    fpr, tpr, thresholds = roc_curve(labels_np, probs_np)
-
-    # J = Sensitivity + Specificity - 1 = TPR + (1 - FPR) - 1 = TPR - FPR
-    j_scores = tpr - fpr
-    best_idx = np.argmax(j_scores)
-    best_threshold = thresholds[best_idx]
+    # Handle edge case with only one class
+    if len(np.unique(labels_np)) > 1:
+        fpr, tpr, thresholds = roc_curve(labels_np, probs_np)
+        j_scores = tpr - fpr
+        best_idx = np.argmax(j_scores)
+        best_threshold = thresholds[best_idx]
+    else:
+        best_threshold = 0.5
 
     metrics["optimal_threshold"] = float(best_threshold)
 
@@ -182,15 +186,14 @@ def evaluate_model(model_path, test_data_path, device):
 
 def main():
     """Main evaluation function"""
-    # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="Evaluate trained model on test dataset"
     )
     parser.add_argument(
         "--epoch",
         type=int,
-        default=TRAINING_EPOCHS,
-        help=f"Epoch number to evaluate (default: {TRAINING_EPOCHS}, the final epoch)",
+        default=None,
+        help="Epoch number to evaluate. If not specified, loads best_model.pth",
     )
     args = parser.parse_args()
 
@@ -234,24 +237,33 @@ def main():
         print(f"{'='*60}")
 
         try:
-            # Setup fold-specific model and data
-            model_path = Path(
-                f"model/{current_output_prefix}/epoch_{args.epoch:03d}.pth"
-            )
+            # Determine model path
+            if args.epoch is not None:
+                model_filename = f"epoch_{args.epoch:03d}.pth"
+            else:
+                model_filename = "best_model.pth"
+                
+            model_path = Path(f"model/{current_output_prefix}/{model_filename}")
             dataset_dir = Path("preprocessing") / "data" / current_output_prefix
             test_data_path = dataset_dir / "test_dataset.h5"
 
             # Check if files exist
             if not model_path.exists():
-                print(f"❌ Model not found: {model_path}")
-                continue
+                # Fallback to last epoch if best not found
+                last_epoch = Path(f"model/{current_output_prefix}/epoch_{TRAINING_EPOCHS:03d}.pth")
+                if args.epoch is None and last_epoch.exists():
+                    print(f"⚠️ 'best_model.pth' not found. Falling back to last epoch: {last_epoch}")
+                    model_path = last_epoch
+                else:
+                    print(f"❌ Model not found: {model_path}")
+                    continue
+                    
             if not test_data_path.exists():
                 print(f"❌ Test dataset not found: {test_data_path}")
                 continue
 
-            print(f"Evaluating model from epoch {args.epoch}")
+            print(f"Evaluating model: {model_path.name}")
             print(f"Dataset prefix: {current_output_prefix}")
-            print(f"Using test dataset: {test_data_path}")
 
             (
                 metrics,
@@ -268,9 +280,7 @@ def main():
             print("PATIENT TEST RESULTS")
             print("=" * 60)
             print(f"Loss:      {metrics['loss']:.4f}")
-            print(
-                f"Accuracy:  {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)"
-            )
+            print(f"Accuracy:  {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)")
             print(f"Precision: {metrics['precision']:.4f}")
             print(f"Recall:    {metrics['recall']:.4f}")
             print(f"F1 Score:  {metrics['f1']:.4f}")
@@ -278,61 +288,26 @@ def main():
 
             print(f"\nOptimal Threshold Analysis (Youden's J):")
             print(f"Threshold: {metrics['optimal_threshold']:.4f}")
-            print(
-                f"Accuracy:  {metrics['opt_accuracy']:.4f} ({metrics['opt_accuracy']*100:.2f}%)"
-            )
-            print(f"Precision: {metrics['opt_precision']:.4f}")
-            print(f"Recall:    {metrics['opt_recall']:.4f}")
+            print(f"Accuracy:  {metrics['opt_accuracy']:.4f}")
             print(f"F1 Score:  {metrics['opt_f1']:.4f}")
 
             print("\nConfusion Matrix:")
             print("                Predicted")
             print(f"                Interictal  {positive_class.capitalize()}")
             print(f"Actual Interictal    {cm[0,0]:6d}    {cm[0,1]:6d}")
-            print(
-                f"       {positive_class.capitalize():9s}   {cm[1,0]:6d}    {cm[1,1]:6d}"
-            )
-
-            # Class-wise statistics
-            print("\nClass Distribution:")
-            true_np = np.array(true_labels)
-            pred_np = np.array(predictions)
-            print(f"True Interictal (0): {np.sum(true_np == 0)} samples")
-            print(
-                f"True {positive_class.capitalize()} (1):   {np.sum(true_np == 1)} samples"
-            )
-            print(f"Pred Interictal (0): {np.sum(pred_np == 0)} samples")
-            print(
-                f"Pred {positive_class.capitalize()} (1):   {np.sum(pred_np == 1)} samples"
-            )
-
-            # Detailed classification report
-            print("\nDetailed Classification Report:")
-            print(
-                classification_report(
-                    true_labels,
-                    predictions,
-                    target_names=["Interictal", positive_class.capitalize()],
-                    digits=4,
-                )
-            )
+            if cm.shape[0] > 1:
+                print(f"       {positive_class.capitalize():9s}   {cm[1,0]:6d}    {cm[1,1]:6d}")
 
             # Save fold-specific results
             patient_results = {
                 "patient_id": patient_id,
                 "task_mode": checkpoint_task_mode,
-                "positive_class": positive_class,
-                "negative_class": "interictal",
                 "test_metrics": metrics,
                 "confusion_matrix": cm.tolist(),
                 "model_path": str(model_path),
-                "test_data_path": str(test_data_path),
             }
 
-            patient_results_path = Path(
-                f"model/{current_output_prefix}/test_results.json"
-            )
-            patient_results_path.parent.mkdir(parents=True, exist_ok=True)
+            patient_results_path = Path(f"model/{current_output_prefix}/test_results.json")
             with open(patient_results_path, "w") as f:
                 json.dump(patient_results, f, indent=2)
 
@@ -341,73 +316,38 @@ def main():
             # Store for batch summary
             batch_results[current_idx] = {
                 "patient_id": patient_id,
-                "output_prefix": current_output_prefix,
                 "metrics": metrics,
-                "confusion_matrix": cm.tolist(),
             }
 
         except Exception as e:
             print(f"❌ Error evaluating patient {patient_id}: {e}")
             import traceback
-
             traceback.print_exc()
 
-    # Save batch results summary if processing multiple folds
+    # Save batch results summary
     if PATIENT_INDEX is None and batch_results:
         print("\n" + "=" * 60)
         print("BATCH EVALUATION SUMMARY")
         print("=" * 60)
 
-        # Compute aggregate metrics
         accuracies = [res["metrics"]["accuracy"] for res in batch_results.values()]
-        precisions = [res["metrics"]["precision"] for res in batch_results.values()]
-        recalls = [res["metrics"]["recall"] for res in batch_results.values()]
-        f1_scores = [res["metrics"]["f1"] for res in batch_results.values()]
         auc_rocs = [res["metrics"]["auc_roc"] for res in batch_results.values()]
 
         print(f"Patients evaluated: {len(batch_results)}/{len(patients_to_process)}")
-        print(f"\nMean metrics (across patients):")
-        print(f"  Accuracy:  {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
-        print(f"  Precision: {np.mean(precisions):.4f} (±{np.std(precisions):.4f})")
-        print(f"  Recall:    {np.mean(recalls):.4f} (±{np.std(recalls):.4f})")
-        print(f"  F1 Score:  {np.mean(f1_scores):.4f} (±{np.std(f1_scores):.4f})")
-        print(f"  AUC-ROC:   {np.mean(auc_rocs):.4f} (±{np.std(auc_rocs):.4f})")
+        print(f"Mean Accuracy: {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
+        print(f"Mean AUC-ROC:  {np.mean(auc_rocs):.4f} (±{np.std(auc_rocs):.4f})")
 
-        # Save batch summary
         batch_summary = {
             "total_patients": n_patients,
-            "evaluated_patients": len(batch_results),
             "patient_results": batch_results,
-            "aggregate_metrics": {
-                "accuracy": {
-                    "mean": float(np.mean(accuracies)),
-                    "std": float(np.std(accuracies)),
-                },
-                "precision": {
-                    "mean": float(np.mean(precisions)),
-                    "std": float(np.std(precisions)),
-                },
-                "recall": {
-                    "mean": float(np.mean(recalls)),
-                    "std": float(np.std(recalls)),
-                },
-                "f1_score": {
-                    "mean": float(np.mean(f1_scores)),
-                    "std": float(np.std(f1_scores)),
-                },
-                "auc_roc": {
-                    "mean": float(np.mean(auc_rocs)),
-                    "std": float(np.std(auc_rocs)),
-                },
-            },
+            "mean_accuracy": float(np.mean(accuracies)),
+            "mean_auc": float(np.mean(auc_rocs)),
         }
 
-        batch_results_path = Path("model/batch_test_results.json")
-        with open(batch_results_path, "w") as f:
+        with open("model/batch_test_results.json", "w") as f:
             json.dump(batch_summary, f, indent=2)
 
-        print(f"\n✅ Batch results saved to {batch_results_path}")
-        print("=" * 60)
+        print(f"\n✅ Batch results saved to model/batch_test_results.json")
 
 
 if __name__ == "__main__":

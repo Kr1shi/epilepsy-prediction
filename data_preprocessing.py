@@ -17,6 +17,8 @@ from data_segmentation_helpers.config import (
     TARGET_CHANNELS,
     LOW_FREQ_HZ,
     HIGH_FREQ_HZ,
+    PHASE_FREQ_BAND,
+    AMP_FREQ_BAND,
     NOTCH_FREQ_HZ,
     STFT_NPERSEG,
     STFT_NOVERLAP,
@@ -57,7 +59,9 @@ class EEGPreprocessor:
         self.checkpoint = self.load_checkpoint()
 
         self.logger.info(f"EEG Preprocessor initialized for {self.patient_id}")
-        self.logger.info("Strategy: 3-Pass Global Normalization (Efficient)")
+        self.logger.info(
+            "Strategy: Dual-Stream (Phase + Amp) with Global Normalization"
+        )
 
     @property
     def positive_label(self):
@@ -68,7 +72,6 @@ class EEGPreprocessor:
     def group_sequences_by_file(
         sequences: List[Dict],
     ) -> Dict[Tuple[str, str], List[Dict]]:
-        """Group sequences by (patient_id, filename) for efficient batch processing."""
         from collections import defaultdict
 
         file_groups = defaultdict(list)
@@ -143,37 +146,63 @@ class EEGPreprocessor:
         raw._data = data
 
     def apply_stft(self, data, sampling_rate):
+        """Apply STFT with high spectral resolution (nfft=2560 for 0.1Hz spacing)."""
         spectrograms = []
         time_array = None
+        freq_array = None
+
+        # nfft = sampling_rate / desired_resolution = 256 / 0.1 = 2560
+        nfft_val = int(sampling_rate / 0.1)
+
         for ch in range(data.shape[0]):
             f, t, Zxx = spectrogram(
                 data[ch, :],
                 fs=sampling_rate,
                 nperseg=STFT_NPERSEG,
                 noverlap=STFT_NOVERLAP,
+                nfft=nfft_val,  # Force 0.1 Hz frequency bins
                 window="hann",
+                mode="complex",
             )
             if time_array is None:
                 time_array = t
-            freq_mask = (f >= LOW_FREQ_HZ) & (f <= HIGH_FREQ_HZ)
-            spectrograms.append(Zxx[freq_mask, :])
-        return np.array(spectrograms), f[freq_mask], time_array
+            if freq_array is None:
+                freq_array = f
+            spectrograms.append(Zxx)
+
+        return np.array(spectrograms), freq_array, time_array
 
     def extract_spectrograms_from_file(
         self, patient_id: str, filename: str, sequences: List[Dict]
     ) -> List[Optional[Dict]]:
-        """Pass 1 helper: Load, filter, compute STFT, and log-transform."""
+        """
+        Pass 1 (Optimized):
+        1. Identify ALL unique segments required by these sequences.
+        2. Compute STFT for each unique segment ONCE.
+        3. Reassemble sequences from these pre-computed blocks.
+        """
         try:
+            # 1. Collect all unique segment start times required
+            # Using a set to remove duplicates automatically
+            unique_starts = set()
+            for seq in sequences:
+                unique_starts.update(seq["segment_starts"])
+
+            # Sort them for efficient file reading (sequential access is faster)
+            sorted_starts = sorted(list(unique_starts))
+
+            # 2. Load Raw Data
             edf_path = f"physionet.org/files/chbmit/1.0.0/{patient_id}/{filename}"
             raw = mne.io.read_raw_edf(edf_path, preload=False, verbose=False)
             sampling_rate = raw.info["sfreq"]
             raw_selected, clean_channels = self.select_target_channels(raw)
 
-            all_starts = [s for seq in sequences for s in seq["segment_starts"]]
-            crop_tmin, crop_tmax = max(0, min(all_starts) - 5.0), min(
-                raw_selected.times[-1], max(all_starts) + SEGMENT_DURATION + 5.0
+            # Determine crop bounds
+            crop_tmin, crop_tmax = max(0, min(sorted_starts) - 5.0), min(
+                raw_selected.times[-1], max(sorted_starts) + SEGMENT_DURATION + 5.0
             )
 
+            # Load Data into RAM
             raw_cropped = (
                 raw_selected.copy().crop(tmin=crop_tmin, tmax=crop_tmax).load_data()
             )
@@ -181,27 +210,80 @@ class EEGPreprocessor:
                 freqs=NOTCH_FREQ_HZ, n_jobs=MNE_N_JOBS, verbose=False
             )
             self.remove_amplitude_artifacts(raw_cropped)
-
             data_uv = raw_cropped.get_data() * 1e6
-            stft_coeffs, frequencies, time_arr = self.apply_stft(data_uv, sampling_rate)
-            full_power = np.abs(stft_coeffs) ** 2
 
+            # 3. Pre-compute frequency masks (Fast)
+            nfft_val = int(sampling_rate / 0.1)
+            freqs = np.fft.rfftfreq(nfft_val, d=1 / sampling_rate)
+            phase_mask = (freqs >= PHASE_FREQ_BAND[0]) & (freqs <= PHASE_FREQ_BAND[1])
+            amp_mask = (freqs >= AMP_FREQ_BAND[0]) & (freqs <= AMP_FREQ_BAND[1])
+
+            # 4. Compute & Cache Unique Segments
+            # Dictionary: start_time -> { 'phase': np.array, 'amp': np.array }
+            segment_cache = {}
+
+            for start in tqdm(
+                sorted_starts, desc=f"Processing segments ({filename})", leave=False
+            ):
+                # Calculate indices
+                start_rel = start - crop_tmin
+                start_idx = int(start_rel * sampling_rate)
+                end_idx = start_idx + int(SEGMENT_DURATION * sampling_rate)
+
+                if end_idx > data_uv.shape[1]:
+                    continue
+
+                chunk = data_uv[:, start_idx:end_idx]
+
+                # STFT
+                z_chunk, f_chunk, t_chunk = self.apply_stft(chunk, sampling_rate)
+
+                # Phase
+                z_phase = z_chunk[:, phase_mask, :]
+                phase_map = np.angle(z_phase)
+
+                # Amp
+                z_amp_full = z_chunk[:, amp_mask, :]
+                z_amp = z_amp_full[:, ::10, :]  # Downsample freq
+                amp_map = np.abs(z_amp) ** 2
+                if APPLY_LOG_TRANSFORM:
+                    amp_map = np.log10(amp_map + LOG_TRANSFORM_EPSILON)
+
+                segment_cache[start] = {"phase": phase_map, "amp": amp_map}
+
+            # 5. Reassemble Sequences
             results = []
             for seq in sequences:
-                seq_specs = []
+                seq_phase_list = []
+                seq_amp_list = []
+                valid = True
+
                 for start in seq["segment_starts"]:
-                    start_rel = start - crop_tmin
-                    bin_mask = (time_arr >= start_rel) & (
-                        time_arr < start_rel + SEGMENT_DURATION
-                    )
-                    spec = full_power[:, :, bin_mask]
-                    if APPLY_LOG_TRANSFORM:
-                        spec = np.log10(spec + LOG_TRANSFORM_EPSILON)
-                    seq_specs.append(spec)
+                    if start in segment_cache:
+                        seg_data = segment_cache[start]
+                        seq_phase_list.append(seg_data["phase"])
+                        seq_amp_list.append(seg_data["amp"])
+                    else:
+                        valid = False
+                        break
+
+                if not valid or not seq_phase_list:
+                    results.append(None)
+                    continue
+
+                # Pad/Trim time dimensions if inconsistent
+                min_t = min(x.shape[2] for x in seq_phase_list)
+                seq_phase_stack = np.stack(
+                    [x[:, :, :min_t] for x in seq_phase_list], axis=0
+                )
+                seq_amp_stack = np.stack(
+                    [x[:, :, :min_t] for x in seq_amp_list], axis=0
+                )
 
                 results.append(
                     {
-                        "spectrogram": np.stack(seq_specs, axis=0),
+                        "spectrogram_phase": seq_phase_stack,
+                        "spectrogram_amp": seq_amp_stack,
                         "label": 1 if seq["type"] == self.positive_label else 0,
                         "patient_id": patient_id,
                         "file_name": filename,
@@ -209,20 +291,34 @@ class EEGPreprocessor:
                         "time_to_seizure": seq.get("time_to_seizure", -1),
                     }
                 )
+
             return results
+
         except Exception as e:
-            self.logger.error(f"Error extracting {filename}: {e}")
+            self.logger.error(f"Error processing file {filename}: {e}")
+            import traceback
+
+            traceback.print_exc()
             return [None] * len(sequences)
 
-    def _init_hdf5(self, path, shape):
+    def _init_hdf5(self, path, phase_shape, amp_shape):
         with h5py.File(path, "w") as f:
+            # Dual Datasets
             f.create_dataset(
-                "spectrograms",
-                (0, *shape),
-                maxshape=(None, *shape),
+                "spectrograms_phase",
+                (0, *phase_shape),
+                maxshape=(None, *phase_shape),
                 dtype=np.float32,
                 chunks=True,
             )
+            f.create_dataset(
+                "spectrograms_amp",
+                (0, *amp_shape),
+                maxshape=(None, *amp_shape),
+                dtype=np.float32,
+                chunks=True,
+            )
+
             f.create_dataset("labels", (0,), maxshape=(None,), dtype=np.int32)
             f.create_dataset("patient_ids", (0,), maxshape=(None,), dtype="S10")
             si = f.create_group("segment_info")
@@ -235,20 +331,24 @@ class EEGPreprocessor:
 
     def _append_to_hdf5(self, path, batch):
         with h5py.File(path, "a") as f:
-            n_old = f["spectrograms"].shape[0]
+            n_old = f["spectrograms_phase"].shape[0]
             n_new = len(batch)
-            for ds in [
-                f["spectrograms"],
-                f["labels"],
-                f["patient_ids"],
-                f["segment_info/start_times"],
-                f["segment_info/file_names"],
-                f["segment_info/time_to_seizure"],
+
+            # Resize all
+            for ds_name in [
+                "spectrograms_phase",
+                "spectrograms_amp",
+                "labels",
+                "patient_ids",
             ]:
-                ds.resize(n_old + n_new, axis=0)
+                f[ds_name].resize(n_old + n_new, axis=0)
+            for k in ["start_times", "file_names", "time_to_seizure"]:
+                f[f"segment_info/{k}"].resize(n_old + n_new, axis=0)
+
             for i, item in enumerate(batch):
                 idx = n_old + i
-                f["spectrograms"][idx] = item["spectrogram"]
+                f["spectrograms_phase"][idx] = item["spectrogram_phase"]
+                f["spectrograms_amp"][idx] = item["spectrogram_amp"]
                 f["labels"][idx] = item["label"]
                 f["patient_ids"][idx] = item["patient_id"].encode("utf-8")
                 f["segment_info/start_times"][idx] = item["start_sec"]
@@ -262,7 +362,9 @@ class EEGPreprocessor:
                 continue
 
             groups = self.group_sequences_by_file(sequences)
-            for (pid, fname), f_seqs in tqdm(groups.items(), desc=f"Pass 1: {split}"):
+            for (pid, fname), f_seqs in tqdm(
+                groups.items(), desc=f"Pass 1 (Dual-Stream): {split}"
+            ):
                 file_id = f"p1_{split}_{fname}"
                 if file_id in self.checkpoint["completed_files"]:
                     continue
@@ -274,7 +376,11 @@ class EEGPreprocessor:
                 ]
                 if batch:
                     if not path.exists():
-                        self._init_hdf5(path, batch[0]["spectrogram"].shape)
+                        self._init_hdf5(
+                            path,
+                            batch[0]["spectrogram_phase"].shape,
+                            batch[0]["spectrogram_amp"].shape,
+                        )
                     self._append_to_hdf5(path, batch)
                 self.checkpoint["completed_files"].add(file_id)
                 self.save_checkpoint()
@@ -283,9 +389,9 @@ class EEGPreprocessor:
 
     def compute_stats(self) -> Tuple[float, float]:
         path = self.intermediate_dir / "train_intermediate.h5"
-        self.logger.info("Pass 2: Computing global stats...")
+        self.logger.info("Pass 2: Computing global stats (Amplitude Stream ONLY)...")
         with h5py.File(path, "r") as f:
-            ds = f["spectrograms"]
+            ds = f["spectrograms_amp"]  # Only normalize amplitude
             sum_v, sum_sq, count = 0.0, 0.0, 0
             for i in tqdm(range(0, ds.shape[0], 100), desc="Stats"):
                 chunk = ds[i : i + 100]
@@ -304,26 +410,43 @@ class EEGPreprocessor:
             )
             if not src.exists():
                 continue
-            self.logger.info(f"Pass 3: Normalizing {split}...")
+            self.logger.info(f"Pass 3: Finalizing {split} (Norm Amp, Raw Phase)...")
             with h5py.File(src, "r") as fin, h5py.File(dst, "w") as fout:
+                # Copy Metadata / Labels
                 for k in ["labels", "patient_ids"]:
                     fout.create_dataset(k, data=fin[k][:])
                 gi, go = fin["segment_info"], fout.create_group("segment_info")
                 for k in gi:
                     go.create_dataset(k, data=gi[k][:])
 
-                ds_in = fin["spectrograms"]
-                ds_out = fout.create_dataset(
-                    "spectrograms", ds_in.shape, dtype=np.float32
+                # Setup Datasets
+                phase_in = fin["spectrograms_phase"]
+                amp_in = fin["spectrograms_amp"]
+
+                # Phase: Direct Copy (No Normalization)
+                phase_out = fout.create_dataset(
+                    "spectrograms_phase", phase_in.shape, dtype=np.float32
                 )
-                for i in tqdm(range(0, ds_in.shape[0], 100), desc=f"Final {split}"):
-                    chunk = ds_in[i : i + 100]
-                    ds_out[i : i + 100] = (
-                        (chunk - mean) / std if std > 1e-8 else chunk - mean
+                # Amp: Normalized Copy
+                amp_out = fout.create_dataset(
+                    "spectrograms_amp", amp_in.shape, dtype=np.float32
+                )
+
+                chunk_size = 100
+                total = phase_in.shape[0]
+
+                for i in tqdm(range(0, total, chunk_size), desc=f"Final {split}"):
+                    # Copy Phase
+                    phase_out[i : i + chunk_size] = phase_in[i : i + chunk_size]
+
+                    # Normalize Amp
+                    chunk_amp = amp_in[i : i + chunk_size]
+                    amp_out[i : i + chunk_size] = (
+                        (chunk_amp - mean) / std if std > 1e-8 else chunk_amp - mean
                     )
 
                 fout.create_group("metadata").attrs.update(
-                    {"mean": mean, "std": std, "norm": "global"}
+                    {"mean": mean, "std": std, "norm": "dual_stream_amp_only"}
                 )
 
     def run_preprocessing(self):

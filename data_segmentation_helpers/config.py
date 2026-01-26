@@ -11,7 +11,7 @@ Single Patient Training:
 
 TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
 PREICTAL_WINDOW = 10 * 60  # 10 minutes before seizure
-INTERICTAL_BUFFER = 120 * 60  # 2 hours buffer from seizures
+INTERICTAL_BUFFER = 30 * 60
 
 # =============================================================================
 # Dataset Configuration
@@ -24,17 +24,25 @@ ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
 PATIENTS = [
     "chb01",
     "chb02",
+    "chb03",
+    # "chb04",
     # "chb05",
     # "chb06",
     # "chb07",
     # "chb08",
+    # "chb09",
+    # "chb10",
     # "chb11",
     # "chb13",
     # "chb14",
     # "chb15",
+    # "chb16",
     # "chb17",
+    # "chb18",
     # "chb19",
     # "chb20",
+    # "chb21",
+    # "chb22",
     # "chb23",
 ]
 
@@ -49,16 +57,20 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 # =============================================================================
 
 SEGMENT_DURATION = 5  # seconds per segment
-SEQUENCE_LENGTH = 30  # segments per sequence (5 min total)
-SEQUENCE_STRIDE = 5  # segments between sequences (83% overlap in preictal)
+SEQUENCE_LENGTH = 5  # segments per sequence
+SEQUENCE_STRIDE = 1  # segments between sequences
 
 # =============================================================================
 # Signal Processing
 # =============================================================================
 
 LOW_FREQ_HZ = 0.5
-HIGH_FREQ_HZ = 50
+HIGH_FREQ_HZ = 128  # Extended to capture High Gamma/HFO
 NOTCH_FREQ_HZ = 60
+
+# Dual-Stream Configuration
+PHASE_FREQ_BAND = (0.5, 12.0)  # Delta/Theta (for Phase)
+AMP_FREQ_BAND = (20.0, 128.0)  # Gamma/HFO (for Amplitude)
 
 STFT_NPERSEG = 256  # STFT window length
 STFT_NOVERLAP = 128  # STFT overlap (50%)
@@ -94,16 +106,16 @@ TARGET_CHANNELS = [
 
 LSTM_HIDDEN_DIM = 512
 LSTM_NUM_LAYERS = 3
-LSTM_DROPOUT = 0.5
+LSTM_DROPOUT = 0.5  # Reduced from 0.6 back to 0.5
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
 
-TRAINING_EPOCHS = 5
+TRAINING_EPOCHS = 10
 SEQUENCE_BATCH_SIZE = 16
-LEARNING_RATE = 0.00001
-WEIGHT_DECAY = 1e-4
+LEARNING_RATE = 0.0001  # Increased from 1e-5 to 1e-4
+WEIGHT_DECAY = 1e-4  # Reduced from 1e-3 back to 1e-4
 NUM_WORKERS = 4
 
 # =============================================================================

@@ -357,7 +357,8 @@ class EEGPreprocessor:
 
     def create_intermediate_datasets(self, splits):
         for split, sequences in splits.items():
-            path = self.intermediate_dir / f"{split}_intermediate.h5"
+            path = self.intermediate_dir / f"s{split}_intermediate.h5"
+
             if path.exists() and f"pass1_{split}_complete" in self.checkpoint:
                 continue
 
@@ -387,30 +388,34 @@ class EEGPreprocessor:
             self.checkpoint[f"pass1_{split}_complete"] = True
             self.save_checkpoint()
 
-    def compute_stats(self) -> Tuple[float, float]:
-        path = self.intermediate_dir / "train_intermediate.h5"
+    def compute_stats(self, split_names) -> Tuple[float, float]:
         self.logger.info("Pass 2: Computing global stats (Amplitude Stream ONLY)...")
-        with h5py.File(path, "r") as f:
-            ds = f["spectrograms_amp"]  # Only normalize amplitude
-            sum_v, sum_sq, count = 0.0, 0.0, 0
-            for i in tqdm(range(0, ds.shape[0], 100), desc="Stats"):
-                chunk = ds[i : i + 100]
-                sum_v += np.sum(chunk)
-                sum_sq += np.sum(chunk**2)
-                count += chunk.size
-        mean = sum_v / count
-        std = np.sqrt((sum_sq / count) - (mean**2))
-        return float(mean), float(std)
+        
+        sum_v, sum_sq, count = 0.0, 0.0, 0
+        # path = self.intermediate_dir / "train_intermediate.h5"
+        for split in split_names:
+            path = self.intermediate_dir / f"s{split}_intermediate.h5"
+            with h5py.File(path, "r") as f:
+                ds = f["spectrograms_amp"]  # Only normalize amplitude
+                for i in tqdm(range(0, ds.shape[0], 100), desc="Stats"):
+                    chunk = ds[i : i + 100]
+                    sum_v += np.sum(chunk)
+                    sum_sq += np.sum(chunk**2)
+                    count += chunk.size
+        # mean = sum_v / count
+        # std = np.sqrt((sum_sq / count) - (mean**2))
+        # return float(mean), float(std)
+        return float(sum_v), float(sum_sq), float(count)
 
-    def create_final_datasets(self, mean, std):
-        for split in ["train", "test"]:
+    def create_final_datasets(self, mean, std, split_names):
+        for split in split_names:
             src, dst = (
-                self.intermediate_dir / f"{split}_intermediate.h5",
-                self.data_dir / f"{split}_dataset.h5",
+                self.intermediate_dir / f"s{split}_intermediate.h5",
+                self.data_dir / f"s{split}_dataset.h5",
             )
             if not src.exists():
                 continue
-            self.logger.info(f"Pass 3: Finalizing {split} (Norm Amp, Raw Phase)...")
+            self.logger.info(f"Pass 3: Finalizing split {split} (Norm Amp, Raw Phase)...")
             with h5py.File(src, "r") as fin, h5py.File(dst, "w") as fout:
                 # Copy Metadata / Labels
                 for k in ["labels", "patient_ids"]:
@@ -452,21 +457,32 @@ class EEGPreprocessor:
     def run_preprocessing(self):
         with open(self.input_json_path, "r") as f:
             all_seqs = json.load(f)["sequences"]
+        split_names = set([seq.get("split") for seq in all_seqs])
         splits = {
             s: [seq for seq in all_seqs if seq.get("split") == s]
-            for s in ["train", "test"]
+            for s in split_names
         }
 
         self.create_intermediate_datasets(splits)
 
-        if "global_mean" not in self.checkpoint:
-            mean, std = self.compute_stats()
-            self.checkpoint.update({"global_mean": mean, "global_std": std})
+        if "patient_stats" not in self.checkpoint:
+            self.checkpoint.update({"patient_stats": {}})
+        
+        if self.patient_id not in self.checkpoint["patient_stats"]:
+            # mean, std = self.compute_stats(split_names)
+            sum_v, sum_sq, count = self.compute_stats(split_names)
+            self.checkpoint["patient_stats"].update(
+                {"sum_v": sum_v, "sum_sq": sum_sq, "count": count})
             self.save_checkpoint()
         else:
-            mean, std = self.checkpoint["global_mean"], self.checkpoint["global_std"]
+            # mean, std = self.checkpoint["global_mean"], self.checkpoint["global_std"]
+            sum_v = self.checkpoint["patient_stats"]["sum_v"]
+            sum_sq = self.checkpoint["patient_stats"]["sum_sq"]
+            count = self.checkpoint["patient_stats"]["count"]
 
-        self.create_final_datasets(mean, std)
+        mean = float(sum_v / count)
+        std = float( np.sqrt((sum_sq / count) - (mean**2))  )
+        self.create_final_datasets(mean, std, split_names)
         self.logger.info("Preprocessing complete.")
 
 
@@ -479,3 +495,6 @@ if __name__ == "__main__":
             EEGPreprocessor(cfg).run_preprocessing()
         except Exception as e:
             print(f"Error {cfg['patient_id']}: {e}")
+    
+    
+

@@ -47,8 +47,23 @@ PATIENTS = [
     "chb23",
 ]
 
+ALL_PATIENTS = [
+    "chb01", "chb02", "chb03", "chb04",
+    "chb05", "chb06", "chb07", "chb08",
+    "chb09", "chb10", "chb11", "chb13",
+    "chb14", "chb15", "chb16", "chb17",
+    "chb18", "chb19", "chb20", "chb21",
+    "chb22", "chb23", "chb24"
+]
+
 # Current patient index to process (0 to len(PATIENTS)-1, or None for all)
+# PATIENT_INDEX = None
 PATIENT_INDEX = None
+TEST_SEIZURE = None
+
+# Current fold to process (0 to len(LOPO_PATIENTS)-1, or None for all folds)
+# LOPO_FOLD_ID = 2
+LOPO_FOLD_ID = None
 
 # Precomputed seizure counts (for reference)
 from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
@@ -117,6 +132,11 @@ TRAINING_EPOCHS = 5
 SEQUENCE_BATCH_SIZE = 16
 LEARNING_RATE = 0.0001  # Increased from 1e-5 to 1e-4
 WEIGHT_DECAY = 1e-4  # Reduced from 1e-3 back to 1e-4
+# TRAINING_EPOCHS = 4
+# SEQUENCE_BATCH_SIZE = 8
+# LEARNING_RATE = 0.00001
+# WEIGHT_DECAY = 1e-4
+
 NUM_WORKERS = 4
 
 # =============================================================================

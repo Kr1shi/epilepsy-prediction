@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import h5py
 import numpy as np
 import json
@@ -25,21 +25,9 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-from data_segmentation_helpers.config import (
-    TASK_MODE,
-    SEQUENCE_LENGTH,
-    SEQUENCE_BATCH_SIZE,
-    NUM_WORKERS,
-    LSTM_HIDDEN_DIM,
-    LSTM_NUM_LAYERS,
-    LSTM_DROPOUT,
-    TRAINING_EPOCHS,
-    LEARNING_RATE,
-    WEIGHT_DECAY,
-    PATIENTS,
-    PATIENT_INDEX,
-    get_patient_config,
-)
+import gc
+
+from data_segmentation_helpers.config import *
 
 
 class EEGDataset(Dataset):
@@ -200,7 +188,7 @@ class CNN_LSTM_Hybrid_Dual(nn.Module):
             input_size=fusion_dim,
             hidden_size=lstm_hidden_dim,
             num_layers=lstm_num_layers,
-            batch_first=True,
+            batch_first=False,
             dropout=dropout if lstm_num_layers > 1 else 0,
             bidirectional=True,
         )
@@ -338,13 +326,65 @@ def optimize_running_average(predictions, labels, max_window=30):
     )
     return best_params
 
+def create_datasets(patients_to_process, skip_missing_class=True):
+    all_datasets = {}
+    for idx in patients_to_process:
+        pid = PATIENTS[idx]
+        all_datasets[pid] = {}
+        patient_config = get_patient_config(idx)
+        dataset_prefix = patient_config["output_prefix"]
+        dataset_dir = Path("preprocessing") / "data" / dataset_prefix
+        h5_files = os.listdir(dataset_dir)
+        for h5_filename in h5_files:
+            split_name = h5_filename.strip().removeprefix("s").removesuffix("_dataset.h5")
+            h5_file = dataset_dir / h5_filename
+            dataset = EEGDataset(str(h5_file), split=split_name)
+            if skip_missing_class:
+                class_dist = torch.bincount(dataset.labels)
+                if 0 in class_dist:
+                    print(f"skipping patient {pid} seizure {split_name}: missing label")
+                    del dataset
+                    gc.collect()
+                    continue
+            all_datasets[pid][split_name] = dataset
+        print(f"patient {pid} splits: {all_datasets[pid].keys()}")
+    return all_datasets
+    
+def get_datasets_lopo(patient_id, all_datasets):
+    test_datasets = []
+    train_datasets = []
+    for pid in all_datasets:
+        if pid == patient_id:
+            test_datasets = list(all_datasets[pid].values())
+        else:
+            train_datasets = train_datasets + list(all_datasets[pid].values())
+    test_combined_dataset = ConcatDataset(test_datasets)
+    train_combined_dataset = ConcatDataset(train_datasets)
+    return test_combined_dataset, train_combined_dataset
+def get_datasets_per_patient(fold_id, patient_id, all_datasets):
+    patient_datasets = all_datasets[patient_id]
+    test_datasets = []
+    train_datasets = []
+    for sid in  patient_datasets:
+        if sid == fold_id:
+            test_datasets = [patient_datasets[sid]]
+        else:
+            train_datasets = train_datasets + [patient_datasets[sid]]
+    test_combined_dataset = ConcatDataset(test_datasets)
+    train_combined_dataset = ConcatDataset(train_datasets)
+    return test_combined_dataset, train_combined_dataset
 
 class EEGCNNTrainer:
-    def __init__(self, patient_config: Dict):
+    def __init__(self, patient_config: Dict, datasets, lopo=False, test_seizure_id=0):
         self.patient_id = patient_config["patient_id"]
-        dataset_prefix = patient_config["output_prefix"]
+        self.test_seizure_id = test_seizure_id
 
-        self.model_dir = Path("model") / dataset_prefix
+        dataset_prefix = patient_config["output_prefix"]
+        self.lopo = lopo
+        if lopo:
+            self.model_dir = Path("model") / "LOPO" / dataset_prefix 
+        else:
+            self.model_dir = Path("model") / "per_patient" / dataset_prefix / f"test_seizure_{test_seizure_id}"
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_prefix = dataset_prefix
         self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
@@ -355,9 +395,29 @@ class EEGCNNTrainer:
         self.device = self._get_device()
         print(f"Device: {self.device}")
 
+        test_dataset = None
+        train_dataset = None
+        if lopo:
+            test_dataset, train_dataset = get_datasets_lopo(self.patient_id, datasets)
+        else:
+            test_dataset, train_dataset = get_datasets_per_patient(self.test_seizure_id,
+                                                                   self.patient_id,
+                                                                   datasets)
         # Load Data
-        self.train_loader = self._create_dataloader("train")
-        self.val_loader = self._create_dataloader("test")
+        self.train_loader = DataLoader(
+            train_dataset,
+            batch_size=SEQUENCE_BATCH_SIZE,
+            shuffle=True,
+            num_workers=NUM_WORKERS,
+            pin_memory=(self.device.type == "cuda"),
+        )
+        self.val_loader = DataLoader(
+            test_dataset,
+            batch_size=SEQUENCE_BATCH_SIZE,
+            shuffle=False,
+            num_workers=NUM_WORKERS,
+            pin_memory=(self.device.type == "cuda"),
+        )
 
         # Initialize Dual-Stream Model
         self.model = CNN_LSTM_Hybrid_Dual(
@@ -384,6 +444,7 @@ class EEGCNNTrainer:
 
         print(f"Model Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
 
+
     @property
     def positive_label(self):
         return "preictal" if TASK_MODE == "prediction" else "ictal"
@@ -405,19 +466,19 @@ class EEGCNNTrainer:
         print(f"Using CPU")
         return torch.device("cpu")
 
-    def _create_dataloader(self, split):
-        h5_file = self.dataset_dir / f"{split}_dataset.h5"
-        if not h5_file.exists():
-            raise FileNotFoundError(f"Missing {h5_file}")
+    # def _create_dataloader(self, split):
+    #     h5_file = self.dataset_dir / f"{split}_dataset.h5"
+    #     if not h5_file.exists():
+    #         raise FileNotFoundError(f"Missing {h5_file}")
 
-        dataset = EEGDataset(str(h5_file), split=split)
-        return DataLoader(
-            dataset,
-            batch_size=SEQUENCE_BATCH_SIZE,
-            shuffle=(split == "train"),
-            num_workers=NUM_WORKERS,
-            pin_memory=(self.device.type == "cuda"),
-        )
+    #     dataset = EEGDataset(str(h5_file), split=split)
+    #     return DataLoader(
+    #         dataset,
+    #         batch_size=SEQUENCE_BATCH_SIZE,
+    #         shuffle=(split == "train"),
+    #         num_workers=NUM_WORKERS,
+    #         pin_memory=(self.device.type == "cuda"),
+    #     )
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -535,7 +596,10 @@ class EEGCNNTrainer:
 
     def train(self):
         print("=" * 60)
-        print(f"STARTING DUAL-STREAM TRAINING: {self.patient_id}")
+        if self.lopo:
+            print(f"STARTING DUAL-STREAM TRAINING: LOPO {self.patient_id}")
+        else:
+            print(f"STARTING DUAL-STREAM TRAINING: {self.patient_id} test seizure {self.test_seizure_id}")
         print("=" * 60)
 
         start_time = time.time()
@@ -610,20 +674,53 @@ class EEGCNNTrainer:
 
 def main():
     n_patients = len(PATIENTS)
-    if PATIENT_INDEX is None:
-        patients_to_process = list(range(n_patients))
-    else:
-        patients_to_process = [PATIENT_INDEX]
+    
+    if LOPO_FOLD_ID is None:
+        # per patient
+        if PATIENT_INDEX is None:
+            patients_to_process = list(range(n_patients))
+        else:
+            patients_to_process = [PATIENT_INDEX]
 
-    for current_idx in patients_to_process:
-        patient_config = get_patient_config(current_idx)
+        for current_idx in patients_to_process:
+            patient_id = PATIENTS[current_idx]
+            patient_config = get_patient_config(current_idx)
+
+            all_datasets = create_datasets([current_idx], skip_missing_class=True)
+            test_seizures = all_datasets[patient_id].keys()
+            if TEST_SEIZURE is not None:
+                test_seizures = [TEST_SEIZURE]
+            print("patient:", patient_id, "seizures:", test_seizures)
+            
+            for sid in test_seizures:
+                try:
+                    gc.collect()
+                    EEGCNNTrainer(patient_config, datasets=all_datasets, test_seizure_id=sid).train()
+                except Exception as e:
+                    print(f"Error {patient_config['patient_id']} seizure {sid}: {e}")
+                    import traceback
+
+                    traceback.print_exc()
+    else:
+        patients_to_process = list(range(n_patients))
+        assert(LOPO_FOLD_ID < n_patients)
+
+        all_datasets = create_datasets(patients_to_process)
+
+        patient_config = get_patient_config(LOPO_FOLD_ID)
+        print("HERE")
         try:
-            EEGCNNTrainer(patient_config).train()
+            gc.collect()
+            EEGCNNTrainer(patient_config, datasets=all_datasets, 
+                          lopo=True).train()
         except Exception as e:
-            print(f"Error {patient_config['patient_id']}: {e}")
+            print(f"Error LOPO {patient_config['patient_id']} : {e}")
             import traceback
 
             traceback.print_exc()
+
+
+
 
 
 if __name__ == "__main__":

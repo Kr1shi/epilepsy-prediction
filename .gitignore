@@ -207,12 +207,18 @@ __marimo__/
 research/
 testing/
 preprocessing/
+preprocessing_*/
 aaron/
 mario/
 physionet.org/
 model/
 papers/
 result_plots/
+profiling/
+
+local/
+DANN*/
+GANN*/
 
 # Data files
 *.json

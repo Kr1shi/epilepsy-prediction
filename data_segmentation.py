@@ -28,6 +28,7 @@ from data_segmentation_helpers.config import (
     get_patient_config,
     SEIZURE_COUNTS,
     INTERICTAL_TO_PREICTAL_RATIO,
+    LOPO_FOLD_ID
 )
 from data_segmentation_helpers.segmentation import parse_summary_file
 from data_segmentation_helpers.channel_validation import (
@@ -535,34 +536,64 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
         # 3 -> 2 (2 train, 1 test)
     else:
         n_train_seizures = 0
+    # 3. Determine split: Train on ALL seizures except the LAST one
+    # if num_seizures > 0:
+    #     n_train_seizures = num_seizures - 1
+    # else:
+    #     n_train_seizures = 0
 
-    train_seizure_ids = set(patient_seizure_ids[:n_train_seizures])
+    # train_seizure_ids = set(patient_seizure_ids[:n_train_seizures])
 
     # 4. Find split point: where the first TEST seizure begins
     # Default to 0 if no training seizures (e.g. num_seizures is 0 or 1)
-    split_index = 0
-    if n_train_seizures > 0:
-        split_index = len(patient_seqs)
-        for i, seq in enumerate(patient_seqs):
-            sid = seq.get("seizure_id")
-            if sid is not None and sid not in train_seizure_ids:
-                split_index = i
-                break
+    # split_index = 0
+    # if n_train_seizures > 0:
+    #     split_index = len(patient_seqs)
+    #     for i, seq in enumerate(patient_seqs):
+    #         sid = seq.get("seizure_id")
+    #         if sid is not None and sid not in train_seizure_ids:
+    #             split_index = i
+    #             break
+    
+    # train_sequences = patient_seqs[:split_index]
+    # test_sequences = patient_seqs[split_index:]
 
-    train_sequences = patient_seqs[:split_index]
-    test_sequences = patient_seqs[split_index:]
+    current_sid = None
+    split_start_idx = 0
+    all_splits = {}
+    for i, seq in enumerate(patient_seqs):
+            sid = seq.get("seizure_id")
+            if sid is not None:
+                if current_sid is None:
+                    current_sid = sid
+                elif sid != current_sid:
+                    split_end_index = i
+                    split_sequences = patient_seqs[split_start_idx:split_end_index]
+                    all_splits[current_sid] = split_sequences
+                    # 
+                    split_start_idx = split_end_index
+                    current_sid = sid
+    all_splits[current_sid] = patient_seqs[split_start_idx:]
+                
 
     if num_seizures > 0:
         print(f"\nPatient {patient_id} Split:")
         print(f"  Total Seizures: {num_seizures}")
+        # print(
+        #     f"  Train Seizures: {n_train_seizures} (IDs: {patient_seizure_ids[:n_train_seizures]})"
+        # )
+        # print(
+        #     f"  Test Seizures: {num_seizures - n_train_seizures} (IDs: {patient_seizure_ids[n_train_seizures:]})"
+        # )
         print(
-            f"  Train Seizures: {n_train_seizures} (IDs: {patient_seizure_ids[:n_train_seizures]})"
+            f"  IDs: {patient_seizure_ids})"
         )
-        print(
-            f"  Test Seizures: {num_seizures - n_train_seizures} (IDs: {patient_seizure_ids[n_train_seizures:]})"
-        )
-        print(f"  Sequences: {len(train_sequences)} Train / {len(test_sequences)} Test")
-
+        out_str = f"  Sequences: "
+        for sid in all_splits:
+            out_str = out_str + f"{len(all_splits[sid])}"
+        print(out_str)
+    
+    '''
     # Check if test set has no interictal data and move from train if necessary
     test_interictal_count = sum(
         1 for seq in test_sequences if seq["type"] == "interictal"
@@ -616,23 +647,24 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
                 print("  Warning: Not enough interictal data in train to move.")
         else:
             print("  Warning: Train set also has no interictal data!")
-
+    '''
     # Assign split labels
-    for seq in train_sequences:
-        seq["split"] = "train"
-    for seq in test_sequences:
-        seq["split"] = "test"
-
-    splits = {"train": train_sequences, "test": test_sequences}
+    # for seq in train_sequences:
+    #     seq["split"] = "train"
+    # for seq in test_sequences:
+    #     seq["split"] = "test"
+    # splits = {"train": train_sequences, "test": test_sequences}
 
     # Balance each split by downsampling majority class
     balanced_splits, balance_stats = balance_sequences_across_splits(
-        splits, positive_label, random_seed
+        all_splits, positive_label, random_seed
     )
 
     # Flatten sequences
     retained_sequences = []
-    for split_name in ["train", "test"]:
+    for split_name in all_splits:
+        for seq in balanced_splits[split_name]:
+            seq["split"] = split_name
         retained_sequences.extend(balanced_splits[split_name])
 
     # Compute split counts
@@ -956,7 +988,7 @@ if __name__ == "__main__":
 
             # Print split summary
             print(f"\n=== SPLIT SUMMARY ===")
-            for split_name in ["train", "test"]:
+            for split_name in split_counts:
                 counts = split_counts.get(split_name, {})
                 print(
                     f"  {split_name}: {counts.get('total', 0)} sequences "
@@ -967,7 +999,7 @@ if __name__ == "__main__":
             # Print balance stats
             if balance_stats:
                 print(f"\n=== BALANCING SUMMARY ===")
-                for split_name in ["train", "test"]:
+                for split_name in split_counts:
                     stats = balance_stats.get(split_name, {})
                     if stats.get("balanced", False):
                         print(

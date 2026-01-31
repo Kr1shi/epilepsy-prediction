@@ -85,8 +85,8 @@ HIGH_FREQ_HZ = 128  # Extended to capture High Gamma/HFO
 NOTCH_FREQ_HZ = 60
 
 # Dual-Stream Configuration
-PHASE_FREQ_BAND = (0.5, 12.0)  # Delta/Theta (for Phase)
-AMP_FREQ_BAND = (20.0, 128.0)  # Gamma/HFO (for Amplitude)
+PHASE_FREQ_BAND = (0.0, 5.0)  # Delta/Theta (for Phase)
+AMP_FREQ_BAND = (80.0, 128.0)  # Gamma/HFO (for Amplitude)
 
 STFT_NPERSEG = 256  # STFT window length
 STFT_NOVERLAP = 128  # STFT overlap (50%)

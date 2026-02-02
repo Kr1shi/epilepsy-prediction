@@ -50,8 +50,8 @@ SMOOTHING_T = 20  # Window size for smoothing (heuristic fallback)
 # Set these values to manually control smoothing.
 # If both are integers, they will override any other settings.
 # Set to None to use parameters from the model checkpoint or heuristics.
-MANUAL_SMOOTHING_WINDOW = 10  # e.g., 15
-MANUAL_SMOOTHING_COUNT =  6  # e.g., 5
+MANUAL_SMOOTHING_WINDOW = 17  # e.g., 15
+MANUAL_SMOOTHING_COUNT =  15  # e.g., 5
 
 
 def get_positive_label():
@@ -539,15 +539,11 @@ def main():
                 test_dataset = EEGDataset(test_data_path, split="test")
 
                 # Calculate per-seizure accuracy
-                # Note: Interictal sequences are non-overlapping, so their stride is the full sequence duration.
-                # We pass this interictal stride for accurate FPR calculation (duration & refractory steps).
-                interictal_stride = SEGMENT_DURATION * SEQUENCE_LENGTH
-                
                 seizure_accuracy_metrics = calculate_per_seizure_accuracy(
                     true_labels,
                     predictions,
                     test_dataset,
-                    interictal_stride,
+                    SEGMENT_DURATION,
                     window_size,
                     threshold_x,
                 )

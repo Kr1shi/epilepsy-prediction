@@ -123,11 +123,13 @@ class DualStreamSpectrogramEncoder(nn.Module):
     3. Pools time dimension ONLY after fusion.
     """
 
-    def __init__(self, in_channels=18, embedding_dim=256):
+    def __init__(self, num_input_channels=18, embedding_dim=256):
         super().__init__()
 
-        self.phase_tower = CompactEEGCNN(in_channels, output_channels=64)
-        self.amp_tower = CompactEEGCNN(in_channels, output_channels=64)
+        # Phase stream uses Sin/Cos (2 channels per EEG channel)
+        self.phase_tower = CompactEEGCNN(num_input_channels * 2, output_channels=64)
+        # Amp stream uses raw power (1 channel per EEG channel)
+        self.amp_tower = CompactEEGCNN(num_input_channels, output_channels=64)
 
         # Fusion is now a 1x1 Convolution across time steps
         self.fusion_conv = nn.Sequential(
@@ -180,7 +182,7 @@ class CNN_LSTM_Hybrid_Dual(nn.Module):
 
         # 1. Dual-Stream Encoder
         self.encoder = DualStreamSpectrogramEncoder(
-            in_channels=num_input_channels, embedding_dim=fusion_dim
+            num_input_channels=num_input_channels, embedding_dim=fusion_dim
         )
 
         # 2. BiLSTM
@@ -211,16 +213,16 @@ class CNN_LSTM_Hybrid_Dual(nn.Module):
     def forward(self, x_phase, x_amp):
         """
         Args:
-            x_phase: (batch, seq, channels, h_phase, w)
-            x_amp:   (batch, seq, channels, h_amp, w)
+            x_phase: (batch, seq, channels_phase, h_phase, w)
+            x_amp:   (batch, seq, channels_amp, h_amp, w)
         """
-        batch_size, seq_len, c, h_p, w = x_phase.shape
-        _, _, _, h_a, _ = x_amp.shape
+        batch_size, seq_len, c_p, h_p, w = x_phase.shape
+        _, _, c_a, h_a, _ = x_amp.shape
 
         # Flatten sequence dimension for CNN processing
         # (Batch * Seq, C, H, W)
-        x_phase_flat = x_phase.view(batch_size * seq_len, c, h_p, w)
-        x_amp_flat = x_amp.view(batch_size * seq_len, c, h_a, w)
+        x_phase_flat = x_phase.view(batch_size * seq_len, c_p, h_p, w)
+        x_amp_flat = x_amp.view(batch_size * seq_len, c_a, h_a, w)
 
         # Dual-Stream Encoding
         features = self.encoder(x_phase_flat, x_amp_flat)  # (Batch*Seq, FusionDim)

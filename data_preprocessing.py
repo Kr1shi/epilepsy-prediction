@@ -289,7 +289,7 @@ class EEGPreprocessor:
                     {
                         "spectrogram_phase": seq_phase_stack,
                         "spectrogram_amp": seq_amp_stack,
-                        "label": 1 if seq["type"] == self.positive_label else 0,
+                        "label": float(seq["tts_label"]),  # TTS Regression Target
                         "patient_id": patient_id,
                         "file_name": filename,
                         "start_sec": seq["sequence_start_sec"],
@@ -324,7 +324,7 @@ class EEGPreprocessor:
                 chunks=True,
             )
 
-            f.create_dataset("labels", (0,), maxshape=(None,), dtype=np.int32)
+            f.create_dataset("labels", (0,), maxshape=(None,), dtype=np.float32)
             f.create_dataset("patient_ids", (0,), maxshape=(None,), dtype="S10")
             si = f.create_group("segment_info")
             for k, dt in [

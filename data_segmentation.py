@@ -28,7 +28,10 @@ from data_segmentation_helpers.config import (
     get_patient_config,
     SEIZURE_COUNTS,
     INTERICTAL_TO_PREICTAL_RATIO,
-    LOPO_FOLD_ID
+    LOPO_FOLD_ID,
+    MAX_HORIZON_SEC,
+    POST_ICTAL_EXCLUSION_SEC,
+    TRAIN_TEST_SPLIT_RATIO,
 )
 from data_segmentation_helpers.segmentation import parse_summary_file
 from data_segmentation_helpers.channel_validation import (
@@ -106,231 +109,94 @@ def identify_positive_regions(all_seizures_global):
 def create_sequences_from_file(
     patient_id, filename, all_seizures_global, file_duration, file_offset
 ):
-    """Create sequences of consecutive segments from a single file
+    """Create sequences of consecutive segments with TTS Regression labels.
 
-    Args:
-        patient_id: Patient identifier (e.g., 'chb01')
-        filename: EDF filename (e.g., 'chb01_03.edf')
-        all_seizures_global: List of ALL seizures with global timeline coordinates
-        file_duration: Duration of the file in seconds
-        file_offset: Global timeline offset for this file (accounts for gaps)
-
-    Returns:
-        List of sequence dictionaries
+    Logic:
+    - Uniform stride (non-overlapping): stride = sequence_duration.
+    - Labels: Time until NEXT seizure start, capped at MAX_HORIZON_SEC.
+    - Exclusion: Discard data during seizures or within POST_ICTAL_EXCLUSION_SEC after.
     """
     sequences = []
-    skipped_boundary_sequences = (
-        0  # Track sequences skipped due to insufficient boundary data
-    )
+    sequence_duration = SEGMENT_DURATION * SEQUENCE_LENGTH
+    stride = sequence_duration  # Force 0% overlap for all sequences
 
-    # Calculate sequence parameters
-    sequence_duration = SEGMENT_DURATION * SEQUENCE_LENGTH  # e.g., 5s * 30 = 150s
-    overlapping_stride = (
-        SEGMENT_DURATION * SEQUENCE_STRIDE
-    )  # e.g., 5s * 5 = 25s (83% overlap for preictal/ictal)
-    non_overlapping_stride = sequence_duration  # e.g., 150s (0% overlap for interictal)
-
-    # Identify positive regions (preictal/ictal) to determine stride strategy
-    positive_regions = identify_positive_regions(all_seizures_global)
-
-    # Calculate how many sequences we can extract
-    if file_duration < sequence_duration + (2 * SAFETY_MARGIN):
-        return (
-            sequences  # File too short for even one sequence (including safety margins)
-        )
-
-    # Helper function to check if a position is in a positive region
-    def is_in_positive_region(start_global, end_global):
-        """Check if sequence overlaps with any positive region"""
-        for region_start, region_end in positive_regions:
-            if start_global < region_end and end_global > region_start:
-                return True
-        return False
-
-    # Generate sequence start times using adaptive sliding window
+    # Generate sequence start times
     sequence_start_local = SAFETY_MARGIN
     while sequence_start_local + sequence_duration + SAFETY_MARGIN <= file_duration:
-        sequence_end_local = sequence_start_local + sequence_duration
-
         # Convert to global timeline
         sequence_start_global = file_offset + sequence_start_local
-        sequence_end_global = file_offset + sequence_end_local
+        sequence_end_global = sequence_start_global + sequence_duration
 
-        # Generate segment start times within this sequence (local to file)
+        # 1. Identify "Next" and "Previous" Seizures
+        next_seizure = None
+        prev_seizure = None
+        is_ictal = False
+
+        for seizure in all_seizures_global:
+            s_start = seizure["start_sec_global"]
+            s_end = seizure["end_sec_global"]
+
+            # Check if current sequence overlaps with this seizure (Ictal)
+            if sequence_start_global < s_end and sequence_end_global > s_start:
+                is_ictal = True
+                break
+
+            # Find next seizure
+            if s_start >= sequence_end_global:
+                if next_seizure is None or s_start < next_seizure["start_sec_global"]:
+                    next_seizure = seizure
+
+            # Find previous seizure
+            if s_end <= sequence_start_global:
+                if prev_seizure is None or s_end > prev_seizure["end_sec_global"]:
+                    prev_seizure = seizure
+
+        # 2. Apply Exclusion Rules
+        # Rule A: Discard Ictal data
+        if is_ictal:
+            sequence_start_local += stride
+            continue
+
+        # Rule B: Discard Post-Ictal data (1 hour after previous seizure)
+        if prev_seizure:
+            time_since_prev = sequence_start_global - prev_seizure["end_sec_global"]
+            if time_since_prev < POST_ICTAL_EXCLUSION_SEC:
+                sequence_start_local += stride
+                continue
+
+        # Rule C: If no next seizure exists in the record, we can't label it properly
+        # (Alternatively, we could label it as MAX_HORIZON, but exclusion is safer)
+        if next_seizure is None:
+            sequence_start_local += stride
+            continue
+
+        # 3. Calculate TTS Label (Sawtooth)
+        # Use the end of the sequence as the reference point for countdown
+        tts_seconds = next_seizure["start_sec_global"] - sequence_end_global
+        capped_tts = min(tts_seconds, MAX_HORIZON_SEC)
+
+        # 4. Final Sequence Metadata
         segment_starts = [
             sequence_start_local + (i * SEGMENT_DURATION)
             for i in range(SEQUENCE_LENGTH)
         ]
 
-        # Validate all segments have sufficient data
-        last_segment_end = segment_starts[-1] + SEGMENT_DURATION
-        if last_segment_end + SAFETY_MARGIN > file_duration:
-            # Skip this sequence - insufficient data for complete preprocessing
-            skipped_boundary_sequences += 1
-            # Use non-overlapping stride for interictal regions (safest assumption)
-            sequence_start_local += non_overlapping_stride
-            continue
-
-        # Determine sequence label based on LAST segment
-        last_segment_start_local = segment_starts[-1]
-        last_segment_end_local = last_segment_start_local + SEGMENT_DURATION
-        last_segment_start_global = file_offset + last_segment_start_local
-        last_segment_end_global = file_offset + last_segment_end_local
-
-        # Check if sequence is preictal/ictal, interictal, or in excluded buffer zone
-        sequence_type = "interictal"
-        time_to_seizure = None
-        in_excluded_zone = False
-        matched_seizure_id = None
-
-        # PASS 1: Check for positive class (preictal OR ictal depending on mode)
-        if TASK_MODE == "prediction":
-            # Prediction mode: Check if preictal for ANY seizure (takes priority)
-            for seizure in all_seizures_global:
-                seizure_start_global = seizure["start_sec_global"]
-
-                # Check if last segment falls in preictal window (10 minutes before seizure)
-                preictal_window_start_global = max(
-                    0, seizure_start_global - PREICTAL_WINDOW
-                )
-
-                if (
-                    preictal_window_start_global <= last_segment_start_global
-                    and last_segment_end_global <= seizure_start_global
-                ):
-                    sequence_type = "preictal"
-                    time_to_seizure = seizure_start_global - last_segment_end_global
-                    matched_seizure_id = seizure.get("seizure_id")
-                    break
-
-        elif TASK_MODE == "detection":
-            # Detection mode: Check if ictal (overlaps with ANY seizure period)
-            for seizure in all_seizures_global:
-                seizure_start_global = seizure["start_sec_global"]
-                seizure_end_global = seizure["end_sec_global"]
-
-                # Check if ANY part of sequence overlaps with seizure period
-                # Overlap occurs if: sequence_start < seizure_end AND sequence_end > seizure_start
-                if (
-                    sequence_start_global < seizure_end_global
-                    and sequence_end_global > seizure_start_global
-                ):
-                    sequence_type = "ictal"
-                    matched_seizure_id = seizure.get("seizure_id")
-                    # Store overlap information (could be useful for analysis)
-                    overlap_start = max(sequence_start_global, seizure_start_global)
-                    overlap_end = min(sequence_end_global, seizure_end_global)
-                    break
-
-        # PASS 2: Only check buffer zones if NOT positive class (preictal/ictal)
-        # Buffer zones should only exclude interictal sequences, not override positive labels
-        if sequence_type == "interictal":
-            for seizure in all_seizures_global:
-                seizure_start_global = seizure["start_sec_global"]
-                seizure_end_global = seizure["end_sec_global"]
-
-                if TASK_MODE == "prediction":
-                    # Prediction mode: Exclude 50-min buffer before preictal window
-                    preictal_window_start_global = max(
-                        0, seizure_start_global - PREICTAL_WINDOW
-                    )
-
-                    # Buffer zone 1: [seizure_start - 60min, seizure_start - 10min) - before preictal window
-                    buffer_before_start_global = max(
-                        0, seizure_start_global - INTERICTAL_BUFFER
-                    )
-                    buffer_before_end_global = preictal_window_start_global
-
-                    # Check if sequence overlaps with pre-preictal buffer
-                    if not (
-                        sequence_end_global <= buffer_before_start_global
-                        or sequence_start_global >= buffer_before_end_global
-                    ):
-                        in_excluded_zone = True
-                        break
-
-                    # Buffer zone 2: [seizure_start, seizure_end + 60min] - during and after seizure
-                    buffer_after_end_global = seizure_end_global + INTERICTAL_BUFFER
-
-                    # Check if sequence overlaps with ictal + post-ictal buffer
-                    if not (
-                        sequence_end_global <= seizure_start_global
-                        or sequence_start_global >= buffer_after_end_global
-                    ):
-                        in_excluded_zone = True
-                        break
-
-                elif TASK_MODE == "detection":
-                    # Detection mode: Exclude full 60-min buffer before and after seizure
-                    # Buffer zone 1: [seizure_start - 60min, seizure_start) - before seizure
-                    buffer_before_start_global = max(
-                        0, seizure_start_global - INTERICTAL_BUFFER
-                    )
-
-                    # Check if sequence overlaps with pre-ictal buffer
-                    if not (
-                        sequence_end_global <= buffer_before_start_global
-                        or sequence_start_global >= seizure_start_global
-                    ):
-                        in_excluded_zone = True
-                        break
-
-                    # Buffer zone 2: [seizure_start, seizure_end + 60min] - during and after seizure
-                    buffer_after_end_global = seizure_end_global + INTERICTAL_BUFFER
-
-                    # Check if sequence overlaps with ictal + post-ictal buffer
-                    if not (
-                        sequence_end_global <= seizure_start_global
-                        or sequence_start_global >= buffer_after_end_global
-                    ):
-                        in_excluded_zone = True
-                        break
-
-        # Skip sequences in excluded buffer zone
-        if in_excluded_zone:
-            # Use non-overlapping stride for interictal regions (safest assumption)
-            sequence_start_local += non_overlapping_stride
-            continue
-
-        # Create sequence metadata (store LOCAL times for file-based processing)
         sequence = {
-            "patient_id": patient_id,
-            "file": filename,
-            "sequence_start_sec": sequence_start_local,
-            "sequence_end_sec": sequence_end_local,
-            "sequence_duration_sec": sequence_duration,
-            "segment_starts": segment_starts,
-            "num_segments": SEQUENCE_LENGTH,
-            "type": sequence_type,
-            "task_mode": TASK_MODE,  # Track which mode generated this sequence
+            "patient_id": str(patient_id),
+            "file": str(filename),
+            "sequence_start_sec": float(sequence_start_local),
+            "sequence_end_sec": float(sequence_start_local + sequence_duration),
+            "sequence_duration_sec": float(sequence_duration),
+            "segment_starts": [float(s) for s in segment_starts],
+            "num_segments": int(SEQUENCE_LENGTH),
+            "type": "tts_regression",
+            "tts_label": float(capped_tts),  # The target for regression
+            "is_preictal": bool(tts_seconds < PREICTAL_WINDOW),  # Standard python bool
+            "global_start_sec": float(sequence_start_global),
+            "next_seizure_id": int(next_seizure["seizure_id"]),
         }
-
-        if sequence_type == "preictal":
-            sequence["time_to_seizure"] = time_to_seizure
-        if matched_seizure_id is not None:
-            sequence["seizure_id"] = matched_seizure_id
-        else:
-            sequence["seizure_id"] = None
-
         sequences.append(sequence)
-
-        # Move to next sequence with adaptive stride
-        # Use overlapping stride for sequences in positive regions (preictal/ictal)
-        # Use non-overlapping stride for interictal sequences to prevent data leakage
-        if is_in_positive_region(sequence_start_global, sequence_end_global):
-            sequence_start_local += (
-                overlapping_stride  # 25s: 83% overlap for preictal/ictal
-            )
-        else:
-            sequence_start_local += (
-                non_overlapping_stride  # 150s: 0% overlap for interictal
-            )
-
-    # Log skipped sequences if verbose warnings enabled
-    if VERBOSE_WARNINGS and skipped_boundary_sequences > 0:
-        print(
-            f"  {filename}: Skipped {skipped_boundary_sequences} sequences due to insufficient boundary data (safety margin: {SAFETY_MARGIN}s)"
-        )
+        sequence_start_local += stride
 
     return sequences
 
@@ -497,266 +363,88 @@ def create_sequences_single_patient(patient_id):
 
 
 def assign_patient_splits(sequences, patient_id, random_seed=42):
-    """Assign sequences to train/test splits for a single patient.
+    """Assign sequences to train/test splits by GROUPING by seizure.
 
-    Strategy:
-    - Train set: All seizures except the last one (past)
-    - Test set: The last seizure (future)
-
-    Args:
-        sequences: List of all sequence dictionaries for the patient
-        patient_id: Patient ID
-        random_seed: Seed for deterministic balancing
-
-    Returns:
-        Tuple of (retained_sequences, split_counts, balance_stats)
+    Logic:
+    - Group all sequences by their 'next_seizure_id'.
+    - Randomly shuffle the seizure groups.
+    - Assign ~70% of seizures (and their sequences) to Train.
+    - Assign remaining seizures to Test.
+    - This prevents temporal leakage between train/test for the same countdown.
     """
-    positive_label = "preictal" if TASK_MODE == "prediction" else "ictal"
+    if not sequences:
+        return [], {}, {}
 
-    # 1. Get Patient data
-    patient_seqs = [s for s in sequences if s["patient_id"] == patient_id]
+    import random
+    rng = random.Random(random_seed)
 
-    # 2. Identify unique seizures for this patient
-    patient_seizure_ids = sorted(
-        list(
-            set(
-                s["seizure_id"] for s in patient_seqs if s.get("seizure_id") is not None
-            )
-        )
-    )
-    num_seizures = len(patient_seizure_ids)
+    # 1. Group sequences by seizure_id
+    seizure_groups = {}
+    for seq in sequences:
+        sid = seq.get("next_seizure_id", -1)
+        if sid not in seizure_groups:
+            seizure_groups[sid] = []
+        seizure_groups[sid].append(seq)
 
-    # 3. Determine split: 70% Train, 30% Test (Chronological split)
-    if num_seizures > 0:
-        n_train_seizures = int(num_seizures * 0.7)
-        # Ensure we don't have 0 training seizures if we have enough (e.g. 4+ seizures)
-        # But for small counts (1, 2, 3), int(0.7) logic holds:
-        # 1 -> 0 (0 train, 1 test)
-        # 2 -> 1 (1 train, 1 test)
-        # 3 -> 2 (2 train, 1 test)
+    group_ids = list(seizure_groups.keys())
+    rng.shuffle(group_ids)
+
+    n_groups = len(group_ids)
+    
+    # Fallback for patients with very few seizures
+    if n_groups < 2:
+        print(f"[WARNING] Patient {patient_id} has only {n_groups} seizure(s). "
+              "Falling back to random sequence split (LEAKAGE RISK).")
+        rng.shuffle(sequences)
+        n_train = int(len(sequences) * TRAIN_TEST_SPLIT_RATIO)
+        train_sequences = sequences[:n_train]
+        test_sequences = sequences[n_train:]
     else:
-        n_train_seizures = 0
-    # 3. Determine split: Train on ALL seizures except the LAST one
-    # if num_seizures > 0:
-    #     n_train_seizures = num_seizures - 1
-    # else:
-    #     n_train_seizures = 0
+        # Split groups
+        n_train_groups = max(1, int(n_groups * TRAIN_TEST_SPLIT_RATIO))
+        # Ensure at least one group in test if possible
+        if n_train_groups == n_groups and n_groups > 1:
+            n_train_groups = n_groups - 1
+            
+        train_group_ids = group_ids[:n_train_groups]
+        test_group_ids = group_ids[n_train_groups:]
+        
+        train_sequences = []
+        for gid in train_group_ids:
+            train_sequences.extend(seizure_groups[gid])
+            
+        test_sequences = []
+        for gid in test_group_ids:
+            test_sequences.extend(seizure_groups[gid])
 
-    # train_seizure_ids = set(patient_seizure_ids[:n_train_seizures])
+        print(f"  Split by Seizure: {len(train_group_ids)} seizures in Train, {len(test_group_ids)} in Test")
 
-    # 4. Find split point: where the first TEST seizure begins
-    # Default to 0 if no training seizures (e.g. num_seizures is 0 or 1)
-    # split_index = 0
-    # if n_train_seizures > 0:
-    #     split_index = len(patient_seqs)
-    #     for i, seq in enumerate(patient_seqs):
-    #         sid = seq.get("seizure_id")
-    #         if sid is not None and sid not in train_seizure_ids:
-    #             split_index = i
-    #             break
-    
-    # train_sequences = patient_seqs[:split_index]
-    # test_sequences = patient_seqs[split_index:]
+    # 3. Label
+    for seq in train_sequences:
+        seq["split"] = "train"
+    for seq in test_sequences:
+        seq["split"] = "test"
 
-    current_sid = None
-    split_start_idx = 0
-    all_splits = {}
-    for i, seq in enumerate(patient_seqs):
-            sid = seq.get("seizure_id")
-            if sid is not None:
-                if current_sid is None:
-                    current_sid = sid
-                elif sid != current_sid:
-                    split_end_index = i
-                    split_sequences = patient_seqs[split_start_idx:split_end_index]
-                    all_splits[current_sid] = split_sequences
-                    # 
-                    split_start_idx = split_end_index
-                    current_sid = sid
-    all_splits[current_sid] = patient_seqs[split_start_idx:]
-                
+    retained_sequences = train_sequences + test_sequences
 
-    if num_seizures > 0:
-        print(f"\nPatient {patient_id} Split:")
-        print(f"  Total Seizures: {num_seizures}")
-        # print(
-        #     f"  Train Seizures: {n_train_seizures} (IDs: {patient_seizure_ids[:n_train_seizures]})"
-        # )
-        # print(
-        #     f"  Test Seizures: {num_seizures - n_train_seizures} (IDs: {patient_seizure_ids[n_train_seizures:]})"
-        # )
-        print(
-            f"  IDs: {patient_seizure_ids})"
-        )
-        out_str = f"  Sequences: "
-        for sid in all_splits:
-            out_str = out_str + f"{len(all_splits[sid])}"
-        print(out_str)
-    
-    '''
-    # Check if test set has no interictal data and move from train if necessary
-    test_interictal_count = sum(
-        1 for seq in test_sequences if seq["type"] == "interictal"
-    )
-
-    if test_interictal_count == 0:
-        print(
-            f"  Warning: Test set has 0 interictal sequences. Moving sequences from train set..."
-        )
-
-        # Identify available interictal sequences in train
-        train_interictal_indices = [
-            i for i, seq in enumerate(train_sequences) if seq["type"] == "interictal"
-        ]
-
-        if train_interictal_indices:
-            # Determine how many to move: match the number of positive sequences in test
-            test_positive_count = sum(
-                1 for seq in test_sequences if seq["type"] == positive_label
-            )
-            # Default to a small number if no positives (unlikely) or just 10
-            num_to_move = (
-                test_positive_count
-                if test_positive_count > 0
-                else min(10, len(train_interictal_indices))
-            )
-
-            # Don't take more than available
-            num_to_move = min(num_to_move, len(train_interictal_indices))
-
-            if num_to_move > 0:
-                # Take from the end of the train set (closest to test set time-wise)
-                indices_to_move = train_interictal_indices[-num_to_move:]
-                indices_to_move_set = set(indices_to_move)
-
-                # Extract sequences to move
-                moved_sequences = [train_sequences[i] for i in indices_to_move]
-
-                # Update lists: Remove from train, Add to test
-                train_sequences = [
-                    s
-                    for i, s in enumerate(train_sequences)
-                    if i not in indices_to_move_set
-                ]
-                test_sequences.extend(moved_sequences)
-
-                print(
-                    f"  Moved {len(moved_sequences)} interictal sequences from train to test."
-                )
-            else:
-                print("  Warning: Not enough interictal data in train to move.")
-        else:
-            print("  Warning: Train set also has no interictal data!")
-    '''
-    # Assign split labels
-    # for seq in train_sequences:
-    #     seq["split"] = "train"
-    # for seq in test_sequences:
-    #     seq["split"] = "test"
-    # splits = {"train": train_sequences, "test": test_sequences}
-
-    # Balance each split by downsampling majority class
-    balanced_splits, balance_stats = balance_sequences_across_splits(
-        all_splits, positive_label, random_seed
-    )
-
-    # Flatten sequences
-    retained_sequences = []
-    for split_name in all_splits:
-        for seq in balanced_splits[split_name]:
-            seq["split"] = split_name
-        retained_sequences.extend(balanced_splits[split_name])
-
-    # Compute split counts
+    # 4. Compute counts for summary
+    import numpy as np
     split_counts = {
-        split_name: {
-            "total": len(split_seqs),
-            positive_label: sum(
-                1 for seq in split_seqs if seq["type"] == positive_label
-            ),
-            "interictal": sum(1 for seq in split_seqs if seq["type"] == "interictal"),
-        }
-        for split_name, split_seqs in balanced_splits.items()
+        "train": {
+            "total": len(train_sequences),
+            "mean_tts": float(np.mean([s["tts_label"] for s in train_sequences]))
+            if train_sequences
+            else 0.0,
+        },
+        "test": {
+            "total": len(test_sequences),
+            "mean_tts": float(np.mean([s["tts_label"] for s in test_sequences]))
+            if test_sequences
+            else 0.0,
+        },
     }
 
-    return retained_sequences, split_counts, balance_stats
-
-
-def balance_sequences_across_splits(splits, positive_label, random_seed=42):
-    """Balance each split by downsampling the majority class to match the minority.
-
-    Args:
-        splits: Dict mapping split name to list of sequences (each with 'type' label).
-        positive_label: Positive class label ('preictal' or 'ictal').
-        random_seed: Seed for deterministic shuffling.
-
-    Returns:
-        Tuple of (balanced_splits_dict, balance_stats)
-    """
-    rng = random.Random(random_seed)
-    balanced_splits = {}
-    balance_stats = {}
-
-    for split_name, split_sequences in splits.items():
-        positives = [seq for seq in split_sequences if seq["type"] == positive_label]
-        interictals = [seq for seq in split_sequences if seq["type"] == "interictal"]
-        others = [
-            seq
-            for seq in split_sequences
-            if seq["type"] not in (positive_label, "interictal")
-        ]
-
-        if not positives or not interictals:
-            balanced_splits[split_name] = split_sequences[:]
-            balance_stats[split_name] = {
-                "positive_kept": len(positives),
-                "positive_dropped": 0,
-                "interictal_kept": len(interictals),
-                "interictal_dropped": 0,
-                "other_sequences": len(others),
-                "balanced": False,
-                "note": "Skipped balancing due to missing class",
-            }
-            continue
-
-        # Determine target counts based on ratio
-        # We want to keep all positives if possible
-        target_positive = len(positives)
-        
-        # Calculate target interictals based on ratio
-        target_interictal = int(len(positives) * INTERICTAL_TO_PREICTAL_RATIO)
-        
-        # Cap at available interictals
-        target_interictal = min(target_interictal, len(interictals))
-
-        rng.shuffle(positives)
-        rng.shuffle(interictals)
-
-        kept_positive = positives[:target_positive]
-        kept_interictal = interictals[:target_interictal]
-        dropped_positive = max(0, len(positives) - target_positive) # Should be 0
-        dropped_interictal = max(0, len(interictals) - target_interictal)
-
-        combined = kept_positive + kept_interictal
-        rng.shuffle(combined)
-
-        if others:
-            # Preserve other sequence types (if any) at the end for completeness
-            combined.extend(others)
-
-        balanced_splits[split_name] = combined
-        balance_stats[split_name] = {
-            "positive_kept": len(kept_positive),
-            "positive_dropped": dropped_positive,
-            "interictal_kept": len(kept_interictal),
-            "interictal_dropped": dropped_interictal,
-            "other_sequences": len(others),
-            "balanced": True,
-            "target_per_class": target_interictal, # recording interictal target as ref
-            "ratio": INTERICTAL_TO_PREICTAL_RATIO
-        }
-
-    return balanced_splits, balance_stats
+    return retained_sequences, split_counts, {}
 
 
 def save_sequences_to_file(
@@ -767,25 +455,10 @@ def save_sequences_to_file(
     split_summary=None,
     extra_summary=None,
 ):
-    """Save all sequences to a single file with validation information
+    """Save all sequences to a single file with TTS Regression information."""
 
-    Args:
-        sequences: List of sequence dictionaries
-        validation_results: List of validation result dictionaries from each patient
-        output_file: Output JSON filename (auto-generated based on mode if None)
-        balancing_stats: Optional balancing statistics
-        split_summary: Optional per-split counts (for single-patient mode)
-        extra_summary: Optional dict of additional summary fields
-    """
-
-    # Determine positive class label
-    positive_label = "preictal" if TASK_MODE == "prediction" else "ictal"
     if output_file is None:
         raise ValueError("output_file must be specified")
-
-    # Separate by type
-    positive_sequences = [s for s in sequences if s["type"] == positive_label]
-    interictal_sequences = [s for s in sequences if s["type"] == "interictal"]
 
     # Get validation summary
     validation_summary = (
@@ -794,32 +467,18 @@ def save_sequences_to_file(
 
     data = {
         "sequences": sequences,
-        f"{positive_label}_sequences": positive_sequences,
-        "interictal_sequences": interictal_sequences,
         "summary": {
-            "task_mode": TASK_MODE,
+            "task_mode": "tts_regression",
             "total_sequences": len(sequences),
-            f"total_{positive_label}": len(positive_sequences),
-            "total_interictal": len(interictal_sequences),
             "patients_processed": len(set([s["patient_id"] for s in sequences])),
+            "max_horizon_sec": MAX_HORIZON_SEC,
+            "post_ictal_exclusion_sec": POST_ICTAL_EXCLUSION_SEC,
             "segment_duration": SEGMENT_DURATION,
             "sequence_length": SEQUENCE_LENGTH,
-            "sequence_stride": SEQUENCE_STRIDE,
             "sequence_total_duration": SEGMENT_DURATION * SEQUENCE_LENGTH,
-            "preictal_window": PREICTAL_WINDOW if TASK_MODE == "prediction" else "N/A",
-            "interictal_buffer": INTERICTAL_BUFFER,
-            "class_balance": (
-                len(positive_sequences) / len(interictal_sequences)
-                if interictal_sequences
-                else 0
-            ),
         },
         "validation_info": validation_summary,
     }
-
-    # Add balancing info if provided
-    if balancing_stats:
-        data["balancing_info"] = balancing_stats
 
     if split_summary:
         data["summary"]["per_split"] = split_summary
@@ -835,75 +494,22 @@ def save_sequences_to_file(
 
 
 def print_summary(sequences):
-    """Print comprehensive summary"""
-
-    # Determine positive class label
-    positive_label = "preictal" if TASK_MODE == "prediction" else "ictal"
-    positive_sequences = [s for s in sequences if s["type"] == positive_label]
-    interictal_sequences = [s for s in sequences if s["type"] == "interictal"]
-
-    # Overall summary
-    print(f"\n=== OVERALL SUMMARY ===")
-    print(f"Task mode: {TASK_MODE.upper()}")
+    """Print comprehensive summary for TTS Regression"""
+    import numpy as np
+    
+    print(f"\n=== OVERALL SUMMARY (TTS REGRESSION) ===")
     print(f"Total sequences: {len(sequences)}")
-    print(f"  - {positive_label.capitalize()} sequences: {len(positive_sequences)}")
-    print(f"  - Interictal sequences: {len(interictal_sequences)}")
-    print(f"Sequence configuration:")
-    print(f"  - Segments per sequence: {SEQUENCE_LENGTH}")
-    print(
-        f"  - Sequence duration: {SEGMENT_DURATION * SEQUENCE_LENGTH}s ({SEGMENT_DURATION * SEQUENCE_LENGTH / 60:.1f} min)"
-    )
-    print(
-        f"  - Sequence stride: {SEQUENCE_STRIDE} segments ({SEGMENT_DURATION * SEQUENCE_STRIDE}s)"
-    )
-    if TASK_MODE == "prediction":
-        print(f"  - Preictal window: {PREICTAL_WINDOW//60} min")
-    print(f"  - Interictal buffer: {INTERICTAL_BUFFER//60} min")
+    print(f"Max Horizon: {MAX_HORIZON_SEC/3600:.1f} hours")
+    print(f"Post-Ictal Exclusion: {POST_ICTAL_EXCLUSION_SEC/60:.1f} min")
 
-    # Per-patient breakdown
-    patients = set([s["patient_id"] for s in sequences])
-    print(f"\n=== PER-PATIENT BREAKDOWN ===")
-    print(f"Patients processed: {len(patients)}")
-
-    for patient in sorted(patients):
-        patient_seqs = [s for s in sequences if s["patient_id"] == patient]
-        positive_count = len([s for s in patient_seqs if s["type"] == positive_label])
-        interictal_count = len([s for s in patient_seqs if s["type"] == "interictal"])
+    # Per-split breakdown
+    splits = sorted(list(set([s.get("split", "none") for s in sequences])))
+    for split_name in splits:
+        split_seqs = [s for s in sequences if s.get("split") == split_name]
+        mean_tts = np.mean([s["tts_label"] for s in split_seqs])
         print(
-            f"{patient}: {len(patient_seqs)} total ({positive_count} {positive_label}, {interictal_count} interictal)"
+            f"Split '{split_name}': {len(split_seqs)} sequences (Mean TTS: {mean_tts/60:.1f} min)"
         )
-
-    # Per-split breakdown (only when split assignments exist)
-    if any(seq.get("split") for seq in sequences):
-        print(f"\n=== PER-SPLIT BREAKDOWN ===")
-        available_splits = sorted(
-            {seq.get("split") for seq in sequences if seq.get("split")}
-        )
-        for split_name in available_splits:
-            split_sequences = [s for s in sequences if s.get("split") == split_name]
-            split_positive = len(
-                [s for s in split_sequences if s["type"] == positive_label]
-            )
-            split_interictal = len(
-                [s for s in split_sequences if s["type"] == "interictal"]
-            )
-            print(
-                f"{split_name}: {len(split_sequences)} total ({split_positive} {positive_label}, {split_interictal} interictal)"
-            )
-
-    # Statistics
-    print(f"\n=== STATISTICS ===")
-    if TASK_MODE == "prediction" and positive_sequences:
-        avg_time_to_seizure = sum(
-            [s.get("time_to_seizure", 0) for s in positive_sequences]
-        ) / len(positive_sequences)
-        print(
-            f"Average time to seizure (preictal): {avg_time_to_seizure:.1f}s ({avg_time_to_seizure/60:.1f} min)"
-        )
-
-    print(
-        f"Class balance: {len(positive_sequences)}/{len(interictal_sequences)} = {len(positive_sequences)/len(interictal_sequences) if interictal_sequences else 0:.2f}"
-    )
 
 
 if __name__ == "__main__":

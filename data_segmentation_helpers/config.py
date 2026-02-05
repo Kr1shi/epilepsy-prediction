@@ -19,13 +19,40 @@ INTERICTAL_BUFFER = 30 * 60
 
 BASE_PATH = "physionet.org/files/chbmit/1.0.0/"
 ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
-INTERICTAL_TO_PREICTAL_RATIO = 2.0  # Ratio of interictal to preictal sequences (e.g., 1.0 = 50/50, 2.0 = 67/33)
+INTERICTAL_TO_PREICTAL_RATIO = (
+    2.0  # Ratio of interictal to preictal sequences (e.g., 1.0 = 50/50, 2.0 = 67/33)
+)
 
 # Patients to include in processing
 PATIENTS = [
     "chb01",
+    # "chb02",
+    # "chb03",
+    # "chb04",
+    # "chb05",
+    # "chb06",
+    # "chb07",
+    # "chb08",
+    # "chb09",
+    # "chb10",
+    # "chb11",
+    # "chb13",
+    # "chb14",
+    # "chb15",
+    # "chb16",
+    # "chb17",
+    # "chb18",
+    # "chb19",
+    # "chb20",
+    # "chb21",
+    # "chb22",
+    # "chb23",
+]
+
+ALL_PATIENTS = [
+    "chb01",
     "chb02",
-    #"chb03",
+    "chb03",
     "chb04",
     "chb05",
     "chb06",
@@ -34,26 +61,18 @@ PATIENTS = [
     "chb09",
     "chb10",
     "chb11",
-    #"chb13",
+    "chb13",
     "chb14",
     "chb15",
-    #"chb16",
-    #"chb17",
+    "chb16",
+    "chb17",
     "chb18",
     "chb19",
     "chb20",
     "chb21",
     "chb22",
     "chb23",
-]
-
-ALL_PATIENTS = [
-    "chb01", "chb02", "chb03", "chb04",
-    "chb05", "chb06", "chb07", "chb08",
-    "chb09", "chb10", "chb11", "chb13",
-    "chb14", "chb15", "chb16", "chb17",
-    "chb18", "chb19", "chb20", "chb21",
-    "chb22", "chb23", "chb24"
+    "chb24",
 ]
 
 # Current patient index to process (0 to len(PATIENTS)-1, or None for all)
@@ -87,6 +106,13 @@ NOTCH_FREQ_HZ = 60
 # Dual-Stream Configuration
 PHASE_FREQ_BAND = (0.0, 5.0)  # Delta/Theta (for Phase)
 AMP_FREQ_BAND = (80.0, 128.0)  # Gamma/HFO (for Amplitude)
+
+# =============================================================================
+# TTS Regression Configuration
+# =============================================================================
+MAX_HORIZON_SEC = 1 * 3600  # 1 hour (Capping for sawtooth label)
+POST_ICTAL_EXCLUSION_SEC = 1 * 3600  # 1 hour (Skip data after seizure)
+TRAIN_TEST_SPLIT_RATIO = 0.7  # 70% Train, 30% Test
 
 STFT_NPERSEG = 256  # STFT window length
 STFT_NOVERLAP = 128  # STFT overlap (50%)
@@ -128,9 +154,9 @@ LSTM_DROPOUT = 0.5  # Reduced from 0.6 back to 0.5
 # Training Configuration
 # =============================================================================
 
-TRAINING_EPOCHS = 5
-SEQUENCE_BATCH_SIZE = 16
-LEARNING_RATE = 0.0001  # Increased from 1e-5 to 1e-4
+TRAINING_EPOCHS = 100
+SEQUENCE_BATCH_SIZE = 32
+LEARNING_RATE = 5e-4  # Increased for faster convergence in regression
 WEIGHT_DECAY = 1e-4  # Reduced from 1e-3 back to 1e-4
 # TRAINING_EPOCHS = 4
 # SEQUENCE_BATCH_SIZE = 8

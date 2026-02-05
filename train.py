@@ -11,12 +11,8 @@ from pathlib import Path
 from typing import Dict
 import matplotlib.pyplot as plt
 from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score,
-    roc_curve,
+    mean_absolute_error,
+    mean_squared_error,
 )
 from tqdm import tqdm
 import time
@@ -41,7 +37,7 @@ class EEGDataset(Dataset):
         with h5py.File(h5_file_path, "r") as f:
             self.phase_data = torch.FloatTensor(f["spectrograms_phase"][:])
             self.amp_data = torch.FloatTensor(f["spectrograms_amp"][:])
-            self.labels = torch.LongTensor(f["labels"][:])
+            self.labels = torch.FloatTensor(f["labels"][:])
             self.patient_ids = [pid.decode("utf-8") for pid in f["patient_ids"][:]]
 
             if "metadata" in f:
@@ -50,7 +46,7 @@ class EEGDataset(Dataset):
         print(f"Loaded {self.split} dataset: {len(self.labels)} samples")
         print(f"  - Phase Shape: {self.phase_data.shape} (Time/Timing)")
         print(f"  - Amp Shape:   {self.amp_data.shape} (Power/Energy)")
-        print(f"  - Class Dist:  {torch.bincount(self.labels)}")
+        print(f"  - Mean TTS:    {torch.mean(self.labels)/60:.1f} minutes")
 
     def __len__(self):
         return len(self.labels)
@@ -202,12 +198,13 @@ class CNN_LSTM_Hybrid_Dual(nn.Module):
             nn.Linear(64, 1, bias=False),
         )
 
-        # 4. Classifier
+        # 4. Classifier (Now Regression Output)
         self.fc = nn.Sequential(
             nn.Linear(lstm_hidden_dim * 2, 64),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(64, num_classes),
+            nn.Linear(64, 1),
+            nn.Softplus(),  # Ensures output is always positive seconds
         )
 
     def forward(self, x_phase, x_amp):
@@ -248,38 +245,27 @@ class MetricsTracker:
     def reset(self):
         self.predictions = []
         self.true_labels = []
-        self.probabilities = []
 
-    def update(self, predictions, labels, probabilities):
-        self.predictions.extend(predictions.detach().cpu().numpy())
-        self.true_labels.extend(labels.detach().cpu().numpy())
-        self.probabilities.extend(probabilities.detach().cpu().numpy())
+    def update(self, predictions, labels):
+        # Flatten and move to CPU
+        self.predictions.extend(predictions.detach().cpu().numpy().flatten())
+        self.true_labels.extend(labels.detach().cpu().numpy().flatten())
 
     def compute_metrics(self):
         pred_np = np.array(self.predictions)
         true_np = np.array(self.true_labels)
-        prob_np = np.array(self.probabilities)
 
-        # Handle edge case where only one class is present in batch
-        if len(np.unique(true_np)) > 1:
-            auc = roc_auc_score(true_np, prob_np)
-            # Compute optimal threshold using Youden's J statistic
-            fpr, tpr, thresholds = roc_curve(true_np, prob_np)
-            j_scores = tpr - fpr
-            best_threshold = thresholds[np.argmax(j_scores)]
-        else:
-            auc = 0.5
-            best_threshold = 0.5
+        mae = mean_absolute_error(true_np, pred_np)
+        mse = mean_squared_error(true_np, pred_np)
+        rmse = np.sqrt(mse)
 
+        # Legacy placeholder for 'optimal_threshold' to avoid breaking logic elsewhere
         return {
-            "accuracy": accuracy_score(true_np, pred_np),
-            "precision": precision_score(
-                true_np, pred_np, average="binary", zero_division=0
-            ),
-            "recall": recall_score(true_np, pred_np, average="binary", zero_division=0),
-            "f1": f1_score(true_np, pred_np, average="binary", zero_division=0),
-            "auc_roc": auc,
-            "optimal_threshold": float(best_threshold),
+            "mae": mae,
+            "rmse": rmse,
+            "mae_minutes": mae / 60.0,
+            "rmse_minutes": rmse / 60.0,
+            "optimal_threshold": 0.0,
         }
 
 
@@ -328,88 +314,49 @@ def optimize_running_average(predictions, labels, max_window=30):
     )
     return best_params
 
-def create_datasets(patients_to_process, skip_missing_class=True):
+def create_datasets(patients_to_process):
     all_datasets = {}
     for idx in patients_to_process:
         pid = PATIENTS[idx]
-        all_datasets[pid] = {}
         patient_config = get_patient_config(idx)
         dataset_prefix = patient_config["output_prefix"]
         dataset_dir = Path("preprocessing") / "data" / dataset_prefix
-        h5_files = os.listdir(dataset_dir)
-        for h5_filename in h5_files:
-            split_name = h5_filename.strip().removeprefix("s").removesuffix("_dataset.h5")
-            h5_file = dataset_dir / h5_filename
-            dataset = EEGDataset(str(h5_file), split=split_name)
-            if skip_missing_class:
-                class_dist = torch.bincount(dataset.labels)
-                if 0 in class_dist:
-                    print(f"skipping patient {pid} seizure {split_name}: missing label")
-                    del dataset
-                    gc.collect()
-                    continue
-            all_datasets[pid][split_name] = dataset
-        print(f"patient {pid} splits: {all_datasets[pid].keys()}")
+        
+        train_path = dataset_dir / "strain_dataset.h5"
+        test_path = dataset_dir / "stest_dataset.h5"
+        
+        if not train_path.exists() or not test_path.exists():
+            print(f"Warning: Missing split files for patient {pid} in {dataset_dir}")
+            continue
+            
+        all_datasets[pid] = {
+            "train": EEGDataset(str(train_path), split="train"),
+            "test": EEGDataset(str(test_path), split="test"),
+        }
     return all_datasets
-    
-def get_datasets_lopo(patient_id, all_datasets):
-    test_datasets = []
-    train_datasets = []
-    for pid in all_datasets:
-        if pid == patient_id:
-            test_datasets = list(all_datasets[pid].values())
-        else:
-            train_datasets = train_datasets + list(all_datasets[pid].values())
-    test_combined_dataset = ConcatDataset(test_datasets)
-    train_combined_dataset = ConcatDataset(train_datasets)
-    return test_combined_dataset, train_combined_dataset
-def get_datasets_per_patient(fold_id, patient_id, all_datasets):
-    patient_datasets = all_datasets[patient_id]
-    test_datasets = []
-    train_datasets = []
-    for sid in  patient_datasets:
-        if sid == fold_id:
-            test_datasets = [patient_datasets[sid]]
-        else:
-            train_datasets = train_datasets + [patient_datasets[sid]]
-    test_combined_dataset = ConcatDataset(test_datasets)
-    train_combined_dataset = ConcatDataset(train_datasets)
-    return test_combined_dataset, train_combined_dataset
 
 class EEGCNNTrainer:
-    def __init__(self, patient_config: Dict, datasets, lopo=False, test_seizure_id=0):
+    def __init__(self, patient_config: Dict, datasets):
         self.patient_id = patient_config["patient_id"]
-        self.test_seizure_id = test_seizure_id
 
         dataset_prefix = patient_config["output_prefix"]
-        self.lopo = lopo
-        if lopo:
-            self.model_dir = Path("model") / "LOPO" / dataset_prefix 
-        else:
-            self.model_dir = Path("model") / "per_patient" / dataset_prefix / f"test_seizure_{test_seizure_id}"
+        self.model_dir = Path("model") / "tts_regression" / dataset_prefix 
         self.model_dir.mkdir(parents=True, exist_ok=True)
-        self.dataset_prefix = dataset_prefix
-        self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
 
-        print(f"Dataset: {self.dataset_prefix}")
+        print(f"Dataset: {dataset_prefix}")
         print(f"Patient: {self.patient_id}")
 
         self.device = self._get_device()
         print(f"Device: {self.device}")
 
-        test_dataset = None
-        train_dataset = None
-        if lopo:
-            test_dataset, train_dataset = get_datasets_lopo(self.patient_id, datasets)
-        else:
-            test_dataset, train_dataset = get_datasets_per_patient(self.test_seizure_id,
-                                                                   self.patient_id,
-                                                                   datasets)
-        # Load Data
+        # Load Data using the new split structure
+        train_dataset = datasets[self.patient_id]["train"]
+        test_dataset = datasets[self.patient_id]["test"]
+
         self.train_loader = DataLoader(
             train_dataset,
             batch_size=SEQUENCE_BATCH_SIZE,
-            shuffle=True,
+            shuffle=True,  # Safe to shuffle now!
             num_workers=NUM_WORKERS,
             pin_memory=(self.device.type == "cuda"),
         )
@@ -424,32 +371,31 @@ class EEGCNNTrainer:
         # Initialize Dual-Stream Model
         self.model = CNN_LSTM_Hybrid_Dual(
             num_input_channels=18,
-            num_classes=2,
+            num_classes=1,  # Regression output
             lstm_hidden_dim=LSTM_HIDDEN_DIM,
             lstm_num_layers=LSTM_NUM_LAYERS,
             dropout=LSTM_DROPOUT,
         )
         self.model.to(self.device)
 
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.HuberLoss(delta=1.0)
         self.optimizer = optim.Adam(
             self.model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 
         self.scheduler = optim.lr_scheduler.StepLR(
-            self.optimizer, step_size=5, gamma=0.5
+            self.optimizer, step_size=10, gamma=0.7
         )
 
         self.train_metrics_history = []
         self.val_metrics_history = []
-        self.best_val_auc = 0.0
+        self.best_val_mae = float("inf")
 
         print(f"Model Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
 
-
     @property
     def positive_label(self):
-        return "preictal" if TASK_MODE == "prediction" else "ictal"
+        return "tts_regression"
 
     def _get_device_name(self):
         if self.device.type == "cuda":
@@ -492,7 +438,7 @@ class EEGCNNTrainer:
             x_phase, x_amp, labels = (
                 x_phase.to(self.device),
                 x_amp.to(self.device),
-                labels.to(self.device),
+                labels.to(self.device).unsqueeze(1),  # Match (Batch, 1)
             )
 
             self.optimizer.zero_grad()
@@ -502,9 +448,7 @@ class EEGCNNTrainer:
             self.optimizer.step()
 
             total_loss += loss.item()
-            probs = torch.softmax(outputs, dim=1)[:, 1]
-            preds = torch.argmax(outputs, dim=1)
-            tracker.update(preds, labels, probs)
+            tracker.update(outputs, labels)
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
         metrics = tracker.compute_metrics()
@@ -527,16 +471,14 @@ class EEGCNNTrainer:
                 x_phase, x_amp, labels = (
                     x_phase.to(self.device),
                     x_amp.to(self.device),
-                    labels.to(self.device),
+                    labels.to(self.device).unsqueeze(1),
                 )
 
                 outputs = self.model(x_phase, x_amp)
                 loss = self.criterion(outputs, labels)
 
                 total_loss += loss.item()
-                probs = torch.softmax(outputs, dim=1)[:, 1]
-                preds = torch.argmax(outputs, dim=1)
-                tracker.update(preds, labels, probs)
+                tracker.update(outputs, labels)
 
         metrics = tracker.compute_metrics()
         metrics["loss"] = total_loss / len(target_loader)
@@ -546,15 +488,15 @@ class EEGCNNTrainer:
         checkpoint = {
             "epoch": epoch,
             "model_state_dict": self.model.state_dict(),
-            "best_val_auc": self.best_val_auc,
+            "best_val_mae": self.best_val_mae,
             "config": {"patient_id": self.patient_id},
         }
 
-        # Only save if we have a new best model
-        if val_metrics["auc_roc"] > self.best_val_auc:
-            self.best_val_auc = val_metrics["auc_roc"]
+        # Only save if we have a new best model (lower MAE is better)
+        if val_metrics["mae"] < self.best_val_mae:
+            self.best_val_mae = val_metrics["mae"]
             torch.save(checkpoint, self.model_dir / "best_model.pth")
-            print(f"⭐ New Best AUC: {self.best_val_auc:.4f}")
+            print(f"⭐ New Best MAE: {self.best_val_mae/60:.2f} min")
 
     def save_metrics(self):
         metrics_data = {
@@ -565,6 +507,7 @@ class EEGCNNTrainer:
                 "epochs": TRAINING_EPOCHS,
                 "batch_size": SEQUENCE_BATCH_SIZE,
                 "lr": LEARNING_RATE,
+                "max_horizon_sec": MAX_HORIZON_SEC,
             },
             "training_info": {
                 "device": str(self.device),
@@ -576,14 +519,14 @@ class EEGCNNTrainer:
 
     def plot_training_curves(self):
         plt.style.use("seaborn-v0_8")
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle(f"Patient {self.patient_id} Dual-Stream Training", fontsize=16)
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig.suptitle(f"Patient {self.patient_id} TTS Regression Training", fontsize=16)
 
         epochs = range(1, len(self.train_metrics_history) + 1)
-        metrics = ["loss", "accuracy", "precision", "recall", "f1", "auc_roc"]
+        metrics = ["loss", "mae_minutes", "rmse_minutes"]
 
         for idx, m in enumerate(metrics):
-            ax = axes[idx // 3, idx % 3]
+            ax = axes[idx]
             ax.plot(
                 epochs, [x[m] for x in self.train_metrics_history], "o-", label="Train"
             )
@@ -598,10 +541,7 @@ class EEGCNNTrainer:
 
     def train(self):
         print("=" * 60)
-        if self.lopo:
-            print(f"STARTING DUAL-STREAM TRAINING: LOPO {self.patient_id}")
-        else:
-            print(f"STARTING DUAL-STREAM TRAINING: {self.patient_id} test seizure {self.test_seizure_id}")
+        print(f"STARTING TTS REGRESSION TRAINING: {self.patient_id}")
         print("=" * 60)
 
         start_time = time.time()
@@ -616,16 +556,16 @@ class EEGCNNTrainer:
 
             print(f"Epoch {epoch+1}:")
             print(
-                f"  Train | Loss: {train_m['loss']:.4f} | AUC: {train_m['auc_roc']:.4f} | Acc: {train_m['accuracy']:.4f} | Prec: {train_m['precision']:.4f} | Rec: {train_m['recall']:.4f} | F1: {train_m['f1']:.4f}"
+                f"  Train | Loss: {train_m['loss']:.4f} | MAE: {train_m['mae_minutes']:.2f}m | RMSE: {train_m['rmse_minutes']:.2f}m"
             )
             print(
-                f"  Val   | Loss: {val_m['loss']:.4f}   | AUC: {val_m['auc_roc']:.4f}   | Acc: {val_m['accuracy']:.4f}   | Prec: {val_m['precision']:.4f}   | Rec: {val_m['recall']:.4f}   | F1: {val_m['f1']:.4f}"
+                f"  Val   | Loss: {val_m['loss']:.4f} | MAE: {val_m['mae_minutes']:.2f}m | RMSE: {val_m['rmse_minutes']:.2f}m"
             )
             print("-" * 60)
 
         self.save_metrics()
         self.plot_training_curves()
-        self.tune_best_model_threshold()
+        # self.tune_best_model_threshold() # Not applicable for regression yet
         print(f"Total time: {(time.time() - start_time)/60:.1f} min")
 
     def tune_best_model_threshold(self):
@@ -677,52 +617,37 @@ class EEGCNNTrainer:
 def main():
     n_patients = len(PATIENTS)
     
-    if LOPO_FOLD_ID is None:
-        # per patient
-        if PATIENT_INDEX is None:
-            patients_to_process = list(range(n_patients))
-        else:
-            patients_to_process = [PATIENT_INDEX]
-
-        for current_idx in patients_to_process:
-            patient_id = PATIENTS[current_idx]
-            patient_config = get_patient_config(current_idx)
-
-            all_datasets = create_datasets([current_idx], skip_missing_class=True)
-            test_seizures = all_datasets[patient_id].keys()
-            if TEST_SEIZURE is not None:
-                test_seizures = [TEST_SEIZURE]
-            print("patient:", patient_id, "seizures:", test_seizures)
-            
-            for sid in test_seizures:
-                try:
-                    gc.collect()
-                    EEGCNNTrainer(patient_config, datasets=all_datasets, test_seizure_id=sid).train()
-                except Exception as e:
-                    print(f"Error {patient_config['patient_id']} seizure {sid}: {e}")
-                    import traceback
-
-                    traceback.print_exc()
-    else:
+    # Determine which patients to process
+    if PATIENT_INDEX is None:
         patients_to_process = list(range(n_patients))
-        assert(LOPO_FOLD_ID < n_patients)
+    else:
+        patients_to_process = [PATIENT_INDEX]
 
-        all_datasets = create_datasets(patients_to_process)
+    # Initialize all datasets once
+    print("\n" + "=" * 60)
+    print("LOADING DATASETS")
+    print("=" * 60)
+    all_datasets = create_datasets(patients_to_process)
 
-        patient_config = get_patient_config(LOPO_FOLD_ID)
-        print("HERE")
+    # Process each patient
+    for current_idx in patients_to_process:
+        patient_id = PATIENTS[current_idx]
+        
+        if patient_id not in all_datasets:
+            continue
+            
+        patient_config = get_patient_config(current_idx)
+
         try:
             gc.collect()
-            EEGCNNTrainer(patient_config, datasets=all_datasets, 
-                          lopo=True).train()
+            # Train model using simple 70/30 split
+            trainer = EEGCNNTrainer(patient_config, datasets=all_datasets)
+            trainer.train()
+            
         except Exception as e:
-            print(f"Error LOPO {patient_config['patient_id']} : {e}")
+            print(f"Error training patient {patient_id}: {e}")
             import traceback
-
             traceback.print_exc()
-
-
-
 
 
 if __name__ == "__main__":

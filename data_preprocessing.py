@@ -238,9 +238,14 @@ class EEGPreprocessor:
                 # STFT
                 z_chunk, f_chunk, t_chunk = self.apply_stft(chunk, sampling_rate)
 
-                # Phase
+                # Phase (Sin/Cos Transform)
                 z_phase = z_chunk[:, phase_mask, :]
-                phase_map = np.angle(z_phase)
+                angles = np.angle(z_phase)
+                phase_sin = np.sin(angles)
+                phase_cos = np.cos(angles)
+                # Concatenate along the channel axis (axis 0)
+                # Resulting shape: (num_channels * 2, freqs, time)
+                phase_map = np.concatenate([phase_sin, phase_cos], axis=0)
 
                 # Amp
                 z_amp_full = z_chunk[:, amp_mask, :]

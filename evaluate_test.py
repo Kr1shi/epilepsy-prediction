@@ -41,6 +41,7 @@ from data_segmentation_helpers.config import (
     PATIENT_INDEX,
     get_patient_config,
     SEGMENT_DURATION,
+    SEQUENCE_STRIDE,
 )
 
 # Smoothing parameters
@@ -51,7 +52,7 @@ SMOOTHING_T = 20  # Window size for smoothing (heuristic fallback)
 # If both are integers, they will override any other settings.
 # Set to None to use parameters from the model checkpoint or heuristics.
 MANUAL_SMOOTHING_WINDOW = 17  # e.g., 15
-MANUAL_SMOOTHING_COUNT =  15  # e.g., 5
+MANUAL_SMOOTHING_COUNT = 15  # e.g., 5
 
 
 def get_positive_label():
@@ -222,40 +223,43 @@ def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.
     SORTING ENABLED: Reconstructs chronological order using HDF5 metadata.
     """
     print("\nGenerating per-seizure dynamics plots...")
-    
+
     # 1. Setup Output Directory
     output_dir = Path("result_plots") / patient_id
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # 2. Get Predictions and Labels
     probabilities = []
     true_labels = []
-    
+
     loader = DataLoader(test_dataset, batch_size=SEQUENCE_BATCH_SIZE, shuffle=False)
-    
+
     model.eval()
     with torch.no_grad():
         for x_phase, x_amp, labels in loader:
             x_phase = x_phase.to(device)
             x_amp = x_amp.to(device)
-            
+
             outputs = model(x_phase, x_amp)
             probs = torch.softmax(outputs, dim=1)[:, 1]
-            
+
             probabilities.extend(probs.cpu().numpy())
             true_labels.extend(labels.numpy())
-            
+
     # 3. Retrieve Metadata for Sorting
     import h5py
+
     try:
         with h5py.File(test_dataset.h5_file_path, "r") as f:
             # Decode bytes to strings for filenames
-            filenames = [n.decode('utf-8') for n in f["segment_info/file_names"][:]]
+            filenames = [n.decode("utf-8") for n in f["segment_info/file_names"][:]]
             start_times = f["segment_info/start_times"][:]
-            
+
             # Verify lengths match
             if len(filenames) != len(probabilities):
-                print(f"⚠️ Metadata length mismatch! Data: {len(probabilities)}, Meta: {len(filenames)}")
+                print(
+                    f"⚠️ Metadata length mismatch! Data: {len(probabilities)}, Meta: {len(filenames)}"
+                )
                 # Fallback to unsorted if mismatch (shouldn't happen)
                 sorted_indices = range(len(probabilities))
             else:
@@ -263,13 +267,13 @@ def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.
                 meta_list = []
                 for i in range(len(filenames)):
                     meta_list.append((i, filenames[i], start_times[i]))
-                
+
                 # Sort by filename, then start_time
                 # This assumes filenames (e.g., chb01_03.edf) sort chronologically, which is true for CHB-MIT
                 meta_list.sort(key=lambda x: (x[1], x[2]))
-                
+
                 sorted_indices = [x[0] for x in meta_list]
-                
+
     except Exception as e:
         print(f"⚠️ Could not load metadata for sorting: {e}")
         sorted_indices = range(len(probabilities))
@@ -277,52 +281,63 @@ def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.
     # Apply Sort
     probs = np.array(probabilities)[sorted_indices]
     labels = np.array(true_labels)[sorted_indices]
-    
+
     # 4. Identify Seizure Events (Contiguous blocks of label=1)
     # We find transitions from 0 to 1 (start) and 1 to 0 (end)
     is_preictal = (labels == 1).astype(int)
     diff = np.diff(np.concatenate(([0], is_preictal, [0])))
     starts = np.where(diff == 1)[0]
     ends = np.where(diff == -1)[0]
-    
+
     if len(starts) == 0:
         print("No preictal (seizure) events found in test set to plot.")
         return
 
     print(f"Found {len(starts)} contiguous seizure events (after sorting).")
-    
+
     # 5. Plot each event
-    buffer_steps = 50 # How much interictal context to show before/after
-    
+    buffer_steps = 50  # How much interictal context to show before/after
+
     for i, (start, end) in enumerate(zip(starts, ends)):
         # Define window with buffer
         plot_start = max(0, start - buffer_steps)
-        plot_end = min(len(probs), end + int(buffer_steps/4)) # smaller buffer after
-        
+        plot_end = min(len(probs), end + int(buffer_steps / 4))  # smaller buffer after
+
         segment_probs = probs[plot_start:plot_end]
         # segment_labels = labels[plot_start:plot_end] # Unused for plotting logic, used implicit logic
         x_axis = np.arange(plot_start, plot_end)
-        
+
         plt.figure(figsize=(12, 6))
-        
+
         # Plot probabilities
-        plt.plot(x_axis, segment_probs, label="Seizure Probability", color="blue", linewidth=1.5)
-        
+        plt.plot(
+            x_axis,
+            segment_probs,
+            label="Seizure Probability",
+            color="blue",
+            linewidth=1.5,
+        )
+
         # Threshold line
-        plt.axhline(y=threshold, color="black", linestyle="--", label=f"Threshold ({threshold:.2f})")
-        
+        plt.axhline(
+            y=threshold,
+            color="black",
+            linestyle="--",
+            label=f"Threshold ({threshold:.2f})",
+        )
+
         # Highlight Preictal Region
         # We fill only where label is 1. Since we know start/end, we can just highlight that block.
         # This highlights the Ground Truth preictal period
-        plt.axvspan(start, end, color='red', alpha=0.2, label="True Preictal Period")
-        
+        plt.axvspan(start, end, color="red", alpha=0.2, label="True Preictal Period")
+
         plt.title(f"Seizure {i+1} Dynamics (Patient {patient_id})")
         plt.xlabel("Sequence Index (Chronological)")
         plt.ylabel("Probability")
         plt.ylim(-0.05, 1.05)
         plt.legend(loc="lower right")
         plt.grid(True, alpha=0.3)
-        
+
         # Save
         filename = f"seizure_{i+1:02d}.png"
         save_path = output_dir / filename
@@ -420,10 +435,10 @@ def main():
             # but to keep it clean we will load it again or pass it out.
             # evaluate_model doesn't return the model object.
             # We will initialize a fresh one for plotting.
-            
+
             # Note: We need to load the checkpoint to get the threshold first
             # But evaluate_model already did that.
-            
+
             (
                 metrics,
                 cm,
@@ -543,7 +558,7 @@ def main():
                     true_labels,
                     predictions,
                     test_dataset,
-                    SEGMENT_DURATION,
+                    SEGMENT_DURATION * SEQUENCE_STRIDE,
                     window_size,
                     threshold_x,
                 )
@@ -557,8 +572,9 @@ def main():
                     f"Per-Seizure Accuracy: {seizure_accuracy_metrics['per_seizure_accuracy']:.4f} "
                     f"({seizure_accuracy_metrics['correctly_predicted_seizures']}/{seizure_accuracy_metrics['total_seizures']})"
                 )
-                print(f"False Positive Rate: {seizure_accuracy_metrics['fp_rate_per_hour']:.4f} per hour")
-
+                print(
+                    f"False Positive Rate: {seizure_accuracy_metrics['fp_rate_per_hour']:.4f} per hour"
+                )
 
             patient_results_path = Path(
                 f"model/{current_output_prefix}/test_results.json"
@@ -567,7 +583,7 @@ def main():
                 json.dump(patient_results, f, indent=2)
 
             print(f"\n✅ Results saved to {patient_results_path}")
-            
+
             # --- Generate Dynamics Plot ---
             # Load model again for plotting since we didn't pass it out
             model = CNN_LSTM_Hybrid_Dual(
@@ -579,26 +595,30 @@ def main():
                 dropout=LSTM_DROPOUT,
             )
             try:
-                checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+                checkpoint = torch.load(
+                    model_path, map_location=device, weights_only=False
+                )
             except TypeError:
                 checkpoint = torch.load(model_path, map_location=device)
             model.load_state_dict(checkpoint["model_state_dict"])
             model.to(device)
-            
+
             # We also need the threshold used by evaluate_model, which it extracted from the checkpoint
             # We can re-extract it here
-            loaded_threshold = checkpoint.get("config", {}).get("optimal_threshold", 0.5)
-            
+            loaded_threshold = checkpoint.get("config", {}).get(
+                "optimal_threshold", 0.5
+            )
+
             # Load dataset for plotting
-            if 'test_dataset' not in locals():
+            if "test_dataset" not in locals():
                 test_dataset = EEGDataset(test_data_path, split="test")
-            
+
             plot_preictal_dynamics(
-                model=model, 
-                test_dataset=test_dataset, 
-                device=device, 
+                model=model,
+                test_dataset=test_dataset,
+                device=device,
                 patient_id=patient_id,
-                threshold=loaded_threshold
+                threshold=loaded_threshold,
             )
 
             batch_results[current_idx] = {
@@ -610,9 +630,9 @@ def main():
                     "smoothed_metrics"
                 ]
             if "seizure_accuracy_metrics" in patient_results:
-                batch_results[current_idx]["seizure_accuracy_metrics"] = patient_results[
-                    "seizure_accuracy_metrics"
-                ]
+                batch_results[current_idx]["seizure_accuracy_metrics"] = (
+                    patient_results["seizure_accuracy_metrics"]
+                )
 
         except Exception as e:
             print(f"❌ Error evaluating patient {patient_id}: {e}")
@@ -642,11 +662,12 @@ def main():
             print(
                 f"Mean Smoothed Accuracy: {np.mean(smoothed_accuracies):.4f} (±{np.std(smoothed_accuracies):.4f})"
             )
-        
+
         per_seizure_accuracies = [
             res["seizure_accuracy_metrics"]["per_seizure_accuracy"]
             for res in batch_results.values()
-            if "seizure_accuracy_metrics" in res and res["seizure_accuracy_metrics"]["total_seizures"] > 0
+            if "seizure_accuracy_metrics" in res
+            and res["seizure_accuracy_metrics"]["total_seizures"] > 0
         ]
         if per_seizure_accuracies:
             print(
@@ -662,7 +683,6 @@ def main():
             print(
                 f"Mean False Positive Rate: {np.mean(fp_rates):.4f} per hour (±{np.std(fp_rates):.4f})"
             )
-
 
         batch_summary = {
             "total_patients": n_patients,

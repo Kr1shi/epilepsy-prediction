@@ -16,6 +16,7 @@ model/
 papers/
 result_plots/
 profiling/
+old_data/
 
 local/
 DANN*/
@@ -28,4 +29,4 @@ GEMINI.md
 *.json
 *.csv
 *.txt
-*.pdf
+*.txt

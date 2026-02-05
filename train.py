@@ -623,26 +623,43 @@ def main():
     else:
         patients_to_process = [PATIENT_INDEX]
 
-    # Initialize all datasets once
-    print("\n" + "=" * 60)
-    print("LOADING DATASETS")
-    print("=" * 60)
-    all_datasets = create_datasets(patients_to_process)
-
     # Process each patient
     for current_idx in patients_to_process:
         patient_id = PATIENTS[current_idx]
-        
-        if patient_id not in all_datasets:
-            continue
-            
         patient_config = get_patient_config(current_idx)
+        dataset_prefix = patient_config["output_prefix"]
+        dataset_dir = Path("preprocessing") / "data" / dataset_prefix
+        
+        train_path = dataset_dir / "strain_dataset.h5"
+        test_path = dataset_dir / "stest_dataset.h5"
+        
+        if not train_path.exists() or not test_path.exists():
+            print(f"Warning: Missing split files for patient {patient_id} in {dataset_dir}")
+            continue
 
+        print("\n" + "=" * 60)
+        print(f"LOADING DATASET FOR: {patient_id}")
+        print("=" * 60)
+        
         try:
-            gc.collect()
-            # Train model using simple 70/30 split
-            trainer = EEGCNNTrainer(patient_config, datasets=all_datasets)
+            # Load only THIS patient's data
+            current_datasets = {
+                patient_id: {
+                    "train": EEGDataset(str(train_path), split="train"),
+                    "test": EEGDataset(str(test_path), split="test"),
+                }
+            }
+            
+            # Train model
+            trainer = EEGCNNTrainer(patient_config, datasets=current_datasets)
             trainer.train()
+            
+            # Cleanup
+            del current_datasets
+            del trainer
+            gc.collect()
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
             
         except Exception as e:
             print(f"Error training patient {patient_id}: {e}")

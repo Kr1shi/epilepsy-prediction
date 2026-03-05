@@ -42,6 +42,36 @@ from data_segmentation_helpers.config import (
 )
 
 
+class FocalLoss(nn.Module):
+    """Focal Loss: down-weights easy examples, focuses on hard ones."""
+
+    def __init__(self, weight=None, gamma=2.0, label_smoothing=0.05):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.label_smoothing = label_smoothing
+
+    def forward(self, inputs, targets):
+        # Apply label smoothing: hard targets -> soft targets
+        n_classes = inputs.size(1)
+        smooth_targets = torch.full_like(inputs, self.label_smoothing / (n_classes - 1))
+        smooth_targets.scatter_(1, targets.unsqueeze(1), 1.0 - self.label_smoothing)
+
+        log_probs = F.log_softmax(inputs, dim=1)
+        probs = torch.exp(log_probs)
+
+        # Focal modulation: (1 - p_t)^gamma
+        focal_weight = (1.0 - probs) ** self.gamma
+
+        # Combine: focal * -log(p) * smooth_target
+        loss = -focal_weight * log_probs * smooth_targets
+
+        if self.weight is not None:
+            loss = loss * self.weight.unsqueeze(0)
+
+        return loss.sum(dim=1).mean()
+
+
 class EEGDataset(Dataset):
     """Dual-Stream Dataset for Phase (Low-Freq) and Amplitude (High-Freq) inputs"""
 
@@ -357,7 +387,17 @@ class EEGCNNTrainer:
 
         # Load Data
         self.train_loader = self._create_dataloader("train")
-        self.val_loader = self._create_dataloader("test")
+
+        # Use dedicated val split when available; fall back to test with a warning.
+        val_h5 = self.dataset_dir / "val_dataset.h5"
+        if val_h5.exists():
+            self.val_loader = self._create_dataloader("val")
+        else:
+            print(
+                f"  WARNING: No val split found for {self.patient_id}. "
+                "Falling back to test set for monitoring (introduces leakage into model selection)."
+            )
+            self.val_loader = self._create_dataloader("test")
 
         # Initialize Dual-Stream Model
         self.model = CNN_LSTM_Hybrid_Dual(
@@ -369,13 +409,20 @@ class EEGCNNTrainer:
         )
         self.model.to(self.device)
 
-        self.criterion = nn.CrossEntropyLoss()
+        # Class-weighted focal loss with label smoothing
+        train_labels = self.train_loader.dataset.labels
+        counts = torch.bincount(train_labels).float()
+        class_weights = counts.sum() / (len(counts) * counts)
+        self.criterion = FocalLoss(
+            weight=class_weights.to(self.device), gamma=2.0, label_smoothing=0.05
+        )
+
         self.optimizer = optim.Adam(
             self.model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 
-        self.scheduler = optim.lr_scheduler.StepLR(
-            self.optimizer, step_size=5, gamma=0.5
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode="max", factor=0.5, patience=3, min_lr=1e-6
         )
 
         self.train_metrics_history = []
@@ -436,6 +483,7 @@ class EEGCNNTrainer:
             outputs = self.model(x_phase, x_amp)
             loss = self.criterion(outputs, labels)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
             total_loss += loss.item()
@@ -539,14 +587,23 @@ class EEGCNNTrainer:
         print("=" * 60)
 
         start_time = time.time()
+        early_stopping_patience = 5
+        epochs_no_improve = 0
+
         for epoch in range(TRAINING_EPOCHS):
             train_m = self.train_epoch(epoch)
             val_m, _ = self.validate_epoch(epoch)
-            self.scheduler.step()
+            self.scheduler.step(val_m["auc_roc"])
 
+            improved = val_m["auc_roc"] > self.best_val_auc
             self.save_model(epoch, train_m, val_m)
             self.train_metrics_history.append(train_m)
             self.val_metrics_history.append(val_m)
+
+            if improved:
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
 
             print(f"Epoch {epoch+1}:")
             print(
@@ -556,6 +613,10 @@ class EEGCNNTrainer:
                 f"  Val   | Loss: {val_m['loss']:.4f}   | AUC: {val_m['auc_roc']:.4f}   | Acc: {val_m['accuracy']:.4f}   | Prec: {val_m['precision']:.4f}   | Rec: {val_m['recall']:.4f}   | F1: {val_m['f1']:.4f}"
             )
             print("-" * 60)
+
+            if epochs_no_improve >= early_stopping_patience:
+                print(f"Early stopping: no val AUC improvement for {early_stopping_patience} consecutive epochs.")
+                break
 
         self.save_metrics()
         self.plot_training_curves()
@@ -571,7 +632,7 @@ class EEGCNNTrainer:
             f"\nPerforming final threshold tuning on best model (using Training Set)..."
         )
         # Load best model
-        checkpoint = torch.load(best_path, map_location=self.device)
+        checkpoint = torch.load(best_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
 
         # Run validation pass on TRAIN set to find optimal threshold without leakage

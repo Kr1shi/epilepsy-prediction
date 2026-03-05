@@ -13,16 +13,16 @@ LOG_FILE="pipeline_log.txt"
     rm -rf preprocessing/
 
     echo "Running data segmentation..."
-    python data_segmentation.py
+    python3 data_segmentation.py
 
     echo "Running data preprocessing..."
-    python data_preprocessing.py
+    python3 data_preprocessing.py
 
     echo "Running model training..."
-    python train.py
+    python3 train.py > output.txt
     
     echo "Evaluating..."
-    python evaluate_test.py
+    python3 evaluate_test.py
 
     echo "----------------------------------------"
     echo "Pipeline finished at $(date)"

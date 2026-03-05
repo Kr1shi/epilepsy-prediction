@@ -403,7 +403,7 @@ class EEGPreprocessor:
         return float(mean), float(std)
 
     def create_final_datasets(self, mean, std):
-        for split in ["train", "test"]:
+        for split in ["train", "val", "test"]:
             src, dst = (
                 self.intermediate_dir / f"{split}_intermediate.h5",
                 self.data_dir / f"{split}_dataset.h5",
@@ -454,7 +454,7 @@ class EEGPreprocessor:
             all_seqs = json.load(f)["sequences"]
         splits = {
             s: [seq for seq in all_seqs if seq.get("split") == s]
-            for s in ["train", "test"]
+            for s in ["train", "val", "test"]
         }
 
         self.create_intermediate_datasets(splits)

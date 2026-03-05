@@ -496,16 +496,21 @@ def create_sequences_single_patient(patient_id):
 
 
 def assign_patient_splits(sequences, patient_id, random_seed=42):
-    """Assign sequences to train/test splits for a single patient.
+    """Assign sequences to train/val/test splits for a single patient.
 
-    Strategy:
-    - Train set: All seizures except the last one (past)
-    - Test set: The last seizure (future)
+    Strategy (random leave-one-seizure-out):
+    - Test: one randomly chosen seizure (final held-out evaluation)
+    - Val:  one randomly chosen seizure from the remaining pool, if >= 2 remain
+            (used for model selection during training; no leakage into test)
+    - Train: all remaining seizures
+
+    Interictal sequences (seizure_id=None) start in train; the interictal
+    coverage check then moves a matching number to val and test as needed.
 
     Args:
         sequences: List of all sequence dictionaries for the patient
         patient_id: Patient ID
-        random_seed: Seed for deterministic balancing
+        random_seed: Seed for deterministic seizure selection and balancing
 
     Returns:
         Tuple of (retained_sequences, split_counts, balance_stats)
@@ -525,105 +530,96 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     )
     num_seizures = len(patient_seizure_ids)
 
-    # 3. Determine split: 70% Train, 30% Test (Chronological split)
-    if num_seizures > 0:
-        n_train_seizures = int(num_seizures * 0.7)
-        # Ensure we don't have 0 training seizures if we have enough (e.g. 4+ seizures)
-        # But for small counts (1, 2, 3), int(0.7) logic holds:
-        # 1 -> 0 (0 train, 1 test)
-        # 2 -> 1 (1 train, 1 test)
-        # 3 -> 2 (2 train, 1 test)
+    # 3. Random leave-one-out: pick test seizure, then val seizure from the rest
+    rng = random.Random(random_seed)
+    if num_seizures >= 1:
+        test_seizure_id = rng.choice(patient_seizure_ids)
+        remaining_ids = [s for s in patient_seizure_ids if s != test_seizure_id]
     else:
-        n_train_seizures = 0
+        test_seizure_id = None
+        remaining_ids = []
 
-    train_seizure_ids = set(patient_seizure_ids[:n_train_seizures])
+    # Val requires at least 2 remaining seizures (so train keeps >= 1)
+    if len(remaining_ids) >= 2:
+        val_seizure_id = rng.choice(remaining_ids)
+        val_seizure_ids = {val_seizure_id}
+        train_seizure_ids = set(remaining_ids) - val_seizure_ids
+    else:
+        val_seizure_id = None
+        val_seizure_ids = set()
+        train_seizure_ids = set(remaining_ids)
 
-    # 4. Find split point: where the first TEST seizure begins
-    # Default to 0 if no training seizures (e.g. num_seizures is 0 or 1)
-    split_index = 0
-    if n_train_seizures > 0:
-        split_index = len(patient_seqs)
-        for i, seq in enumerate(patient_seqs):
-            sid = seq.get("seizure_id")
-            if sid is not None and sid not in train_seizure_ids:
-                split_index = i
-                break
+    test_seizure_ids = {test_seizure_id} if test_seizure_id is not None else set()
 
-    train_sequences = patient_seqs[:split_index]
-    test_sequences = patient_seqs[split_index:]
+    # 4. Partition sequences by seizure assignment
+    # Interictal sequences (seizure_id=None) always start in train
+    train_sequences, val_sequences, test_sequences = [], [], []
+    for seq in patient_seqs:
+        sid = seq.get("seizure_id")
+        if sid is not None and sid in test_seizure_ids:
+            test_sequences.append(seq)
+        elif sid is not None and sid in val_seizure_ids:
+            val_sequences.append(seq)
+        else:
+            train_sequences.append(seq)
 
     if num_seizures > 0:
         print(f"\nPatient {patient_id} Split:")
         print(f"  Total Seizures: {num_seizures}")
+        print(f"  Train Seizures: {len(train_seizure_ids)} (IDs: {sorted(train_seizure_ids)})")
+        print(f"  Val Seizures:   {len(val_seizure_ids)} (IDs: {sorted(val_seizure_ids)})")
+        print(f"  Test Seizures:  {len(test_seizure_ids)} (IDs: {sorted(test_seizure_ids)})")
         print(
-            f"  Train Seizures: {n_train_seizures} (IDs: {patient_seizure_ids[:n_train_seizures]})"
+            f"  Sequences: {len(train_sequences)} Train / {len(val_sequences)} Val / {len(test_sequences)} Test"
         )
+        if not val_seizure_ids:
+            print(f"  Note: No val split (< 2 seizures remain after test holdout).")
+
+    # Helper: move interictal sequences from train into a target split for class balance
+    def _ensure_interictal(target_sequences, target_name):
+        nonlocal train_sequences
+        if sum(1 for s in target_sequences if s["type"] == "interictal") > 0:
+            return target_sequences
         print(
-            f"  Test Seizures: {num_seizures - n_train_seizures} (IDs: {patient_seizure_ids[n_train_seizures:]})"
+            f"  Warning: {target_name} set has 0 interictal sequences. Moving from train..."
         )
-        print(f"  Sequences: {len(train_sequences)} Train / {len(test_sequences)} Test")
-
-    # Check if test set has no interictal data and move from train if necessary
-    test_interictal_count = sum(
-        1 for seq in test_sequences if seq["type"] == "interictal"
-    )
-
-    if test_interictal_count == 0:
-        print(
-            f"  Warning: Test set has 0 interictal sequences. Moving sequences from train set..."
-        )
-
-        # Identify available interictal sequences in train
         train_interictal_indices = [
-            i for i, seq in enumerate(train_sequences) if seq["type"] == "interictal"
+            i for i, s in enumerate(train_sequences) if s["type"] == "interictal"
         ]
-
-        if train_interictal_indices:
-            # Determine how many to move: match the number of positive sequences in test
-            test_positive_count = sum(
-                1 for seq in test_sequences if seq["type"] == positive_label
-            )
-            # Default to a small number if no positives (unlikely) or just 10
-            num_to_move = (
-                test_positive_count
-                if test_positive_count > 0
-                else min(10, len(train_interictal_indices))
-            )
-
-            # Don't take more than available
-            num_to_move = min(num_to_move, len(train_interictal_indices))
-
-            if num_to_move > 0:
-                # Take from the end of the train set (closest to test set time-wise)
-                indices_to_move = train_interictal_indices[-num_to_move:]
-                indices_to_move_set = set(indices_to_move)
-
-                # Extract sequences to move
-                moved_sequences = [train_sequences[i] for i in indices_to_move]
-
-                # Update lists: Remove from train, Add to test
-                train_sequences = [
-                    s
-                    for i, s in enumerate(train_sequences)
-                    if i not in indices_to_move_set
-                ]
-                test_sequences.extend(moved_sequences)
-
-                print(
-                    f"  Moved {len(moved_sequences)} interictal sequences from train to test."
-                )
-            else:
-                print("  Warning: Not enough interictal data in train to move.")
-        else:
+        if not train_interictal_indices:
             print("  Warning: Train set also has no interictal data!")
+            return target_sequences
+        n_positive = sum(1 for s in target_sequences if s["type"] == positive_label)
+        num_to_move = min(
+            n_positive if n_positive > 0 else min(10, len(train_interictal_indices)),
+            len(train_interictal_indices),
+        )
+        if num_to_move == 0:
+            print("  Warning: Not enough interictal data in train to move.")
+            return target_sequences
+        indices_to_move = set(train_interictal_indices[-num_to_move:])
+        moved = [train_sequences[i] for i in sorted(indices_to_move)]
+        train_sequences = [
+            s for i, s in enumerate(train_sequences) if i not in indices_to_move
+        ]
+        target_sequences.extend(moved)
+        print(f"  Moved {len(moved)} interictal sequences from train to {target_name}.")
+        return target_sequences
+
+    # Val and test only hold positive-class sequences initially; ensure interictal coverage
+    if val_sequences:
+        val_sequences = _ensure_interictal(val_sequences, "val")
+    test_sequences = _ensure_interictal(test_sequences, "test")
 
     # Assign split labels
     for seq in train_sequences:
         seq["split"] = "train"
+    for seq in val_sequences:
+        seq["split"] = "val"
     for seq in test_sequences:
         seq["split"] = "test"
 
-    splits = {"train": train_sequences, "test": test_sequences}
+    splits = {"train": train_sequences, "val": val_sequences, "test": test_sequences}
 
     # Balance each split by downsampling majority class
     balanced_splits, balance_stats = balance_sequences_across_splits(
@@ -632,7 +628,7 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
 
     # Flatten sequences
     retained_sequences = []
-    for split_name in ["train", "test"]:
+    for split_name in ["train", "val", "test"]:
         retained_sequences.extend(balanced_splits[split_name])
 
     # Compute split counts
@@ -687,23 +683,24 @@ def balance_sequences_across_splits(splits, positive_label, random_seed=42):
             }
             continue
 
-        # Determine target counts based on ratio
-        # We want to keep all positives if possible
-        target_positive = len(positives)
-        
-        # Calculate target interictals based on ratio
-        target_interictal = int(len(positives) * INTERICTAL_TO_PREICTAL_RATIO)
-        
-        # Cap at available interictals
-        target_interictal = min(target_interictal, len(interictals))
-
+        # Balance classes: downsample whichever is larger
+        # With ratio=1.0, target equal counts; with ratio=2.0, allow 2x interictal
         rng.shuffle(positives)
         rng.shuffle(interictals)
 
+        if len(interictals) >= len(positives):
+            # More interictal than positive: downsample interictal (original behavior)
+            target_positive = len(positives)
+            target_interictal = min(int(len(positives) * INTERICTAL_TO_PREICTAL_RATIO), len(interictals))
+        else:
+            # More positive than interictal: downsample positive to match
+            target_interictal = len(interictals)
+            target_positive = min(int(len(interictals) / INTERICTAL_TO_PREICTAL_RATIO), len(positives))
+
         kept_positive = positives[:target_positive]
         kept_interictal = interictals[:target_interictal]
-        dropped_positive = max(0, len(positives) - target_positive) # Should be 0
-        dropped_interictal = max(0, len(interictals) - target_interictal)
+        dropped_positive = len(positives) - target_positive
+        dropped_interictal = len(interictals) - target_interictal
 
         combined = kept_positive + kept_interictal
         rng.shuffle(combined)
@@ -956,7 +953,7 @@ if __name__ == "__main__":
 
             # Print split summary
             print(f"\n=== SPLIT SUMMARY ===")
-            for split_name in ["train", "test"]:
+            for split_name in ["train", "val", "test"]:
                 counts = split_counts.get(split_name, {})
                 print(
                     f"  {split_name}: {counts.get('total', 0)} sequences "
@@ -967,7 +964,7 @@ if __name__ == "__main__":
             # Print balance stats
             if balance_stats:
                 print(f"\n=== BALANCING SUMMARY ===")
-                for split_name in ["train", "test"]:
+                for split_name in ["train", "val", "test"]:
                     stats = balance_stats.get(split_name, {})
                     if stats.get("balanced", False):
                         print(

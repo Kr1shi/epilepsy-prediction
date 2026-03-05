@@ -11,7 +11,7 @@ Single Patient Training:
 
 TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
 PREICTAL_WINDOW = 10 * 60  # 10 minutes before seizure
-INTERICTAL_BUFFER = 30 * 60
+INTERICTAL_BUFFER = 1 * 60 * 60  # 1 hour buffer around seizures
 
 # =============================================================================
 # Dataset Configuration
@@ -19,32 +19,32 @@ INTERICTAL_BUFFER = 30 * 60
 
 BASE_PATH = "physionet.org/files/chbmit/1.0.0/"
 ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
-INTERICTAL_TO_PREICTAL_RATIO = 2.0  # Ratio of interictal to preictal sequences (e.g., 1.0 = 50/50, 2.0 = 67/33)
+INTERICTAL_TO_PREICTAL_RATIO = 1.0  # Balanced 1:1 ratio of interictal to preictal sequences
 
 # Patients to include in processing
 PATIENTS = [
-    "chb01",
-    "chb02",
-    #"chb03",
-    "chb04",
-    "chb05",
-    "chb06",
-    "chb07",
-    "chb08",
-    "chb09",
-    "chb10",
-    "chb11",
-    #"chb13",
-    "chb14",
-    "chb15",
-    #"chb16",
-    #"chb17",
-    "chb18",
-    "chb19",
-    "chb20",
-    "chb21",
-    "chb22",
-    "chb23",
+    #"chb01",   # 7 seizures
+    #"chb02",   # 3 seizures
+    #"chb03",   # 7 seizures
+    #"chb04",   # 4 seizures
+    #"chb05",   # 5 seizures
+    "chb06",    # 10 seizures  ← top 5
+    #"chb07",   # 3 seizures
+    #"chb08",   # 5 seizures
+    #"chb09",   # 4 seizures
+    #"chb10",   # 7 seizures
+    #"chb11",   # 3 seizures
+    "chb13",    # 12 seizures  ← top 5
+    "chb14",    # 8 seizures   ← top 5 (tied)
+    "chb15",    # 20 seizures  ← top 5
+    "chb16",    # 10 seizures  ← top 5
+    #"chb17",   # 3 seizures
+    #"chb18",   # 6 seizures
+    #"chb19",   # 3 seizures
+    "chb20",    # 8 seizures   ← top 5 (tied)
+    #"chb21",   # 4 seizures
+    #"chb22",   # 3 seizures
+    #"chb23",   # 7 seizures
 ]
 
 # Current patient index to process (0 to len(PATIENTS)-1, or None for all)
@@ -58,8 +58,8 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 # =============================================================================
 
 SEGMENT_DURATION = 5  # seconds per segment
-SEQUENCE_LENGTH = 5  # segments per sequence
-SEQUENCE_STRIDE = 1  # segments between sequences
+SEQUENCE_LENGTH = 30  # segments per sequence (30 × 5s = 150s per sequence)
+SEQUENCE_STRIDE = 5   # segments between sequences (5 × 5s = 25s stride → 83% overlap for positive regions)
 
 # =============================================================================
 # Signal Processing
@@ -105,15 +105,15 @@ TARGET_CHANNELS = [
 # Model Configuration
 # =============================================================================
 
-LSTM_HIDDEN_DIM = 512
-LSTM_NUM_LAYERS = 3
-LSTM_DROPOUT = 0.5  # Reduced from 0.6 back to 0.5
+LSTM_HIDDEN_DIM = 128
+LSTM_NUM_LAYERS = 2
+LSTM_DROPOUT = 0.5
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
 
-TRAINING_EPOCHS = 5
+TRAINING_EPOCHS = 30
 SEQUENCE_BATCH_SIZE = 16
 LEARNING_RATE = 0.0001  # Increased from 1e-5 to 1e-4
 WEIGHT_DECAY = 1e-4  # Reduced from 1e-3 back to 1e-4

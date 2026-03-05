@@ -58,11 +58,10 @@ Raw EEG Files (EDF)
 - One **sequence** = 30 consecutive segments (150 seconds total by default)
 - The LSTM models **temporal dependencies** across segments within a sequence
 
-**Random Leave-One-Seizure-Out Split**:
-- **Test**: one randomly chosen seizure (final held-out evaluation, never seen during training)
-- **Val**: one randomly chosen seizure from the remaining pool, if >= 2 remain (used only for model selection — `best_model.pth` is chosen by val AUC)
-- **Train**: all remaining seizures
-- Patients with < 3 seizures have no val split; training falls back to test for monitoring (printed as a warning)
+**Randomized Sequence-Level Split**:
+- All sequences are shuffled and randomly assigned to **train/val/test** using configurable ratios (default 80/10/10)
+- Sequences from the same seizure may appear in different splits
+- Split ratios configured via `TRAIN_RATIO`, `VAL_RATIO`, `TEST_RATIO` in config.py
 
 **Labeling**: A sequence is labeled based on its **last segment**:
 - **Preictal**: last segment falls within `PREICTAL_WINDOW` (10 min default) before a seizure
@@ -188,8 +187,7 @@ All parameters are in `data_segmentation_helpers/config.py`.
 - Files are processed with a **6-second safety margin** at both ends to account for filter edge effects and STFT padding requirements
 - A patient's seizures are tracked on a **global timeline** that accounts for real-time gaps between recording files
 - **Two-pass labeling**: (1) check for positive class (preictal/ictal), (2) check buffer zones only if not already positive — buffer zones never override a positive label
-- Split boundary is found by scanning sequences chronologically for the first sequence whose `seizure_id` belongs to the test set; interictal sequences (`seizure_id = None`) are implicitly assigned to train if they precede this boundary
-- If the test split has zero interictal sequences, sequences are moved from the end of the train set to balance it
+- All sequences are shuffled and randomly split into train/val/test at the sequence level (80/10/10 default), then each split is independently class-balanced
 
 ### Signal Processing Pipeline (data_preprocessing.py)
 1. **Notch filter**: remove 60 Hz line noise (MNE)
@@ -201,7 +199,7 @@ All parameters are in `data_segmentation_helpers/config.py`.
 All preprocessing is checkpointed — interrupted runs resume without reprocessing completed files.
 
 ### Training (train.py)
-- **Dedicated val split**: `val_loader` uses a randomly held-out val seizure, separate from test. `best_model.pth` is selected by val AUC. Patients with < 3 seizures fall back to test for monitoring (warning printed)
+- **Val split**: `val_loader` uses randomly assigned val sequences. `best_model.pth` is selected by val AUC
 - Best model checkpoint also stores `optimal_threshold` (Youden's J on train set) and `smoothing_window` / `smoothing_count` for post-hoc smoothing
 - Optimizer: Adam with `StepLR(step_size=5, gamma=0.5)`
 - Loss: `CrossEntropyLoss` without class weights
@@ -219,7 +217,7 @@ All preprocessing is checkpointed — interrupted runs resume without reprocessi
 
 ## Known Issues / Limitations
 
-- **Patients with < 3 seizures have no val split** and training falls back to test for monitoring (printed as a warning — this is leakage for those patients)
+- **Sequence-level random split** means sequences from the same seizure may appear in multiple splits — this is intentional for maximizing data utilization
 - **Near-duplicate positive samples**: 83% sequence overlap in preictal regions creates many highly similar training examples, which accelerates overfitting
 - **`INTERICTAL_BUFFER` is 30 minutes** (not 2 hours as older docs stated) — some interictal sequences may contain subtle preictal activity
 - **Amplitude frequency decimation** (`::10`) is done without an anti-aliasing filter

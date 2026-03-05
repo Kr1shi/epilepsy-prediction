@@ -21,6 +21,11 @@ BASE_PATH = "physionet.org/files/chbmit/1.0.0/"
 ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
 INTERICTAL_TO_PREICTAL_RATIO = 1.0  # Balanced 1:1 ratio of interictal to preictal sequences
 
+# Split ratios (must sum to 1.0)
+TRAIN_RATIO = 0.8
+VAL_RATIO = 0.1
+TEST_RATIO = 0.1
+
 # Patients to include in processing
 PATIENTS = [
     #"chb01",   # 7 seizures

@@ -428,6 +428,7 @@ class EEGCNNTrainer:
         self.train_metrics_history = []
         self.val_metrics_history = []
         self.best_val_auc = 0.0
+        self.best_val_recall = 0.0
 
         print(f"Model Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
 

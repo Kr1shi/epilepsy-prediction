@@ -1,8 +1,9 @@
 """Configuration for seizure prediction pipeline
 
-Single Patient Training:
-- Each patient is trained/tested on their own data
-- Split strategy: Train on past seizures, test on future (last) seizure
+Conv-Transformer Architecture:
+- Single-stream full-band STFT spectrograms
+- Conv tower for local spectral patterns → Transformer for long-range temporal attention
+- Cross-patient pretraining, then per-patient fine-tuning
 """
 
 # =============================================================================
@@ -10,7 +11,9 @@ Single Patient Training:
 # =============================================================================
 
 TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
-PREICTAL_WINDOW = 10 * 60  # 10 minutes before seizure
+PREICTAL_WINDOW = 40 * 60  # 40 minutes before seizure (zone starts at -40min)
+PREICTAL_ONSET_BUFFER = 10 * 60  # 10 minutes before seizure (zone ends at -10min)
+                                  # Effective preictal zone: [-40min, -10min]
 INTERICTAL_BUFFER = 1 * 60 * 60  # 1 hour buffer around seizures
 
 # =============================================================================
@@ -62,9 +65,9 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 # Sequence Configuration
 # =============================================================================
 
-SEGMENT_DURATION = 5  # seconds per segment
-SEQUENCE_LENGTH = 30  # segments per sequence (30 × 5s = 150s per sequence)
-SEQUENCE_STRIDE = 5   # segments between sequences (5 × 5s = 25s stride → 83% overlap for positive regions)
+SEGMENT_DURATION = 5    # seconds per segment
+SEQUENCE_LENGTH = 360   # segments per sequence (360 × 5s = 1800s = 30 min)
+SEQUENCE_STRIDE = 12    # segments between sequences (12 × 5s = 60s = 1 min stride for preictal)
 
 # =============================================================================
 # Signal Processing
@@ -74,12 +77,12 @@ LOW_FREQ_HZ = 0.5
 HIGH_FREQ_HZ = 128  # Extended to capture High Gamma/HFO
 NOTCH_FREQ_HZ = 60
 
-# Dual-Stream Configuration
-PHASE_FREQ_BAND = (0.5, 12.0)  # Delta/Theta (for Phase)
-AMP_FREQ_BAND = (20.0, 128.0)  # Gamma/HFO (for Amplitude)
+# Single-Stream Configuration (full-band power spectrogram)
+FULL_FREQ_BAND = (0.5, 128.0)  # Full band for single-stream STFT
 
-STFT_NPERSEG = 256  # STFT window length
+STFT_NPERSEG = 256   # STFT window length
 STFT_NOVERLAP = 128  # STFT overlap (50%)
+STFT_NFFT = 256      # FFT size (1.0 Hz resolution at 256 Hz sampling rate)
 
 ARTIFACT_THRESHOLD_STD = 4  # MAD threshold for artifact removal
 LOG_TRANSFORM_EPSILON = 1e-12  # Avoid log(0)
@@ -107,22 +110,25 @@ TARGET_CHANNELS = [
 ]
 
 # =============================================================================
-# Model Configuration
+# Model Configuration (Conv-Transformer)
 # =============================================================================
 
-LSTM_HIDDEN_DIM = 128
-LSTM_NUM_LAYERS = 2
-LSTM_DROPOUT = 0.5
+CONV_EMBEDDING_DIM = 128         # Conv tower output / Transformer d_model
+TRANSFORMER_NUM_LAYERS = 2       # Transformer encoder layers
+TRANSFORMER_NUM_HEADS = 4        # Attention heads (head_dim = 128/4 = 32)
+TRANSFORMER_FFN_DIM = 512        # Feedforward hidden dimension
+TRANSFORMER_DROPOUT = 0.3        # Dropout for Transformer + FC head
+USE_CLS_TOKEN = True             # CLS token pooling (vs mean pooling)
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
 
 TRAINING_EPOCHS = 30
-SEQUENCE_BATCH_SIZE = 16
-LEARNING_RATE = 0.0001  # Increased from 1e-5 to 1e-4
-WEIGHT_DECAY = 1e-4  # Reduced from 1e-3 back to 1e-4
-NUM_WORKERS = 4
+SEQUENCE_BATCH_SIZE = 4  # Reduced for 30-min windows (~30MB per sample)
+LEARNING_RATE = 0.0001
+WEIGHT_DECAY = 1e-4
+NUM_WORKERS = 0  # Must be 0 for lazy HDF5 loading
 
 # =============================================================================
 # Performance Settings

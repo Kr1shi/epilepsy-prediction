@@ -31,6 +31,7 @@ from data_segmentation_helpers.config import (
     TRAIN_RATIO,
     VAL_RATIO,
     TEST_RATIO,
+    PREICTAL_ONSET_BUFFER,
 )
 from data_segmentation_helpers.segmentation import parse_summary_file
 from data_segmentation_helpers.channel_validation import (
@@ -72,15 +73,18 @@ def identify_positive_regions(all_seizures_global):
 
     for seizure in all_seizures_global:
         if TASK_MODE == "prediction":
-            # Prediction mode: preictal window before seizure
+            # Prediction mode: preictal window before seizure with onset buffer
             seizure_start_global = seizure["start_sec_global"]
             preictal_window_start_global = max(
                 0, seizure_start_global - PREICTAL_WINDOW
             )
-            # Region: from preictal window start to seizure start
-            positive_regions.append(
-                (preictal_window_start_global, seizure_start_global)
-            )
+            # Region: from preictal window start to onset buffer
+            # Effective zone: [-40min, -10min] before seizure
+            preictal_zone_end = seizure_start_global - PREICTAL_ONSET_BUFFER
+            if preictal_zone_end > preictal_window_start_global:
+                positive_regions.append(
+                    (preictal_window_start_global, preictal_zone_end)
+                )
 
         elif TASK_MODE == "detection":
             # Detection mode: during seizure
@@ -188,17 +192,18 @@ def create_sequences_from_file(
         # PASS 1: Check for positive class (preictal OR ictal depending on mode)
         if TASK_MODE == "prediction":
             # Prediction mode: Check if preictal for ANY seizure (takes priority)
+            # Preictal zone: [-PREICTAL_WINDOW, -PREICTAL_ONSET_BUFFER] before seizure
             for seizure in all_seizures_global:
                 seizure_start_global = seizure["start_sec_global"]
 
-                # Check if last segment falls in preictal window (10 minutes before seizure)
                 preictal_window_start_global = max(
                     0, seizure_start_global - PREICTAL_WINDOW
                 )
+                preictal_zone_end = seizure_start_global - PREICTAL_ONSET_BUFFER
 
                 if (
                     preictal_window_start_global <= last_segment_start_global
-                    and last_segment_end_global <= seizure_start_global
+                    and last_segment_end_global <= preictal_zone_end
                 ):
                     sequence_type = "preictal"
                     time_to_seizure = seizure_start_global - last_segment_end_global
@@ -232,12 +237,12 @@ def create_sequences_from_file(
                 seizure_end_global = seizure["end_sec_global"]
 
                 if TASK_MODE == "prediction":
-                    # Prediction mode: Exclude 50-min buffer before preictal window
+                    # Prediction mode: Exclude buffer before preictal window
                     preictal_window_start_global = max(
                         0, seizure_start_global - PREICTAL_WINDOW
                     )
 
-                    # Buffer zone 1: [seizure_start - 60min, seizure_start - 10min) - before preictal window
+                    # Buffer zone 1: [seizure_start - INTERICTAL_BUFFER, preictal_window_start) - before preictal
                     buffer_before_start_global = max(
                         0, seizure_start_global - INTERICTAL_BUFFER
                     )
@@ -251,12 +256,14 @@ def create_sequences_from_file(
                         in_excluded_zone = True
                         break
 
-                    # Buffer zone 2: [seizure_start, seizure_end + 60min] - during and after seizure
+                    # Buffer zone 2: onset buffer [-10min, seizure_start] + ictal + post-ictal
+                    # The onset buffer gap is excluded (too close to seizure for useful prediction)
+                    onset_buffer_start = seizure_start_global - PREICTAL_ONSET_BUFFER
                     buffer_after_end_global = seizure_end_global + INTERICTAL_BUFFER
 
-                    # Check if sequence overlaps with ictal + post-ictal buffer
+                    # Check if sequence overlaps with onset buffer + ictal + post-ictal
                     if not (
-                        sequence_end_global <= seizure_start_global
+                        sequence_end_global <= onset_buffer_start
                         or sequence_start_global >= buffer_after_end_global
                     ):
                         in_excluded_zone = True

@@ -1,8 +1,9 @@
+import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import h5py
 import numpy as np
 import json
@@ -30,9 +31,12 @@ from data_segmentation_helpers.config import (
     SEQUENCE_LENGTH,
     SEQUENCE_BATCH_SIZE,
     NUM_WORKERS,
-    LSTM_HIDDEN_DIM,
-    LSTM_NUM_LAYERS,
-    LSTM_DROPOUT,
+    CONV_EMBEDDING_DIM,
+    TRANSFORMER_NUM_LAYERS,
+    TRANSFORMER_NUM_HEADS,
+    TRANSFORMER_FFN_DIM,
+    TRANSFORMER_DROPOUT,
+    USE_CLS_TOKEN,
     TRAINING_EPOCHS,
     LEARNING_RATE,
     WEIGHT_DECAY,
@@ -52,7 +56,6 @@ class FocalLoss(nn.Module):
         self.label_smoothing = label_smoothing
 
     def forward(self, inputs, targets):
-        # Apply label smoothing: hard targets -> soft targets
         n_classes = inputs.size(1)
         smooth_targets = torch.full_like(inputs, self.label_smoothing / (n_classes - 1))
         smooth_targets.scatter_(1, targets.unsqueeze(1), 1.0 - self.label_smoothing)
@@ -60,10 +63,7 @@ class FocalLoss(nn.Module):
         log_probs = F.log_softmax(inputs, dim=1)
         probs = torch.exp(log_probs)
 
-        # Focal modulation: (1 - p_t)^gamma
         focal_weight = (1.0 - probs) ** self.gamma
-
-        # Combine: focal * -log(p) * smooth_target
         loss = -focal_weight * log_probs * smooth_targets
 
         if self.weight is not None:
@@ -73,212 +73,186 @@ class FocalLoss(nn.Module):
 
 
 class EEGDataset(Dataset):
-    """Dual-Stream Dataset for Phase (Low-Freq) and Amplitude (High-Freq) inputs"""
+    """Single-Stream Dataset with lazy HDF5 loading for large 30-min windows."""
 
     def __init__(self, h5_file_path, split="train"):
         self.h5_file_path = h5_file_path
         self.split = split
+        self.h5_file = None
 
-        # Load data into memory (Phase and Amp streams)
         with h5py.File(h5_file_path, "r") as f:
-            self.phase_data = torch.FloatTensor(f["spectrograms_phase"][:])
-            self.amp_data = torch.FloatTensor(f["spectrograms_amp"][:])
+            if "spectrograms_phase" in f or "spectrograms_amp" in f:
+                raise ValueError(
+                    f"HDF5 file {h5_file_path} uses old dual-stream format. "
+                    "Re-run data_preprocessing.py to generate single-stream datasets."
+                )
             self.labels = torch.LongTensor(f["labels"][:])
-            self.patient_ids = [pid.decode("utf-8") for pid in f["patient_ids"][:]]
+            self.length = len(self.labels)
 
             if "metadata" in f:
                 self.metadata = dict(f["metadata"].attrs)
 
-        print(f"Loaded {self.split} dataset: {len(self.labels)} samples")
-        print(f"  - Phase Shape: {self.phase_data.shape} (Time/Timing)")
-        print(f"  - Amp Shape:   {self.amp_data.shape} (Power/Energy)")
-        print(f"  - Class Dist:  {torch.bincount(self.labels)}")
+        print(f"Loaded {self.split} dataset: {self.length} samples")
+        print(f"  - Class Dist: {torch.bincount(self.labels)}")
+
+    def _open_h5(self):
+        if self.h5_file is None:
+            self.h5_file = h5py.File(self.h5_file_path, "r")
 
     def __len__(self):
-        return len(self.labels)
+        return self.length
 
     def __getitem__(self, idx):
+        """Returns: (spectrogram, label)
+        spectrogram: (sequence_length, channels, freq_bins, time_bins)
         """
-        Returns:
-            x_phase: (sequence_length, channels, freq_phase, time)
-            x_amp:   (sequence_length, channels, freq_amp, time)
-            label:   int
-        """
-        return self.phase_data[idx], self.amp_data[idx], self.labels[idx]
+        self._open_h5()
+        x = torch.FloatTensor(self.h5_file["spectrograms"][idx])
+        return x, self.labels[idx]
+
+    def __del__(self):
+        if self.h5_file is not None:
+            self.h5_file.close()
 
 
-class CompactEEGCNN(nn.Module):
+class ConvTower(nn.Module):
+    """Conv tower that extracts a fixed-size embedding from a single spectrogram segment.
+
+    Input:  (batch, 18, 128, 9)
+    Output: (batch, embed_dim)
     """
-    A lightweight CNN backbone that preserves Temporal Resolution.
-    Pools Frequency (Height) to 1, but keeps Time (Width) intact.
-    """
 
-    def __init__(self, in_channels=18, output_channels=64):
-        super(CompactEEGCNN, self).__init__()
+    def __init__(self, in_channels=18, embed_dim=128):
+        super().__init__()
 
-        # Block 1: Capture basic patterns
         self.block1 = nn.Sequential(
             nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(0.25),  # Regularization
-            nn.MaxPool2d(2),  # Reduces Time and Freq by 2
+            nn.GELU(),
+            nn.MaxPool2d(2),
         )
 
-        # Block 2: Spatial compositions
         self.block2 = nn.Sequential(
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(0.25),  # Regularization
-            nn.MaxPool2d(2),  # Reduces Time and Freq by 2
+            nn.GELU(),
+            nn.MaxPool2d(2),
         )
 
-        # Block 3: Complex features (Preserve Time)
         self.block3 = nn.Sequential(
-            nn.Conv2d(64, output_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(output_channels),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(0.25),  # Regularization
-            # No Pooling here (or use MaxPool2d((2, 1)) to pool Freq only)
+            nn.Conv2d(64, embed_dim, kernel_size=3, padding=1),
+            nn.BatchNorm2d(embed_dim),
+            nn.GELU(),
         )
 
-        # CRITICAL: Adaptive Pool Height (Freq) to 1, Keep Width (Time)
-        # This creates a "ribbon" of features over time
-        self.gap_freq = nn.AdaptiveAvgPool2d((1, None))
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
 
     def forward(self, x):
         x = self.block1(x)
         x = self.block2(x)
         x = self.block3(x)
-
-        # Output shape: (Batch, Channels, 1, Time)
-        x = self.gap_freq(x)
-        return x
+        x = self.pool(x)
+        return x.view(x.size(0), -1)
 
 
-class DualStreamSpectrogramEncoder(nn.Module):
+class ConvTransformerModel(nn.Module):
+    """Single-stream Conv-Transformer for EEG sequence classification.
+
+    Conv tower tokenizes each 5s segment into an embedding, then a Transformer
+    attends across all time positions to classify the full window.
     """
-    Convolutional Fusion Module:
-    1. Extracts Phase/Amp ribbons over time.
-    2. Fuses them using 1x1 Conv (coupling detection at each time step).
-    3. Pools time dimension ONLY after fusion.
-    """
-
-    def __init__(self, in_channels=18, embedding_dim=256):
-        super().__init__()
-
-        self.phase_tower = CompactEEGCNN(in_channels, output_channels=64)
-        self.amp_tower = CompactEEGCNN(in_channels, output_channels=64)
-
-        # Fusion is now a 1x1 Convolution across time steps
-        self.fusion_conv = nn.Sequential(
-            nn.Conv2d(64 + 64, embedding_dim, kernel_size=1),
-            nn.BatchNorm2d(embedding_dim),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-        )
-
-        # Global Time Pooling (Happens AFTER fusion)
-        self.gap_time = nn.AdaptiveAvgPool2d(1)
-
-    def forward(self, x_phase, x_amp):
-        # 1. Extract Features (Time preserved)
-        # Shape: (Batch, 64, 1, Time)
-        feat_p = self.phase_tower(x_phase)
-        feat_a = self.amp_tower(x_amp)
-
-        # 2. Concatenate along Channels
-        # Shape: (Batch, 128, 1, Time)
-        combined = torch.cat((feat_p, feat_a), dim=1)
-
-        # 3. Fuse (Pixel-wise coupling detection)
-        # The Conv1x1 acts as a learnable "Dot Product" at each time step
-        # Shape: (Batch, embedding_dim, 1, Time)
-        fused_map = self.fusion_conv(combined)
-
-        # 4. Now average over time
-        # Shape: (Batch, embedding_dim, 1, 1)
-        out = self.gap_time(fused_map)
-
-        return out.view(out.size(0), -1)
-
-
-class CNN_LSTM_Hybrid_Dual(nn.Module):
-    """Dual-Stream Hybrid Model: Dual CNN -> Fusion -> BiLSTM -> Attention"""
 
     def __init__(
         self,
         num_input_channels=18,
         num_classes=2,
         sequence_length=SEQUENCE_LENGTH,
-        lstm_hidden_dim=LSTM_HIDDEN_DIM,
-        lstm_num_layers=LSTM_NUM_LAYERS,
-        dropout=LSTM_DROPOUT,
+        embed_dim=CONV_EMBEDDING_DIM,
+        num_layers=TRANSFORMER_NUM_LAYERS,
+        num_heads=TRANSFORMER_NUM_HEADS,
+        ffn_dim=TRANSFORMER_FFN_DIM,
+        dropout=TRANSFORMER_DROPOUT,
+        use_cls_token=USE_CLS_TOKEN,
     ):
         super().__init__()
+        self.sequence_length = sequence_length
+        self.embed_dim = embed_dim
+        self.use_cls_token = use_cls_token
 
-        fusion_dim = 256  # Output size of the DualStreamEncoder
+        # Per-segment feature extractor
+        self.conv_tower = ConvTower(in_channels=num_input_channels, embed_dim=embed_dim)
 
-        # 1. Dual-Stream Encoder
-        self.encoder = DualStreamSpectrogramEncoder(
-            in_channels=num_input_channels, embedding_dim=fusion_dim
-        )
+        # CLS token and positional embeddings
+        if use_cls_token:
+            self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02)
+            self.pos_embedding = nn.Parameter(
+                torch.randn(1, sequence_length + 1, embed_dim) * 0.02
+            )
+        else:
+            self.pos_embedding = nn.Parameter(
+                torch.randn(1, sequence_length, embed_dim) * 0.02
+            )
 
-        # 2. BiLSTM
-        self.lstm = nn.LSTM(
-            input_size=fusion_dim,
-            hidden_size=lstm_hidden_dim,
-            num_layers=lstm_num_layers,
+        # Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=ffn_dim,
+            dropout=dropout,
+            activation="gelu",
             batch_first=True,
-            dropout=dropout if lstm_num_layers > 1 else 0,
-            bidirectional=True,
+            norm_first=True,
         )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # 3. Attention
-        self.attention = nn.Sequential(
-            nn.Linear(lstm_hidden_dim * 2, 64),
-            nn.Tanh(),
-            nn.Linear(64, 1, bias=False),
-        )
+        # Post-transformer norm
+        self.norm = nn.LayerNorm(embed_dim)
 
-        # 4. Classifier
+        # Classification head
         self.fc = nn.Sequential(
-            nn.Linear(lstm_hidden_dim * 2, 64),
-            nn.ReLU(),
+            nn.Linear(embed_dim, 64),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(64, num_classes),
         )
 
-    def forward(self, x_phase, x_amp):
+    def forward(self, x):
         """
         Args:
-            x_phase: (batch, seq, channels, h_phase, w)
-            x_amp:   (batch, seq, channels, h_amp, w)
+            x: (batch, seq_len, channels, freq, time)
+        Returns:
+            (batch, num_classes)
         """
-        batch_size, seq_len, c, h_p, w = x_phase.shape
-        _, _, _, h_a, _ = x_amp.shape
+        B, S, C, H, W = x.shape
 
-        # Flatten sequence dimension for CNN processing
-        # (Batch * Seq, C, H, W)
-        x_phase_flat = x_phase.view(batch_size * seq_len, c, h_p, w)
-        x_amp_flat = x_amp.view(batch_size * seq_len, c, h_a, w)
+        # Flatten sequence for CNN: (B*S, C, H, W)
+        x_flat = x.view(B * S, C, H, W)
 
-        # Dual-Stream Encoding
-        features = self.encoder(x_phase_flat, x_amp_flat)  # (Batch*Seq, FusionDim)
+        # Conv tower: (B*S, embed_dim)
+        embeddings = self.conv_tower(x_flat)
 
-        # Reshape back to sequence
-        features = features.view(batch_size, seq_len, -1)
+        # Reshape to sequence: (B, S, embed_dim)
+        embeddings = embeddings.view(B, S, self.embed_dim)
 
-        # LSTM Processing
-        lstm_out, _ = self.lstm(features)
+        # Add CLS token
+        if self.use_cls_token:
+            cls_tokens = self.cls_token.expand(B, -1, -1)
+            embeddings = torch.cat([cls_tokens, embeddings], dim=1)
 
-        # Attention Pooling
-        attn_weights = self.attention(lstm_out)
-        attn_weights = F.softmax(attn_weights, dim=1)
-        context = torch.sum(attn_weights * lstm_out, dim=1)
+        # Add positional encoding
+        embeddings = embeddings + self.pos_embedding
 
-        return self.fc(context)
+        # Transformer
+        out = self.transformer(embeddings)
+        out = self.norm(out)
+
+        # Pooling
+        if self.use_cls_token:
+            pooled = out[:, 0]  # CLS token output
+        else:
+            pooled = out.mean(dim=1)  # Mean pooling
+
+        return self.fc(pooled)
 
 
 class MetricsTracker:
@@ -300,10 +274,8 @@ class MetricsTracker:
         true_np = np.array(self.true_labels)
         prob_np = np.array(self.probabilities)
 
-        # Handle edge case where only one class is present in batch
         if len(np.unique(true_np)) > 1:
             auc = roc_auc_score(true_np, prob_np)
-            # Compute optimal threshold using Youden's J statistic
             fpr, tpr, thresholds = roc_curve(true_np, prob_np)
             j_scores = tpr - fpr
             best_threshold = thresholds[np.argmax(j_scores)]
@@ -324,39 +296,19 @@ class MetricsTracker:
 
 
 def optimize_running_average(predictions, labels, max_window=30):
-    """
-    Finds the optimal Window Size and Count Threshold for smoothing hard predictions.
-
-    Args:
-        predictions: Binary predictions (0 or 1) from the model
-        labels: True labels (0 or 1)
-        max_window: Maximum window size to test
-
-    Returns:
-        Tuple (best_window_size, best_count_threshold)
-    """
+    """Finds the optimal Window Size and Count Threshold for smoothing hard predictions."""
     best_f1 = 0
-    best_params = (1, 1)  # Defaults
+    best_params = (1, 1)
 
     preds_np = np.array(predictions)
     labels_np = np.array(labels)
 
-    # Grid Search for Window Size
-    # Range: 5 to max_window (step 2 to keep odd windows, though even is fine for count)
     for window_size in range(5, max_window + 1):
-        # Calculate moving sum of positive predictions
         kernel = np.ones(window_size)
-        # mode='same' keeps output size same as input
         smoothed_sums = np.convolve(preds_np, kernel, mode="same")
 
-        # Grid Search for Count Threshold (X out of N)
-        # Check thresholds from 1 up to window_size
-        # We can step by 1 or more. Stepping by 1 is thorough.
         for count_threshold in range(1, window_size + 1):
-
-            # Apply threshold
             final_preds = (smoothed_sums >= count_threshold).astype(int)
-
             current_f1 = f1_score(labels_np, final_preds, zero_division=0)
 
             if current_f1 > best_f1:
@@ -369,7 +321,7 @@ def optimize_running_average(predictions, labels, max_window=30):
     return best_params
 
 
-class EEGCNNTrainer:
+class EEGTrainer:
     def __init__(self, patient_config: Dict):
         self.patient_id = patient_config["patient_id"]
         dataset_prefix = patient_config["output_prefix"]
@@ -388,28 +340,40 @@ class EEGCNNTrainer:
         # Load Data
         self.train_loader = self._create_dataloader("train")
 
-        # Use dedicated val split when available; fall back to test with a warning.
         val_h5 = self.dataset_dir / "val_dataset.h5"
         if val_h5.exists():
             self.val_loader = self._create_dataloader("val")
         else:
             print(
                 f"  WARNING: No val split found for {self.patient_id}. "
-                "Falling back to test set for monitoring (introduces leakage into model selection)."
+                "Falling back to test set for monitoring."
             )
             self.val_loader = self._create_dataloader("test")
 
-        # Initialize Dual-Stream Model
-        self.model = CNN_LSTM_Hybrid_Dual(
+        # Initialize Conv-Transformer Model
+        self.model = ConvTransformerModel(
             num_input_channels=18,
             num_classes=2,
-            lstm_hidden_dim=LSTM_HIDDEN_DIM,
-            lstm_num_layers=LSTM_NUM_LAYERS,
-            dropout=LSTM_DROPOUT,
+            sequence_length=SEQUENCE_LENGTH,
+            embed_dim=CONV_EMBEDDING_DIM,
+            num_layers=TRANSFORMER_NUM_LAYERS,
+            num_heads=TRANSFORMER_NUM_HEADS,
+            ffn_dim=TRANSFORMER_FFN_DIM,
+            dropout=TRANSFORMER_DROPOUT,
+            use_cls_token=USE_CLS_TOKEN,
         )
+
+        # Load pretrained weights if available
+        pretrained_path = Path("model") / "pretrained_encoder.pth"
+        if pretrained_path.exists():
+            print(f"Loading pretrained encoder from {pretrained_path}")
+            self.model.load_state_dict(
+                torch.load(pretrained_path, map_location=self.device, weights_only=False)
+            )
+
         self.model.to(self.device)
 
-        # Class-weighted focal loss with label smoothing
+        # Class-weighted focal loss
         train_labels = self.train_loader.dataset.labels
         counts = torch.bincount(train_labels).float()
         class_weights = counts.sum() / (len(counts) * counts)
@@ -428,20 +392,12 @@ class EEGCNNTrainer:
         self.train_metrics_history = []
         self.val_metrics_history = []
         self.best_val_auc = 0.0
-        self.best_val_recall = 0.0
 
         print(f"Model Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
 
     @property
     def positive_label(self):
         return "preictal" if TASK_MODE == "prediction" else "ictal"
-
-    def _get_device_name(self):
-        if self.device.type == "cuda":
-            return torch.cuda.get_device_name()
-        elif self.device.type == "mps":
-            return "Apple Silicon GPU (MPS)"
-        return "CPU"
 
     def _get_device(self):
         if torch.cuda.is_available():
@@ -473,15 +429,11 @@ class EEGCNNTrainer:
         total_loss = 0.0
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch+1} Train")
 
-        for x_phase, x_amp, labels in pbar:
-            x_phase, x_amp, labels = (
-                x_phase.to(self.device),
-                x_amp.to(self.device),
-                labels.to(self.device),
-            )
+        for x, labels in pbar:
+            x, labels = x.to(self.device), labels.to(self.device)
 
             self.optimizer.zero_grad()
-            outputs = self.model(x_phase, x_amp)
+            outputs = self.model(x)
             loss = self.criterion(outputs, labels)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -503,20 +455,14 @@ class EEGCNNTrainer:
         total_loss = 0.0
 
         target_loader = loader if loader is not None else self.val_loader
-
-        # Handle both integer epochs and string descriptions
         desc = f"Epoch {epoch+1} Val" if isinstance(epoch, int) else f"{epoch}"
         pbar = tqdm(target_loader, desc=desc)
 
         with torch.no_grad():
-            for x_phase, x_amp, labels in pbar:
-                x_phase, x_amp, labels = (
-                    x_phase.to(self.device),
-                    x_amp.to(self.device),
-                    labels.to(self.device),
-                )
+            for x, labels in pbar:
+                x, labels = x.to(self.device), labels.to(self.device)
 
-                outputs = self.model(x_phase, x_amp)
+                outputs = self.model(x)
                 loss = self.criterion(outputs, labels)
 
                 total_loss += loss.item()
@@ -533,14 +479,16 @@ class EEGCNNTrainer:
             "epoch": epoch,
             "model_state_dict": self.model.state_dict(),
             "best_val_auc": self.best_val_auc,
-            "config": {"patient_id": self.patient_id},
+            "config": {
+                "patient_id": self.patient_id,
+                "architecture": "conv_transformer",
+            },
         }
 
-        # Only save if we have a new best model
         if val_metrics["auc_roc"] > self.best_val_auc:
             self.best_val_auc = val_metrics["auc_roc"]
             torch.save(checkpoint, self.model_dir / "best_model.pth")
-            print(f"⭐ New Best AUC: {self.best_val_auc:.4f}")
+            print(f"  New Best AUC: {self.best_val_auc:.4f}")
 
     def save_metrics(self):
         metrics_data = {
@@ -551,6 +499,7 @@ class EEGCNNTrainer:
                 "epochs": TRAINING_EPOCHS,
                 "batch_size": SEQUENCE_BATCH_SIZE,
                 "lr": LEARNING_RATE,
+                "architecture": "conv_transformer",
             },
             "training_info": {
                 "device": str(self.device),
@@ -563,7 +512,7 @@ class EEGCNNTrainer:
     def plot_training_curves(self):
         plt.style.use("seaborn-v0_8")
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle(f"Patient {self.patient_id} Dual-Stream Training", fontsize=16)
+        fig.suptitle(f"Patient {self.patient_id} Conv-Transformer Training", fontsize=16)
 
         epochs = range(1, len(self.train_metrics_history) + 1)
         metrics = ["loss", "accuracy", "precision", "recall", "f1", "auc_roc"]
@@ -584,7 +533,7 @@ class EEGCNNTrainer:
 
     def train(self):
         print("=" * 60)
-        print(f"STARTING DUAL-STREAM TRAINING: {self.patient_id}")
+        print(f"STARTING CONV-TRANSFORMER TRAINING: {self.patient_id}")
         print("=" * 60)
 
         start_time = time.time()
@@ -629,32 +578,21 @@ class EEGCNNTrainer:
         if not best_path.exists():
             return
 
-        print(
-            f"\nPerforming final threshold tuning on best model (using Training Set)..."
-        )
-        # Load best model
+        print(f"\nPerforming final threshold tuning on best model (using Training Set)...")
         checkpoint = torch.load(best_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
 
-        # Run validation pass on TRAIN set to find optimal threshold without leakage
         train_metrics, tracker = self.validate_epoch(
             "Final Tuning (Train Set)", loader=self.train_loader
         )
 
         optimal_threshold = train_metrics["optimal_threshold"]
 
-        # Now, apply this optimal threshold to get "hard" predictions for smoothing optimization
-        # The tracker stores raw probabilities, so we can re-threshold them easily
         all_probs = np.array(tracker.probabilities)
         all_labels = np.array(tracker.true_labels)
-
-        # Generate predictions using the optimal threshold
         optimized_preds = (all_probs >= optimal_threshold).astype(int)
-
-        # Find best smoothing parameters using these optimized predictions
         best_window, best_count = optimize_running_average(optimized_preds, all_labels)
 
-        # Update checkpoint config
         if "config" not in checkpoint:
             checkpoint["config"] = {}
 
@@ -664,13 +602,119 @@ class EEGCNNTrainer:
         checkpoint["config"]["task_mode"] = TASK_MODE
 
         torch.save(checkpoint, best_path)
-        print(f"✅ Best model checkpoint updated:")
+        print(f"  Best model checkpoint updated:")
         print(f"   - Optimal Threshold: {optimal_threshold:.4f}")
         print(f"   - Smoothing Window: {best_window}")
         print(f"   - Smoothing Count: {best_count}")
 
 
+def pretrain():
+    """Cross-patient pretraining: train shared encoder on ALL patients."""
+    print("=" * 60)
+    print("CROSS-PATIENT PRETRAINING")
+    print("=" * 60)
+
+    # Device
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+    print(f"Device: {device}")
+
+    # Load train datasets from all patients
+    all_datasets = []
+    for patient_id in PATIENTS:
+        h5_path = Path("preprocessing") / "data" / patient_id / "train_dataset.h5"
+        if h5_path.exists():
+            all_datasets.append(EEGDataset(str(h5_path), split=f"train ({patient_id})"))
+        else:
+            print(f"  Skipping {patient_id}: no train dataset found")
+
+    if not all_datasets:
+        print("No datasets found for pretraining!")
+        return
+
+    combined = ConcatDataset(all_datasets)
+    print(f"\nCombined pretraining dataset: {len(combined)} samples from {len(all_datasets)} patients")
+
+    pretrain_loader = DataLoader(
+        combined,
+        batch_size=SEQUENCE_BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+    )
+
+    # Initialize model
+    model = ConvTransformerModel(
+        num_input_channels=18,
+        num_classes=2,
+        sequence_length=SEQUENCE_LENGTH,
+        embed_dim=CONV_EMBEDDING_DIM,
+        num_layers=TRANSFORMER_NUM_LAYERS,
+        num_heads=TRANSFORMER_NUM_HEADS,
+        ffn_dim=TRANSFORMER_FFN_DIM,
+        dropout=TRANSFORMER_DROPOUT,
+        use_cls_token=USE_CLS_TOKEN,
+    )
+    model.to(device)
+    print(f"Model Parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Compute class weights from combined labels
+    all_labels = torch.cat([ds.labels for ds in all_datasets])
+    counts = torch.bincount(all_labels).float()
+    class_weights = counts.sum() / (len(counts) * counts)
+
+    criterion = FocalLoss(
+        weight=class_weights.to(device), gamma=2.0, label_smoothing=0.05
+    )
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6
+    )
+
+    # Train
+    for epoch in range(TRAINING_EPOCHS):
+        model.train()
+        total_loss = 0.0
+        pbar = tqdm(pretrain_loader, desc=f"Pretrain Epoch {epoch+1}/{TRAINING_EPOCHS}")
+
+        for x, labels in pbar:
+            x, labels = x.to(device), labels.to(device)
+            optimizer.zero_grad()
+            outputs = model(x)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            total_loss += loss.item()
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+
+        avg_loss = total_loss / len(pretrain_loader)
+        scheduler.step(avg_loss)
+        print(f"  Epoch {epoch+1} avg loss: {avg_loss:.4f}")
+
+    # Save pretrained weights
+    save_dir = Path("model")
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_path = save_dir / "pretrained_encoder.pth"
+    torch.save(model.state_dict(), save_path)
+    print(f"\nPretrained encoder saved to {save_path}")
+
+
 def main():
+    parser = argparse.ArgumentParser(description="EEG Conv-Transformer Training")
+    parser.add_argument(
+        "--pretrain", action="store_true",
+        help="Run cross-patient pretraining instead of per-patient fine-tuning"
+    )
+    args = parser.parse_args()
+
+    if args.pretrain:
+        pretrain()
+        return
+
     n_patients = len(PATIENTS)
     if PATIENT_INDEX is None:
         patients_to_process = list(range(n_patients))
@@ -680,7 +724,7 @@ def main():
     for current_idx in patients_to_process:
         patient_config = get_patient_config(current_idx)
         try:
-            EEGCNNTrainer(patient_config).train()
+            EEGTrainer(patient_config).train()
         except Exception as e:
             print(f"Error {patient_config['patient_id']}: {e}")
             import traceback

@@ -508,15 +508,16 @@ def create_sequences_single_patient(patient_id):
 def assign_patient_splits(sequences, patient_id, random_seed=42):
     """Assign sequences to train/val/test splits for a single patient.
 
-    Strategy (randomized sequence-level split):
-    - All sequences are shuffled and randomly assigned to train/val/test
-      using the configured ratios (default 80/10/10).
-    - Sequences from the same seizure may appear in different splits.
+    Strategy (leave-one-seizure-out for test):
+    - One seizure is randomly selected and ALL its positive sequences go to test.
+    - Remaining seizures' positive sequences are split into train/val.
+    - Interictal sequences are distributed proportionally across splits.
+    - Each split is independently class-balanced.
 
     Args:
         sequences: List of all sequence dictionaries for the patient
         patient_id: Patient ID
-        random_seed: Seed for deterministic shuffling and balancing
+        random_seed: Seed for deterministic seizure selection and balancing
 
     Returns:
         Tuple of (retained_sequences, split_counts, balance_stats)
@@ -526,26 +527,87 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     # 1. Get patient data
     patient_seqs = [s for s in sequences if s["patient_id"] == patient_id]
 
-    # 2. Shuffle all sequences randomly
+    # 2. Identify unique seizure IDs from positive sequences
+    positive_seqs = [s for s in patient_seqs if s["type"] == positive_label]
+    interictal_seqs = [s for s in patient_seqs if s["type"] == "interictal"]
+
+    seizure_ids = sorted(set(s["seizure_id"] for s in positive_seqs if s.get("seizure_id") is not None))
+
+    if len(seizure_ids) < 2:
+        print(f"\nPatient {patient_id}: Only {len(seizure_ids)} seizure(s), cannot leave one out.")
+        print("  Falling back to randomized split.")
+        # Fallback: randomized split
+        rng = random.Random(random_seed)
+        rng.shuffle(patient_seqs)
+        n = len(patient_seqs)
+        n_train = int(n * TRAIN_RATIO)
+        n_val = int(n * VAL_RATIO)
+        train_sequences = patient_seqs[:n_train]
+        val_sequences = patient_seqs[n_train:n_train + n_val]
+        test_sequences = patient_seqs[n_train + n_val:]
+        for seq in train_sequences:
+            seq["split"] = "train"
+        for seq in val_sequences:
+            seq["split"] = "val"
+        for seq in test_sequences:
+            seq["split"] = "test"
+        splits = {"train": train_sequences, "val": val_sequences, "test": test_sequences}
+        balanced_splits, balance_stats = balance_sequences_across_splits(
+            splits, positive_label, random_seed
+        )
+        retained_sequences = []
+        for split_name in ["train", "val", "test"]:
+            retained_sequences.extend(balanced_splits[split_name])
+        split_counts = {
+            split_name: {
+                "total": len(split_seqs),
+                positive_label: sum(1 for seq in split_seqs if seq["type"] == positive_label),
+                "interictal": sum(1 for seq in split_seqs if seq["type"] == "interictal"),
+            }
+            for split_name, split_seqs in balanced_splits.items()
+        }
+        return retained_sequences, split_counts, balance_stats
+
+    # 3. Randomly select one seizure to hold out for test
     rng = random.Random(random_seed)
-    rng.shuffle(patient_seqs)
+    test_seizure_id = rng.choice(seizure_ids)
+    remaining_seizure_ids = [sid for sid in seizure_ids if sid != test_seizure_id]
 
-    # 3. Split by ratio
-    n = len(patient_seqs)
-    n_train = int(n * TRAIN_RATIO)
-    n_val = int(n * VAL_RATIO)
-    # Test gets the remainder to avoid rounding loss
-    train_sequences = patient_seqs[:n_train]
-    val_sequences = patient_seqs[n_train:n_train + n_val]
-    test_sequences = patient_seqs[n_train + n_val:]
+    print(f"\nPatient {patient_id} Leave-One-Seizure-Out Split:")
+    print(f"  Total seizures: {len(seizure_ids)} (IDs: {seizure_ids})")
+    print(f"  Test seizure: {test_seizure_id}")
+    print(f"  Train/val seizures: {remaining_seizure_ids}")
 
-    print(f"\nPatient {patient_id} Randomized Split:")
-    print(f"  Total sequences: {n}")
-    print(f"  Train: {len(train_sequences)} ({TRAIN_RATIO:.0%})")
-    print(f"  Val:   {len(val_sequences)} ({VAL_RATIO:.0%})")
-    print(f"  Test:  {len(test_sequences)} ({TEST_RATIO:.0%})")
+    # 4. Split positive sequences by seizure
+    test_positive = [s for s in positive_seqs if s.get("seizure_id") == test_seizure_id]
+    remaining_positive = [s for s in positive_seqs if s.get("seizure_id") != test_seizure_id]
 
-    # 4. Assign split labels
+    # Split remaining positive into train/val (proportional: ~VAL_RATIO of remainder goes to val)
+    rng.shuffle(remaining_positive)
+    val_ratio_adjusted = VAL_RATIO / (TRAIN_RATIO + VAL_RATIO)
+    n_val_positive = max(1, int(len(remaining_positive) * val_ratio_adjusted))
+    val_positive = remaining_positive[:n_val_positive]
+    train_positive = remaining_positive[n_val_positive:]
+
+    # 5. Distribute interictal sequences proportionally
+    rng.shuffle(interictal_seqs)
+    n_total = len(interictal_seqs)
+    n_test_inter = max(1, int(n_total * TEST_RATIO))
+    n_val_inter = max(1, int(n_total * VAL_RATIO))
+    test_interictal = interictal_seqs[:n_test_inter]
+    val_interictal = interictal_seqs[n_test_inter:n_test_inter + n_val_inter]
+    train_interictal = interictal_seqs[n_test_inter + n_val_inter:]
+
+    # 6. Assemble splits
+    train_sequences = train_positive + train_interictal
+    val_sequences = val_positive + val_interictal
+    test_sequences = test_positive + test_interictal
+
+    print(f"  Test positive ({positive_label}): {len(test_positive)} (seizure {test_seizure_id})")
+    print(f"  Train positive: {len(train_positive)}, Val positive: {len(val_positive)}")
+    print(f"  Interictal distribution: train={len(train_interictal)}, val={len(val_interictal)}, test={len(test_interictal)}")
+
+    # 7. Assign split labels
     for seq in train_sequences:
         seq["split"] = "train"
     for seq in val_sequences:
@@ -555,7 +617,7 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
 
     splits = {"train": train_sequences, "val": val_sequences, "test": test_sequences}
 
-    # 5. Balance each split by downsampling majority class
+    # 8. Balance each split by downsampling majority class
     balanced_splits, balance_stats = balance_sequences_across_splits(
         splits, positive_label, random_seed
     )

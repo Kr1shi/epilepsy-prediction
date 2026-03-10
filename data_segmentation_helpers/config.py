@@ -31,28 +31,28 @@ TEST_RATIO = 0.1
 
 # Patients to include in processing
 PATIENTS = [
-    #"chb01",   # 7 seizures
-    #"chb02",   # 3 seizures
-    #"chb03",   # 7 seizures
-    #"chb04",   # 4 seizures
-    #"chb05",   # 5 seizures
+    "chb01",   # 7 seizures
+    "chb02",   # 3 seizures
+    "chb03",   # 7 seizures
+    "chb04",   # 4 seizures
+    "chb05",   # 5 seizures
     "chb06",    # 10 seizures  ← top 5
-    #"chb07",   # 3 seizures
-    #"chb08",   # 5 seizures
-    #"chb09",   # 4 seizures
-    #"chb10",   # 7 seizures
-    #"chb11",   # 3 seizures
+    "chb07",   # 3 seizures
+    "chb08",   # 5 seizures
+    "chb09",   # 4 seizures
+    "chb10",   # 7 seizures
+    "chb11",   # 3 seizures
     "chb13",    # 12 seizures  ← top 5
     "chb14",    # 8 seizures   ← top 5 (tied)
     "chb15",    # 20 seizures  ← top 5
     "chb16",    # 10 seizures  ← top 5
-    #"chb17",   # 3 seizures
-    #"chb18",   # 6 seizures
-    #"chb19",   # 3 seizures
+    "chb17",   # 3 seizures
+    "chb18",   # 6 seizures
+    "chb19",   # 3 seizures
     "chb20",    # 8 seizures   ← top 5 (tied)
-    #"chb21",   # 4 seizures
-    #"chb22",   # 3 seizures
-    #"chb23",   # 7 seizures
+    "chb21",   # 4 seizures
+    "chb22",   # 3 seizures
+    "chb23",   # 7 seizures
 ]
 
 # Current patient index to process (0 to len(PATIENTS)-1, or None for all)

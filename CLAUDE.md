@@ -70,8 +70,12 @@ Raw EEG Files (EDF)
 - `PREICTAL_ONSET_BUFFER = 10 * 60` defines the zone end (10 min before seizure)
 - The 10-min buffer ensures the model predicts seizures with enough clinical lead time
 
-**Randomized Sequence-Level Split**:
-- All sequences are shuffled and randomly assigned to **train/val/test** using configurable ratios (default 80/10/10)
+**Leave-One-Seizure-Out Split**:
+- One seizure is randomly held out for **test** — all its positive sequences go to the test set
+- Remaining seizures' positive sequences are split into **train/val** proportionally
+- Interictal sequences are distributed across splits by ratio
+- Each split is independently class-balanced
+- Falls back to randomized split if a patient has fewer than 2 seizures
 - Split ratios configured via `TRAIN_RATIO`, `VAL_RATIO`, `TEST_RATIO` in config.py
 
 **Adaptive Sliding Window**:
@@ -243,7 +247,7 @@ HDF5 format: `spectrograms` dataset with shape `(N, 360, 18, 128, 9)`. All prepr
 
 ## Known Issues / Limitations
 
-- **Sequence-level random split** means sequences from the same seizure may appear in multiple splits — this is intentional for maximizing data utilization
+- **Leave-one-seizure-out test split** ensures the test seizure is never seen during training, providing rigorous evaluation
 - **Near-duplicate positive samples**: ~97% sequence overlap in preictal regions creates many highly similar training examples
 - **Large sample size**: each 30-min window is ~30MB, requiring lazy HDF5 loading and small batch sizes
 - **No data augmentation** is applied during training

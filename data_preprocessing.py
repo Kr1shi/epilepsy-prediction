@@ -413,6 +413,13 @@ class EEGPreprocessor:
             mean, std = self.checkpoint["global_mean"], self.checkpoint["global_std"]
 
         self.create_final_datasets(mean, std)
+
+        # Clean up intermediate files to save disk space
+        import shutil
+        if self.intermediate_dir.exists():
+            shutil.rmtree(self.intermediate_dir)
+            self.logger.info(f"Deleted intermediate files: {self.intermediate_dir}")
+
         self.logger.info("Preprocessing complete.")
 
 

@@ -37,6 +37,7 @@ from data_segmentation_helpers.config import (
     TRANSFORMER_FFN_DIM,
     TRANSFORMER_DROPOUT,
     USE_CLS_TOKEN,
+    PRETRAINING_EPOCHS,
     TRAINING_EPOCHS,
     LEARNING_RATE,
     WEIGHT_DECAY,
@@ -75,10 +76,11 @@ class FocalLoss(nn.Module):
 class EEGDataset(Dataset):
     """Single-Stream Dataset with lazy HDF5 loading for large 30-min windows."""
 
-    def __init__(self, h5_file_path, split="train"):
+    def __init__(self, h5_file_path, split="train", augment=False):
         self.h5_file_path = h5_file_path
         self.split = split
         self.h5_file = None
+        self.augment = augment and (split == "train")
 
         with h5py.File(h5_file_path, "r") as f:
             if "spectrograms_phase" in f or "spectrograms_amp" in f:
@@ -94,6 +96,8 @@ class EEGDataset(Dataset):
 
         print(f"Loaded {self.split} dataset: {self.length} samples")
         print(f"  - Class Dist: {torch.bincount(self.labels)}")
+        if self.augment:
+            print(f"  - Augmentation: ENABLED")
 
     def _open_h5(self):
         if self.h5_file is None:
@@ -102,12 +106,39 @@ class EEGDataset(Dataset):
     def __len__(self):
         return self.length
 
+    def _apply_augmentation(self, x):
+        """Apply spectrogram augmentation.
+        x: (sequence_length, channels, freq_bins, time_bins)
+        """
+        # Time masking: zero out random contiguous segments in the sequence
+        if torch.rand(1).item() < 0.5:
+            seq_len = x.shape[0]
+            mask_len = torch.randint(1, max(2, seq_len // 10), (1,)).item()
+            start = torch.randint(0, seq_len - mask_len + 1, (1,)).item()
+            x[start : start + mask_len] = 0.0
+
+        # Frequency masking: zero out random frequency bands
+        if torch.rand(1).item() < 0.5:
+            freq_bins = x.shape[2]
+            mask_len = torch.randint(1, max(2, freq_bins // 8), (1,)).item()
+            start = torch.randint(0, freq_bins - mask_len + 1, (1,)).item()
+            x[:, :, start : start + mask_len, :] = 0.0
+
+        # Gaussian noise
+        if torch.rand(1).item() < 0.5:
+            noise_std = 0.05 * x.std()
+            x = x + torch.randn_like(x) * noise_std
+
+        return x
+
     def __getitem__(self, idx):
         """Returns: (spectrogram, label)
         spectrogram: (sequence_length, channels, freq_bins, time_bins)
         """
         self._open_h5()
         x = torch.FloatTensor(self.h5_file["spectrograms"][idx])
+        if self.augment:
+            x = self._apply_augmentation(x)
         return x, self.labels[idx]
 
     def __del__(self):
@@ -423,7 +454,7 @@ class EEGTrainer:
         if not h5_file.exists():
             raise FileNotFoundError(f"Missing {h5_file}")
 
-        dataset = EEGDataset(str(h5_file), split=split)
+        dataset = EEGDataset(str(h5_file), split=split, augment=(split == "train"))
         return DataLoader(
             dataset,
             batch_size=SEQUENCE_BATCH_SIZE,
@@ -637,7 +668,7 @@ def pretrain():
     for patient_id in PATIENTS:
         h5_path = Path("preprocessing") / "data" / patient_id / "train_dataset.h5"
         if h5_path.exists():
-            all_datasets.append(EEGDataset(str(h5_path), split=f"train ({patient_id})"))
+            all_datasets.append(EEGDataset(str(h5_path), split=f"train ({patient_id})", augment=True))
         else:
             print(f"  Skipping {patient_id}: no train dataset found")
 
@@ -684,10 +715,10 @@ def pretrain():
     )
 
     # Train
-    for epoch in range(TRAINING_EPOCHS):
+    for epoch in range(PRETRAINING_EPOCHS):
         model.train()
         total_loss = 0.0
-        pbar = tqdm(pretrain_loader, desc=f"Pretrain Epoch {epoch+1}/{TRAINING_EPOCHS}")
+        pbar = tqdm(pretrain_loader, desc=f"Pretrain Epoch {epoch+1}/{PRETRAINING_EPOCHS}")
 
         for x, labels in pbar:
             x, labels = x.to(device), labels.to(device)

@@ -449,7 +449,8 @@ def main():
                 window_size = SMOOTHING_T
                 model_precision = metrics["precision"]
                 target_count = int(round(model_precision * window_size))
-                threshold_x = max(1, min(target_count - 1, window_size))
+                # Cap at 50% of window to avoid near-unanimity requirement
+                threshold_x = max(1, min(target_count - 1, window_size // 2))
                 print(f"\nApplying smoothing using HEURISTIC parameters (fallback):")
                 print(f"  - Window Size: {window_size}")
                 print(

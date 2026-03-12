@@ -40,6 +40,7 @@ from data_segmentation_helpers.config import (
     PRETRAINING_EPOCHS,
     TRAINING_EPOCHS,
     LEARNING_RATE,
+    FINETUNING_LEARNING_RATE,
     WEIGHT_DECAY,
     PATIENTS,
     PATIENT_INDEX,
@@ -422,7 +423,7 @@ class EEGTrainer:
         )
 
         self.optimizer = optim.Adam(
-            self.model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+            self.model.parameters(), lr=FINETUNING_LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -618,15 +619,15 @@ class EEGTrainer:
         if not best_path.exists():
             return
 
-        print(f"\nPerforming final threshold tuning on best model (using Training Set)...")
+        print(f"\nPerforming final threshold tuning on best model (using Validation Set)...")
         checkpoint = torch.load(best_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
 
-        train_metrics, tracker = self.validate_epoch(
-            "Final Tuning (Train Set)", loader=self.train_loader
+        val_metrics, tracker = self.validate_epoch(
+            "Final Tuning (Val Set)", loader=self.val_loader
         )
 
-        optimal_threshold = train_metrics["optimal_threshold"]
+        optimal_threshold = val_metrics["optimal_threshold"]
 
         all_probs = np.array(tracker.probabilities)
         all_labels = np.array(tracker.true_labels)

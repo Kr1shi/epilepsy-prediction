@@ -72,8 +72,14 @@ def calculate_per_seizure_accuracy(
     sorted_raw_predictions = np.array(raw_predictions)[sorted_indices]
 
     # --- 2. Smoothing on Sorted Data ---
+    # Cap window size to not exceed available data
+    if window_size > len(sorted_raw_predictions):
+        original_window = window_size
+        window_size = max(1, len(sorted_raw_predictions))
+        threshold_x = max(1, round(threshold_x * window_size / original_window))
+
     sorted_smoothed_predictions = apply_smoothing(sorted_raw_predictions, window_size, threshold_x)
-    
+
     # The smoothed predictions are shorter. We need to align the labels.
     offset = window_size - 1
     aligned_labels = sorted_labels[offset:]
@@ -95,9 +101,12 @@ def calculate_per_seizure_accuracy(
 
     if num_seizures > 0:
         for i, (start_idx, end_idx) in enumerate(zip(seizure_starts, seizure_ends)):
+            # smoothed[i] covers original positions [i, i+T).
+            # A seizure at [start, end) is detectable by any smoothed[i] where
+            # the window overlaps: i < end AND i+T > start → i >= start-offset
             smoothed_start = max(0, start_idx - offset)
-            smoothed_end = end_idx - offset
-            
+            smoothed_end = min(len(sorted_smoothed_predictions), end_idx)
+
             if smoothed_start < smoothed_end:
                 prediction_slice = sorted_smoothed_predictions[smoothed_start:smoothed_end]
                 if np.sum(prediction_slice) > 0:

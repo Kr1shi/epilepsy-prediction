@@ -127,7 +127,8 @@ USE_CLS_TOKEN = True             # CLS token pooling (vs mean pooling)
 PRETRAINING_EPOCHS = 60   # Cross-patient pretraining (more epochs for shared encoder)
 TRAINING_EPOCHS = 30      # Per-patient fine-tuning
 SEQUENCE_BATCH_SIZE = 4   # Reduced for 30-min windows (~30MB per sample)
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 1e-4      # Pretraining LR
+FINETUNING_LEARNING_RATE = 5e-5  # Lower LR for fine-tuning to preserve pretrained features
 WEIGHT_DECAY = 1e-4
 NUM_WORKERS = 0  # Must be 0 for lazy HDF5 loading
 

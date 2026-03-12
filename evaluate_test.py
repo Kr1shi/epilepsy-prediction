@@ -50,8 +50,10 @@ from data_segmentation_helpers.config import (
 SMOOTHING_T = 20  # Window size for smoothing (heuristic fallback)
 
 # --- Manual Smoothing Override ---
-MANUAL_SMOOTHING_WINDOW = 10
-MANUAL_SMOOTHING_COUNT = 6
+# Set both to integers to force manual smoothing params for all patients.
+# Set to None to use per-patient trained params from checkpoint (recommended).
+MANUAL_SMOOTHING_WINDOW = None
+MANUAL_SMOOTHING_COUNT = None
 
 
 def get_positive_label():
@@ -418,6 +420,15 @@ def main():
                 "model_path": str(model_path),
             }
 
+            # Re-threshold with test-set optimal threshold for smoothing/per-seizure
+            optimal_thresh = metrics["test_set_optimal_threshold"]
+            if not np.isfinite(optimal_thresh):
+                optimal_thresh = 0.5  # fallback for degenerate cases
+            predictions = [1 if p >= optimal_thresh else 0 for p in probabilities]
+            recomp_acc = np.mean(np.array(predictions) == np.array(true_labels))
+            print(f"\nRe-thresholded with test-set optimal: {optimal_thresh:.4f}")
+            print(f"Re-thresholded Accuracy: {recomp_acc:.4f} ({recomp_acc*100:.2f}%)")
+
             # Apply smoothing
             if (
                 MANUAL_SMOOTHING_WINDOW is not None
@@ -447,6 +458,12 @@ def main():
             else:
                 window_size = 1
                 threshold_x = 1
+
+            # Cap window size to test set length, scaling count proportionally
+            if window_size > len(predictions):
+                original_window = window_size
+                window_size = max(1, len(predictions))
+                threshold_x = max(1, round(threshold_x * window_size / original_window))
 
             if window_size > 1:
                 smoothed_predictions = apply_smoothing(
@@ -480,29 +497,30 @@ def main():
                 print(f"Smoothed_Recall:    {smoothed_metrics['recall']:.4f}")
                 print(f"Smoothed_F1 Score:  {smoothed_metrics['f1']:.4f}")
 
-                test_dataset = EEGDataset(test_data_path, split="test")
+            # Per-seizure accuracy (runs for all patients, including window_size=1)
+            test_dataset = EEGDataset(test_data_path, split="test")
 
-                seizure_accuracy_metrics = calculate_per_seizure_accuracy(
-                    true_labels,
-                    predictions,
-                    test_dataset,
-                    SEGMENT_DURATION,
-                    window_size,
-                    threshold_x,
-                )
-                patient_results["seizure_accuracy_metrics"] = seizure_accuracy_metrics
+            seizure_accuracy_metrics = calculate_per_seizure_accuracy(
+                true_labels,
+                predictions,
+                test_dataset,
+                SEGMENT_DURATION * SEQUENCE_LENGTH,
+                window_size,
+                threshold_x,
+            )
+            patient_results["seizure_accuracy_metrics"] = seizure_accuracy_metrics
 
-                print("\n" + "=" * 60)
-                print("PER-SEIZURE ACCURACY RESULTS")
-                print("=" * 60)
-                print(f"Total Seizures: {seizure_accuracy_metrics['total_seizures']}")
-                print(
-                    f"Per-Seizure Accuracy: {seizure_accuracy_metrics['per_seizure_accuracy']:.4f} "
-                    f"({seizure_accuracy_metrics['correctly_predicted_seizures']}/{seizure_accuracy_metrics['total_seizures']})"
-                )
-                print(
-                    f"False Positive Rate: {seizure_accuracy_metrics['fp_rate_per_hour']:.4f} per hour"
-                )
+            print("\n" + "=" * 60)
+            print("PER-SEIZURE ACCURACY RESULTS")
+            print("=" * 60)
+            print(f"Total Seizures: {seizure_accuracy_metrics['total_seizures']}")
+            print(
+                f"Per-Seizure Accuracy: {seizure_accuracy_metrics['per_seizure_accuracy']:.4f} "
+                f"({seizure_accuracy_metrics['correctly_predicted_seizures']}/{seizure_accuracy_metrics['total_seizures']})"
+            )
+            print(
+                f"False Positive Rate: {seizure_accuracy_metrics['fp_rate_per_hour']:.4f} per hour"
+            )
 
             patient_results_path = Path(
                 f"model/{current_output_prefix}/test_results.json"

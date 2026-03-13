@@ -70,15 +70,18 @@ def identify_positive_regions(all_seizures_global):
 
     for seizure in all_seizures_global:
         if TASK_MODE == "prediction":
-            # Prediction mode: preictal window before seizure
+            # Prediction mode: preictal window before seizure with onset buffer
             seizure_start_global = seizure["start_sec_global"]
             preictal_window_start_global = max(
                 0, seizure_start_global - PREICTAL_WINDOW
             )
-            # Region: from preictal window start to seizure start
-            positive_regions.append(
-                (preictal_window_start_global, seizure_start_global)
-            )
+            # Region: from preictal window start to onset buffer
+            # Effective zone: [-40min, -10min] before seizure
+            preictal_zone_end = seizure_start_global - PREICTAL_ONSET_BUFFER
+            if preictal_zone_end > preictal_window_start_global:
+                positive_regions.append(
+                    (preictal_window_start_global, preictal_zone_end)
+                )
 
         elif TASK_MODE == "detection":
             # Detection mode: during seizure
@@ -186,17 +189,18 @@ def create_sequences_from_file(
         # PASS 1: Check for positive class (preictal OR ictal depending on mode)
         if TASK_MODE == "prediction":
             # Prediction mode: Check if preictal for ANY seizure (takes priority)
+            # Preictal zone: [-PREICTAL_WINDOW, -PREICTAL_ONSET_BUFFER] before seizure
             for seizure in all_seizures_global:
                 seizure_start_global = seizure["start_sec_global"]
 
-                # Check if last segment falls in preictal window (10 minutes before seizure)
                 preictal_window_start_global = max(
                     0, seizure_start_global - PREICTAL_WINDOW
                 )
+                preictal_zone_end = seizure_start_global - PREICTAL_ONSET_BUFFER
 
                 if (
                     preictal_window_start_global <= last_segment_start_global
-                    and last_segment_end_global <= seizure_start_global
+                    and last_segment_end_global <= preictal_zone_end
                 ):
                     sequence_type = "preictal"
                     time_to_seizure = seizure_start_global - last_segment_end_global
@@ -230,12 +234,12 @@ def create_sequences_from_file(
                 seizure_end_global = seizure["end_sec_global"]
 
                 if TASK_MODE == "prediction":
-                    # Prediction mode: Exclude 50-min buffer before preictal window
+                    # Prediction mode: Exclude buffer before preictal window
                     preictal_window_start_global = max(
                         0, seizure_start_global - PREICTAL_WINDOW
                     )
 
-                    # Buffer zone 1: [seizure_start - 60min, seizure_start - 10min) - before preictal window
+                    # Buffer zone 1: [seizure_start - INTERICTAL_BUFFER, preictal_window_start) - before preictal
                     buffer_before_start_global = max(
                         0, seizure_start_global - INTERICTAL_BUFFER
                     )
@@ -249,12 +253,14 @@ def create_sequences_from_file(
                         in_excluded_zone = True
                         break
 
-                    # Buffer zone 2: [seizure_start, seizure_end + 60min] - during and after seizure
+                    # Buffer zone 2: onset buffer [-10min, seizure_start] + ictal + post-ictal
+                    # The onset buffer gap is excluded (too close to seizure for useful prediction)
+                    onset_buffer_start = seizure_start_global - PREICTAL_ONSET_BUFFER
                     buffer_after_end_global = seizure_end_global + INTERICTAL_BUFFER
 
-                    # Check if sequence overlaps with ictal + post-ictal buffer
+                    # Check if sequence overlaps with onset buffer + ictal + post-ictal
                     if not (
-                        sequence_end_global <= seizure_start_global
+                        sequence_end_global <= onset_buffer_start
                         or sequence_start_global >= buffer_after_end_global
                     ):
                         in_excluded_zone = True
@@ -497,34 +503,67 @@ def create_sequences_single_patient(patient_id):
 
 
 def assign_patient_splits(sequences, patient_id, random_seed=42):
-    """Assign sequences to train/test splits for a single patient.
+    """Assign sequences to train/val/test splits for a single patient.
 
-    Strategy:
-    - Train set: All seizures except the last one (past)
-    - Test set: The last seizure (future)
+    Strategy (leave-one-seizure-out for test):
+    - One seizure is randomly selected and ALL its positive sequences go to test.
+    - Remaining seizures' positive sequences are split into train/val.
+    - Interictal sequences are distributed proportionally across splits.
+    - Each split is independently class-balanced.
 
     Args:
         sequences: List of all sequence dictionaries for the patient
         patient_id: Patient ID
-        random_seed: Seed for deterministic balancing
+        random_seed: Seed for deterministic seizure selection and balancing
 
     Returns:
         Tuple of (retained_sequences, split_counts, balance_stats)
     """
     positive_label = "preictal" if TASK_MODE == "prediction" else "ictal"
 
-    # 1. Get Patient data
+    # 1. Get patient data
     patient_seqs = [s for s in sequences if s["patient_id"] == patient_id]
 
-    # 2. Identify unique seizures for this patient
-    patient_seizure_ids = sorted(
-        list(
-            set(
-                s["seizure_id"] for s in patient_seqs if s.get("seizure_id") is not None
-            )
+    # 2. Identify unique seizure IDs from positive sequences
+    positive_seqs = [s for s in patient_seqs if s["type"] == positive_label]
+    interictal_seqs = [s for s in patient_seqs if s["type"] == "interictal"]
+
+    seizure_ids = sorted(set(s["seizure_id"] for s in positive_seqs if s.get("seizure_id") is not None))
+
+    if len(seizure_ids) < 2:
+        print(f"\nPatient {patient_id}: Only {len(seizure_ids)} seizure(s), cannot leave one out.")
+        print("  Falling back to randomized split.")
+        # Fallback: randomized split
+        rng = random.Random(random_seed)
+        rng.shuffle(patient_seqs)
+        n = len(patient_seqs)
+        n_train = int(n * TRAIN_RATIO)
+        n_val = int(n * VAL_RATIO)
+        train_sequences = patient_seqs[:n_train]
+        val_sequences = patient_seqs[n_train:n_train + n_val]
+        test_sequences = patient_seqs[n_train + n_val:]
+        for seq in train_sequences:
+            seq["split"] = "train"
+        for seq in val_sequences:
+            seq["split"] = "val"
+        for seq in test_sequences:
+            seq["split"] = "test"
+        splits = {"train": train_sequences, "val": val_sequences, "test": test_sequences}
+        balanced_splits, balance_stats = balance_sequences_across_splits(
+            splits, positive_label, random_seed
         )
-    )
-    num_seizures = len(patient_seizure_ids)
+        retained_sequences = []
+        for split_name in ["train", "val", "test"]:
+            retained_sequences.extend(balanced_splits[split_name])
+        split_counts = {
+            split_name: {
+                "total": len(split_seqs),
+                positive_label: sum(1 for seq in split_seqs if seq["type"] == positive_label),
+                "interictal": sum(1 for seq in split_seqs if seq["type"] == "interictal"),
+            }
+            for split_name, split_seqs in balanced_splits.items()
+        }
+        return retained_sequences, split_counts, balance_stats
 
     # 3. Determine split: 70% Train, 30% Test (Chronological split)
     if num_seizures > 0:
@@ -599,10 +638,9 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
         1 for seq in test_sequences if seq["type"] == "interictal"
     )
 
-    if test_interictal_count == 0:
-        print(
-            f"  Warning: Test set has 0 interictal sequences. Moving sequences from train set..."
-        )
+    print(f"  Test positive ({positive_label}): {len(test_positive)} (seizure {test_seizure_id})")
+    print(f"  Train positive: {len(train_positive)}, Val positive: {len(val_positive)}")
+    print(f"  Interictal distribution: train={len(train_interictal)}, val={len(val_interictal)}, test={len(test_interictal)}")
 
         # Identify available interictal sequences in train
         train_interictal_indices = [
@@ -655,7 +693,7 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     #     seq["split"] = "test"
     # splits = {"train": train_sequences, "test": test_sequences}
 
-    # Balance each split by downsampling majority class
+    # 8. Balance each split by downsampling majority class
     balanced_splits, balance_stats = balance_sequences_across_splits(
         all_splits, positive_label, random_seed
     )
@@ -719,23 +757,24 @@ def balance_sequences_across_splits(splits, positive_label, random_seed=42):
             }
             continue
 
-        # Determine target counts based on ratio
-        # We want to keep all positives if possible
-        target_positive = len(positives)
-        
-        # Calculate target interictals based on ratio
-        target_interictal = int(len(positives) * INTERICTAL_TO_PREICTAL_RATIO)
-        
-        # Cap at available interictals
-        target_interictal = min(target_interictal, len(interictals))
-
+        # Balance classes: downsample whichever is larger
+        # With ratio=1.0, target equal counts; with ratio=2.0, allow 2x interictal
         rng.shuffle(positives)
         rng.shuffle(interictals)
 
+        if len(interictals) >= len(positives):
+            # More interictal than positive: downsample interictal (original behavior)
+            target_positive = len(positives)
+            target_interictal = min(int(len(positives) * INTERICTAL_TO_PREICTAL_RATIO), len(interictals))
+        else:
+            # More positive than interictal: downsample positive to match
+            target_interictal = len(interictals)
+            target_positive = min(int(len(interictals) / INTERICTAL_TO_PREICTAL_RATIO), len(positives))
+
         kept_positive = positives[:target_positive]
         kept_interictal = interictals[:target_interictal]
-        dropped_positive = max(0, len(positives) - target_positive) # Should be 0
-        dropped_interictal = max(0, len(interictals) - target_interictal)
+        dropped_positive = len(positives) - target_positive
+        dropped_interictal = len(interictals) - target_interictal
 
         combined = kept_positive + kept_interictal
         rng.shuffle(combined)

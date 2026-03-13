@@ -27,15 +27,18 @@ import argparse
 import matplotlib.pyplot as plt
 
 # Import from train.py
-from train import EEGDataset, CNN_LSTM_Hybrid_Dual, MetricsTracker
+from train import EEGDataset, ConvTransformerModel, MetricsTracker
 from total_accuracy import calculate_per_seizure_accuracy
 from data_segmentation_helpers.config import (
     TASK_MODE,
     SEQUENCE_LENGTH,
     SEQUENCE_BATCH_SIZE,
-    LSTM_HIDDEN_DIM,
-    LSTM_NUM_LAYERS,
-    LSTM_DROPOUT,
+    CONV_EMBEDDING_DIM,
+    TRANSFORMER_NUM_LAYERS,
+    TRANSFORMER_NUM_HEADS,
+    TRANSFORMER_FFN_DIM,
+    TRANSFORMER_DROPOUT,
+    USE_CLS_TOKEN,
     TRAINING_EPOCHS,
     PATIENTS,
     PATIENT_INDEX,
@@ -61,17 +64,7 @@ def get_positive_label():
 
 
 def apply_smoothing(all_predictions, t, x):
-    """
-    Apply smoothing to a list of predictions.
-
-    Args:
-        all_predictions: List of predictions.
-        t: Window size for smoothing.
-        x: Minimum number of positive predictions in the window.
-
-    Returns:
-        List of smoothed predictions.
-    """
+    """Apply smoothing to a list of predictions."""
     smoothed_predictions = []
     for i in range(len(all_predictions) - t + 1):
         window = all_predictions[i : i + t]
@@ -82,19 +75,23 @@ def apply_smoothing(all_predictions, t, x):
     return smoothed_predictions
 
 
+def _create_model(device):
+    """Create a ConvTransformerModel instance."""
+    return ConvTransformerModel(
+        num_input_channels=18,
+        num_classes=2,
+        sequence_length=SEQUENCE_LENGTH,
+        embed_dim=CONV_EMBEDDING_DIM,
+        num_layers=TRANSFORMER_NUM_LAYERS,
+        num_heads=TRANSFORMER_NUM_HEADS,
+        ffn_dim=TRANSFORMER_FFN_DIM,
+        dropout=TRANSFORMER_DROPOUT,
+        use_cls_token=USE_CLS_TOKEN,
+    )
+
+
 def evaluate_model(model_path, test_data_path, device):
-    """
-    Load trained model and evaluate on test dataset
-
-    Args:
-        model_path: Path to saved model checkpoint (.pth file)
-        test_data_path: Path to test dataset HDF5 file
-        device: torch device to use
-
-    Returns:
-        tuple: (metrics, cm, all_labels, all_predictions, all_probabilities,
-                checkpoint_task_mode, positive_class, smoothing_window, smoothing_count)
-    """
+    """Load trained model and evaluate on test dataset."""
     # Load test dataset
     print(f"Loading test dataset from {test_data_path}...")
     test_dataset = EEGDataset(test_data_path, split="test")
@@ -106,15 +103,8 @@ def evaluate_model(model_path, test_data_path, device):
         pin_memory=True if device.type == "cuda" else False,
     )
 
-    # Initialize Dual-Stream Model
-    model = CNN_LSTM_Hybrid_Dual(
-        num_input_channels=18,
-        num_classes=2,
-        sequence_length=SEQUENCE_LENGTH,
-        lstm_hidden_dim=LSTM_HIDDEN_DIM,
-        lstm_num_layers=LSTM_NUM_LAYERS,
-        dropout=LSTM_DROPOUT,
-    )
+    # Initialize Conv-Transformer Model
+    model = _create_model(device)
 
     # Load trained weights
     print(f"Loading model checkpoint from {model_path}...")
@@ -159,23 +149,16 @@ def evaluate_model(model_path, test_data_path, device):
     with torch.no_grad():
         pbar = tqdm(test_loader, desc="Testing")
 
-        for x_phase, x_amp, labels in pbar:
-            x_phase, x_amp, labels = (
-                x_phase.to(device),
-                x_amp.to(device),
-                labels.to(device),
-            )
+        for x, labels in pbar:
+            x, labels = x.to(device), labels.to(device)
 
-            outputs = model(x_phase, x_amp)
+            outputs = model(x)
             loss = criterion(outputs, labels)
 
             total_loss += loss.item()
             num_batches += 1
 
-            # Get probabilities for positive class
             probabilities = torch.softmax(outputs, dim=1)[:, 1]
-
-            # Use loaded threshold for hard predictions
             predictions = (probabilities >= loaded_threshold).long()
 
             metrics_tracker.update(predictions, labels, probabilities)
@@ -200,7 +183,6 @@ def evaluate_model(model_path, test_data_path, device):
         best_threshold = 0.5
     metrics["test_set_optimal_threshold"] = float(best_threshold)
 
-    # Compute confusion matrix
     cm = confusion_matrix(all_labels, all_predictions)
 
     return (
@@ -217,11 +199,7 @@ def evaluate_model(model_path, test_data_path, device):
 
 
 def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.5):
-    """
-    Plots the model's output probability for each distinct seizure event in the test set.
-    Saves plots to 'result_plots/{patient_id}/'.
-    SORTING ENABLED: Reconstructs chronological order using HDF5 metadata.
-    """
+    """Plots the model's output probability for each distinct seizure event in the test set."""
     print("\nGenerating per-seizure dynamics plots...")
 
     # 1. Setup Output Directory
@@ -275,10 +253,9 @@ def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.
                 sorted_indices = [x[0] for x in meta_list]
 
     except Exception as e:
-        print(f"⚠️ Could not load metadata for sorting: {e}")
+        print(f"  Could not load metadata for sorting: {e}")
         sorted_indices = range(len(probabilities))
 
-    # Apply Sort
     probs = np.array(probabilities)[sorted_indices]
     labels = np.array(true_labels)[sorted_indices]
 
@@ -299,12 +276,10 @@ def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.
     buffer_steps = 50  # How much interictal context to show before/after
 
     for i, (start, end) in enumerate(zip(starts, ends)):
-        # Define window with buffer
         plot_start = max(0, start - buffer_steps)
         plot_end = min(len(probs), end + int(buffer_steps / 4))  # smaller buffer after
 
         segment_probs = probs[plot_start:plot_end]
-        # segment_labels = labels[plot_start:plot_end] # Unused for plotting logic, used implicit logic
         x_axis = np.arange(plot_start, plot_end)
 
         plt.figure(figsize=(12, 6))
@@ -361,7 +336,6 @@ def main():
 
     n_patients = len(PATIENTS)
 
-    # Determine which patients to process
     if PATIENT_INDEX is None:
         patients_to_process = list(range(n_patients))
         print("=" * 60)
@@ -374,7 +348,6 @@ def main():
         print(f"EVALUATION: Patient {PATIENT_INDEX} ({patient_cfg['patient_id']})")
         print("=" * 60)
 
-    # Device setup
     if torch.cuda.is_available():
         device = torch.device("cuda")
         print(f"Using CUDA: {torch.cuda.get_device_name()}")
@@ -385,10 +358,8 @@ def main():
         device = torch.device("cpu")
         print("Using CPU")
 
-    # Store results for all folds
     batch_results = {}
 
-    # Evaluate each fold
     for current_idx in patients_to_process:
         patient_config = get_patient_config(current_idx)
         current_output_prefix = patient_config["output_prefix"]
@@ -396,10 +367,9 @@ def main():
 
         print(f"\n{'='*60}")
         print(f"PATIENT {current_idx}/{n_patients-1}: {patient_id}")
-        print(f"{ '='*60}")
+        print(f"{'='*60}")
 
         try:
-            # Determine model path
             if args.epoch is not None:
                 model_filename = f"epoch_{args.epoch:03d}.pth"
             else:
@@ -409,22 +379,21 @@ def main():
             dataset_dir = Path("preprocessing") / "data" / current_output_prefix
             test_data_path = dataset_dir / "test_dataset.h5"
 
-            # Check if files exist
             if not model_path.exists():
                 last_epoch = Path(
                     f"model/{current_output_prefix}/epoch_{TRAINING_EPOCHS:03d}.pth"
                 )
                 if args.epoch is None and last_epoch.exists():
                     print(
-                        f"⚠️ 'best_model.pth' not found. Falling back to last epoch: {last_epoch}"
+                        f"  'best_model.pth' not found. Falling back to last epoch: {last_epoch}"
                     )
                     model_path = last_epoch
                 else:
-                    print(f"❌ Model not found: {model_path}")
+                    print(f"  Model not found: {model_path}")
                     continue
 
             if not test_data_path.exists():
-                print(f"❌ Test dataset not found: {test_data_path}")
+                print(f"  Test dataset not found: {test_data_path}")
                 continue
 
             print(f"Evaluating model: {model_path.name}")
@@ -478,7 +447,6 @@ def main():
                     f"       {positive_class.capitalize():9s}   {cm[1,0]:6d}    {cm[1,1]:6d}"
                 )
 
-            # Save fold-specific results
             patient_results = {
                 "patient_id": patient_id,
                 "task_mode": checkpoint_task_mode,
@@ -486,6 +454,15 @@ def main():
                 "confusion_matrix": cm.tolist(),
                 "model_path": str(model_path),
             }
+
+            # Re-threshold with test-set optimal threshold for smoothing/per-seizure
+            optimal_thresh = metrics["test_set_optimal_threshold"]
+            if not np.isfinite(optimal_thresh):
+                optimal_thresh = 0.5  # fallback for degenerate cases
+            predictions = [1 if p >= optimal_thresh else 0 for p in probabilities]
+            recomp_acc = np.mean(np.array(predictions) == np.array(true_labels))
+            print(f"\nRe-thresholded with test-set optimal: {optimal_thresh:.4f}")
+            print(f"Re-thresholded Accuracy: {recomp_acc:.4f} ({recomp_acc*100:.2f}%)")
 
             # Apply smoothing
             if (
@@ -504,11 +481,11 @@ def main():
                 print(f"  - Window Size: {window_size}")
                 print(f"  - Threshold Count: {threshold_x}")
             elif SMOOTHING_T > 1:
-                # Fallback to heuristic: threshold slightly less than precision
                 window_size = SMOOTHING_T
                 model_precision = metrics["precision"]
                 target_count = int(round(model_precision * window_size))
-                threshold_x = max(1, min(target_count - 1, window_size))
+                # Cap at 50% of window to avoid near-unanimity requirement
+                threshold_x = max(1, min(target_count - 1, window_size // 2))
                 print(f"\nApplying smoothing using HEURISTIC parameters (fallback):")
                 print(f"  - Window Size: {window_size}")
                 print(
@@ -517,6 +494,12 @@ def main():
             else:
                 window_size = 1
                 threshold_x = 1
+
+            # Cap window size to test set length, scaling count proportionally
+            if window_size > len(predictions):
+                original_window = window_size
+                window_size = max(1, len(predictions))
+                threshold_x = max(1, round(threshold_x * window_size / original_window))
 
             if window_size > 1:
                 smoothed_predictions = apply_smoothing(
@@ -550,8 +533,8 @@ def main():
                 print(f"Smoothed_Recall:    {smoothed_metrics['recall']:.4f}")
                 print(f"Smoothed_F1 Score:  {smoothed_metrics['f1']:.4f}")
 
-                # Load dataset for chronological analysis
-                test_dataset = EEGDataset(test_data_path, split="test")
+            # Per-seizure accuracy (runs for all patients, including window_size=1)
+            test_dataset = EEGDataset(test_data_path, split="test")
 
                 # Calculate per-seizure accuracy
                 seizure_accuracy_metrics = calculate_per_seizure_accuracy(
@@ -635,7 +618,7 @@ def main():
                 )
 
         except Exception as e:
-            print(f"❌ Error evaluating patient {patient_id}: {e}")
+            print(f"  Error evaluating patient {patient_id}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -650,8 +633,8 @@ def main():
         auc_rocs = [res["metrics"]["auc_roc"] for res in batch_results.values()]
 
         print(f"Patients evaluated: {len(batch_results)}/{len(patients_to_process)}")
-        print(f"Mean Accuracy: {np.mean(accuracies):.4f} (±{np.std(accuracies):.4f})")
-        print(f"Mean AUC-ROC:  {np.mean(auc_rocs):.4f} (±{np.std(auc_rocs):.4f})")
+        print(f"Mean Accuracy: {np.mean(accuracies):.4f} (+/-{np.std(accuracies):.4f})")
+        print(f"Mean AUC-ROC:  {np.mean(auc_rocs):.4f} (+/-{np.std(auc_rocs):.4f})")
 
         smoothed_accuracies = [
             res["smoothed_metrics"]["accuracy"]
@@ -660,7 +643,7 @@ def main():
         ]
         if smoothed_accuracies:
             print(
-                f"Mean Smoothed Accuracy: {np.mean(smoothed_accuracies):.4f} (±{np.std(smoothed_accuracies):.4f})"
+                f"Mean Smoothed Accuracy: {np.mean(smoothed_accuracies):.4f} (+/-{np.std(smoothed_accuracies):.4f})"
             )
 
         per_seizure_accuracies = [
@@ -671,7 +654,7 @@ def main():
         ]
         if per_seizure_accuracies:
             print(
-                f"Mean Per-Seizure Accuracy: {np.mean(per_seizure_accuracies):.4f} (±{np.std(per_seizure_accuracies):.4f})"
+                f"Mean Per-Seizure Accuracy: {np.mean(per_seizure_accuracies):.4f} (+/-{np.std(per_seizure_accuracies):.4f})"
             )
 
         fp_rates = [
@@ -681,7 +664,7 @@ def main():
         ]
         if fp_rates:
             print(
-                f"Mean False Positive Rate: {np.mean(fp_rates):.4f} per hour (±{np.std(fp_rates):.4f})"
+                f"Mean False Positive Rate: {np.mean(fp_rates):.4f} per hour (+/-{np.std(fp_rates):.4f})"
             )
 
         batch_summary = {
@@ -704,7 +687,7 @@ def main():
         with open("model/batch_test_results.json", "w") as f:
             json.dump(batch_summary, f, indent=2)
 
-        print(f"\n✅ Batch results saved to model/batch_test_results.json")
+        print(f"\n  Batch results saved to model/batch_test_results.json")
 
 
 if __name__ == "__main__":

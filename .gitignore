@@ -30,3 +30,5 @@ GEMINI.md
 *.csv
 *.txt
 *.txt
+
+/.venv

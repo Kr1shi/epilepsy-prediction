@@ -250,7 +250,6 @@ HDF5 format: `spectrograms` dataset with shape `(N, 360, 18, 128, 9)`. All prepr
 - **Leave-one-seizure-out test split** ensures the test seizure is never seen during training, providing rigorous evaluation
 - **Near-duplicate positive samples**: ~97% sequence overlap in preictal regions creates many highly similar training examples
 - **Large sample size**: each 30-min window is ~30MB, requiring lazy HDF5 loading and small batch sizes
-- **No data augmentation** is applied during training
 - **`num_workers` must be 0**: HDF5 lazy loading is not fork-safe
 
 ## Debugging Tips

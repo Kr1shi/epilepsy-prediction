@@ -12,9 +12,9 @@ Conv-Transformer Architecture:
 
 TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
 PREICTAL_WINDOW = 40 * 60  # 40 minutes before seizure (zone starts at -40min)
-PREICTAL_ONSET_BUFFER = 10 * 60  # 10 minutes before seizure (zone ends at -10min)
-                                  # Effective preictal zone: [-40min, -10min]
-INTERICTAL_BUFFER = 1 * 60 * 60  # 1 hour buffer around seizures
+PREICTAL_ONSET_BUFFER = 0  # No onset buffer — preictal zone extends to seizure onset
+                           # Effective preictal zone: [-40min, 0min]
+INTERICTAL_BUFFER = 30 * 60  # 30 min buffer around seizures (interictal only)
 
 # =============================================================================
 # Dataset Configuration
@@ -42,17 +42,17 @@ PATIENTS = [
     "chb09",   # 4 seizures
     "chb10",   # 7 seizures
     "chb11",   # 3 seizures
-    "chb13",    # 12 seizures  ← top 5
-    "chb14",    # 8 seizures   ← top 5 (tied)
-    "chb15",    # 20 seizures  ← top 5
-    "chb16",    # 10 seizures  ← top 5
-    "chb17",   # 3 seizures
-    "chb18",   # 6 seizures
-    "chb19",   # 3 seizures
-    "chb20",    # 8 seizures   ← top 5 (tied)
-    "chb21",   # 4 seizures
-    "chb22",   # 3 seizures
-    "chb23",   # 7 seizures
+    # "chb13",    # 12 seizures  ← top 5
+    # "chb14",    # 8 seizures   ← top 5 (tied)
+    # "chb15",    # 20 seizures  ← top 5
+    # "chb16",    # 10 seizures  ← top 5
+    # "chb17",   # 3 seizures
+    # "chb18",   # 6 seizures
+    # "chb19",   # 3 seizures
+    # "chb20",    # 8 seizures   ← top 5 (tied)
+    # "chb21",   # 4 seizures
+    # "chb22",   # 3 seizures
+    # "chb23",   # 7 seizures
 ]
 
 ALL_PATIENTS = [
@@ -81,7 +81,7 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 # =============================================================================
 
 SEGMENT_DURATION = 5    # seconds per segment
-SEQUENCE_LENGTH = 360   # segments per sequence (360 × 5s = 1800s = 30 min)
+SEQUENCE_LENGTH = 60    # segments per sequence (60 × 5s = 300s = 5 min)
 SEQUENCE_STRIDE = 12    # segments between sequences (12 × 5s = 60s = 1 min stride for preictal)
 
 # =============================================================================
@@ -127,25 +127,23 @@ TARGET_CHANNELS = [
 ]
 
 # =============================================================================
-# Model Configuration (Conv-Transformer)
+# Model Configuration (Conv-GRU)
 # =============================================================================
 
-CONV_EMBEDDING_DIM = 128         # Conv tower output / Transformer d_model
-TRANSFORMER_NUM_LAYERS = 1       # Transformer encoder layers (reduced from 2)
-TRANSFORMER_NUM_HEADS = 2        # Attention heads (head_dim = 128/2 = 64)
-TRANSFORMER_FFN_DIM = 256        # Feedforward hidden dimension (reduced from 512)
-TRANSFORMER_DROPOUT = 0.3        # Dropout for Transformer + FC head
-USE_CLS_TOKEN = True             # CLS token pooling (vs mean pooling)
+CONV_EMBEDDING_DIM = 128         # Conv tower output dimension
+GRU_HIDDEN_DIM = 64              # BiGRU hidden size (output = 2x this for bidirectional)
+GRU_NUM_LAYERS = 1               # Number of stacked GRU layers
+GRU_DROPOUT = 0.3                # Dropout for GRU + FC head
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
 
-PRETRAINING_EPOCHS = 10
-TRAINING_EPOCHS = 5
-SEQUENCE_BATCH_SIZE = 16
+PRETRAINING_EPOCHS = 30
+TRAINING_EPOCHS = 20
+SEQUENCE_BATCH_SIZE = 4
 LEARNING_RATE = 1e-4             # Pretraining LR
-FINETUNING_LEARNING_RATE = 5e-4  # Higher LR for fine-tuning (FC head only)
+FINETUNING_LEARNING_RATE = 3e-4  # Fine-tuning LR (transformer layer + FC head)
 WEIGHT_DECAY = 1e-4
 
 NUM_WORKERS = 4

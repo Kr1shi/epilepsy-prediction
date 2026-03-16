@@ -30,6 +30,7 @@ from data_segmentation_helpers.config import (
 # Suppress MNE warnings
 warnings.filterwarnings("ignore", message="Channel names are not unique")
 warnings.filterwarnings("ignore", message=".*duplicates.*", category=RuntimeWarning)
+warnings.filterwarnings("ignore", message=".*Scaling factor.*", category=RuntimeWarning)
 mne.set_log_level("ERROR")
 
 # Pre-compute frequency mask (depends only on STFT_NFFT and assumed 256 Hz sampling rate)

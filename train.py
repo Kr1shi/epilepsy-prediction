@@ -170,62 +170,47 @@ class ConvTower(nn.Module):
         return x.view(x.size(0), -1)
 
 
-class ConvTransformerModel(nn.Module):
-    """Single-stream Conv-Transformer for EEG sequence classification.
+class ConvGRUModel(nn.Module):
+    """Single-stream Conv-GRU for EEG sequence classification.
 
-    Conv tower tokenizes each 5s segment into an embedding, then a Transformer
-    attends across all time positions to classify the full window.
+    Conv tower extracts a 128-dim embedding from each 5s spectrogram segment.
+    BiGRU processes the sequence of 360 embeddings to capture the temporal
+    evolution of preictal EEG (gradual buildup toward seizure onset).
+    Final hidden states from both directions are concatenated and classified.
     """
 
     def __init__(
         self,
         num_input_channels=18,
         num_classes=2,
-        sequence_length=SEQUENCE_LENGTH,
         embed_dim=CONV_EMBEDDING_DIM,
-        num_layers=TRANSFORMER_NUM_LAYERS,
-        num_heads=TRANSFORMER_NUM_HEADS,
-        ffn_dim=TRANSFORMER_FFN_DIM,
-        dropout=TRANSFORMER_DROPOUT,
-        use_cls_token=USE_CLS_TOKEN,
+        gru_hidden=GRU_HIDDEN_DIM,
+        gru_layers=GRU_NUM_LAYERS,
+        dropout=GRU_DROPOUT,
     ):
         super().__init__()
-        self.sequence_length = sequence_length
         self.embed_dim = embed_dim
-        self.use_cls_token = use_cls_token
+        self.gru_hidden = gru_hidden
 
         # Per-segment feature extractor
         self.conv_tower = ConvTower(in_channels=num_input_channels, embed_dim=embed_dim)
 
-        # CLS token and positional embeddings
-        if use_cls_token:
-            self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
-            self.pos_embedding = nn.Parameter(
-                torch.randn(1, sequence_length + 1, embed_dim)
-            )
-        else:
-            self.pos_embedding = nn.Parameter(
-                torch.randn(1, sequence_length, embed_dim)
-            )
-
-        # Transformer encoder
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=num_heads,
-            dim_feedforward=ffn_dim,
-            dropout=dropout,
-            activation="gelu",
+        # BiGRU: processes sequence of segment embeddings
+        self.gru = nn.GRU(
+            input_size=embed_dim,
+            hidden_size=gru_hidden,
+            num_layers=gru_layers,
             batch_first=True,
-            norm_first=True,
+            bidirectional=True,
+            dropout=dropout if gru_layers > 1 else 0,
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # Post-transformer norm
-        self.norm = nn.LayerNorm(embed_dim)
+        # Layer norm on GRU output
+        self.norm = nn.LayerNorm(gru_hidden * 2)
 
-        # Classification head
+        # Classification head (input = 2 * gru_hidden for bidirectional)
         self.fc = nn.Sequential(
-            nn.Linear(embed_dim, 64),
+            nn.Linear(gru_hidden * 2, 64),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(64, num_classes),
@@ -249,23 +234,16 @@ class ConvTransformerModel(nn.Module):
         # Reshape to sequence: (B, S, embed_dim)
         embeddings = embeddings.view(B, S, self.embed_dim)
 
-        # Add CLS token
-        if self.use_cls_token:
-            cls_tokens = self.cls_token.expand(B, -1, -1)
-            embeddings = torch.cat([cls_tokens, embeddings], dim=1)
+        # BiGRU: output shape (B, S, 2*gru_hidden), h_n shape (2*layers, B, gru_hidden)
+        _, h_n = self.gru(embeddings)
 
-        # Add positional encoding
-        embeddings = embeddings + self.pos_embedding
+        # Concatenate final hidden states from forward and backward directions
+        # h_n shape: (2*num_layers, B, gru_hidden) → take last layer's forward and backward
+        h_forward = h_n[-2]  # (B, gru_hidden)
+        h_backward = h_n[-1]  # (B, gru_hidden)
+        pooled = torch.cat([h_forward, h_backward], dim=1)  # (B, 2*gru_hidden)
 
-        # Transformer
-        out = self.transformer(embeddings)
-        out = self.norm(out)
-
-        # Pooling
-        if self.use_cls_token:
-            pooled = out[:, 0]  # CLS token output
-        else:
-            pooled = out.mean(dim=1)  # Mean pooling
+        pooled = self.norm(pooled)
 
         return self.fc(pooled)
 
@@ -327,7 +305,7 @@ def optimize_running_average(predictions, labels, max_window=30):
         print(f"  Skipping smoothing optimization (only {min_len} samples)")
         return best_params
 
-    for window_size in range(5, max_window + 1):
+    for window_size in range(5, min(max_window, min_len) + 1):
         kernel = np.ones(window_size)
         smoothed_sums = np.convolve(preds_np, kernel, mode="same")
 
@@ -438,33 +416,36 @@ class EEGCNNTrainer:
             pin_memory=(self.device.type == "cuda"),
         )
 
-        # Initialize Conv-Transformer Model
-        self.model = ConvTransformerModel(
+        # Initialize Conv-GRU Model
+        self.model = ConvGRUModel(
             num_input_channels=18,
             num_classes=2,
-            sequence_length=SEQUENCE_LENGTH,
             embed_dim=CONV_EMBEDDING_DIM,
-            num_layers=TRANSFORMER_NUM_LAYERS,
-            num_heads=TRANSFORMER_NUM_HEADS,
-            ffn_dim=TRANSFORMER_FFN_DIM,
-            dropout=TRANSFORMER_DROPOUT,
-            use_cls_token=USE_CLS_TOKEN,
+            gru_hidden=GRU_HIDDEN_DIM,
+            gru_layers=GRU_NUM_LAYERS,
+            dropout=GRU_DROPOUT,
         )
 
-        # Load pretrained weights if available and freeze encoder
-        pretrained_path = Path("model") / "pretrained_encoder.pth"
+        # Load pretrained weights from the opposite group (no data leakage)
+        my_group = get_pretrain_group(self.patient_id)
+        pretrained_path = get_pretrain_path(1 - my_group)  # use OTHER group's encoder
+        if not pretrained_path.exists():
+            # Fall back to old single-file path
+            pretrained_path = Path("model") / "pretrained_encoder.pth"
         if pretrained_path.exists() and not lopo:
-            print(f"Loading pretrained encoder from {pretrained_path}")
+            print(f"Loading pretrained encoder from {pretrained_path} (patient {self.patient_id} is group {my_group})")
             self.model.load_state_dict(
                 torch.load(pretrained_path, map_location=self.device, weights_only=False)
             )
-            # Freeze encoder (conv_tower + transformer + embeddings), only train FC head
+            # Freeze conv tower (learned general spectral features).
+            # Keep transformer, norm, and FC head trainable so the model
+            # can adapt temporal attention patterns per patient.
             for name, param in self.model.named_parameters():
-                if not name.startswith("fc."):
+                if name.startswith("conv_tower."):
                     param.requires_grad = False
             trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
             total = sum(p.numel() for p in self.model.parameters())
-            print(f"  Encoder frozen. Trainable: {trainable:,} / {total:,} params")
+            print(f"  Conv tower frozen. Trainable: {trainable:,} / {total:,} params")
 
         self.model.to(self.device)
 
@@ -571,7 +552,7 @@ class EEGCNNTrainer:
             "best_val_auc": self.best_val_auc,
             "config": {
                 "patient_id": self.patient_id,
-                "architecture": "conv_transformer",
+                "architecture": "conv_gru",
             },
         }
 
@@ -589,7 +570,7 @@ class EEGCNNTrainer:
                 "epochs": TRAINING_EPOCHS,
                 "batch_size": SEQUENCE_BATCH_SIZE,
                 "lr": LEARNING_RATE,
-                "architecture": "conv_transformer",
+                "architecture": "conv_gru",
             },
             "training_info": {
                 "device": str(self.device),
@@ -602,7 +583,7 @@ class EEGCNNTrainer:
     def plot_training_curves(self):
         plt.style.use("seaborn-v0_8")
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle(f"Patient {self.patient_id} Conv-Transformer Training", fontsize=16)
+        fig.suptitle(f"Patient {self.patient_id} Conv-GRU Training", fontsize=16)
 
         epochs = range(1, len(self.train_metrics_history) + 1)
         metrics = ["loss", "accuracy", "precision", "recall", "f1", "auc_roc"]
@@ -683,6 +664,9 @@ class EEGCNNTrainer:
 
         all_probs = np.array(tracker.probabilities)
         all_labels = np.array(tracker.true_labels)
+        min_len = min(len(all_probs), len(all_labels))
+        all_probs = all_probs[:min_len]
+        all_labels = all_labels[:min_len]
         optimized_preds = (all_probs >= optimal_threshold).astype(int)
         best_window, best_count = optimize_running_average(optimized_preds, all_labels)
 
@@ -701,13 +685,28 @@ class EEGCNNTrainer:
         print(f"   - Smoothing Count: {best_count}")
 
 
+def get_pretrain_group(patient_id):
+    """Which group a patient belongs to. Even index → 0, odd → 1."""
+    return PATIENTS.index(patient_id) % 2
+
+
+def get_pretrain_path(group_id):
+    """Path to pretrained encoder for a group."""
+    return Path("model") / f"pretrained_encoder_group{group_id}.pth"
+
+
 def pretrain():
-    """Cross-patient pretraining: train shared encoder on ALL patients."""
+    """Cross-patient pretraining with two-group split for leak-free evaluation.
+
+    Group 0: even-indexed patients, Group 1: odd-indexed patients.
+    Trains two encoders — each on one group. When fine-tuning a patient
+    in group X, the encoder pretrained on group (1-X) is loaded, so the
+    encoder has never seen any of the fine-tuning patient's data.
+    """
     print("=" * 60)
-    print("CROSS-PATIENT PRETRAINING")
+    print("CROSS-PATIENT PRETRAINING (two-group split)")
     print("=" * 60)
 
-    # Device
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -716,89 +715,90 @@ def pretrain():
         device = torch.device("cpu")
     print(f"Device: {device}")
 
-    # Load all split datasets from all patients
-    all_datasets = []
-    for patient_id in PATIENTS:
-        dataset_dir = Path("preprocessing") / "data" / patient_id
-        if not dataset_dir.exists():
-            print(f"  Skipping {patient_id}: no dataset directory")
+    group_patients = {0: [], 1: []}
+    for i, pid in enumerate(PATIENTS):
+        group_patients[i % 2].append(pid)
+
+    print(f"Group 0 ({len(group_patients[0])} patients): {group_patients[0]}")
+    print(f"Group 1 ({len(group_patients[1])} patients): {group_patients[1]}")
+
+    for group_id in [0, 1]:
+        save_path = get_pretrain_path(group_id)
+        if save_path.exists():
+            print(f"\nGroup {group_id} encoder already exists at {save_path}, skipping.")
             continue
-        for h5_file in dataset_dir.glob("s*_dataset.h5"):
-            all_datasets.append(EEGDataset(str(h5_file), split=f"pretrain ({patient_id})", augment=True))
 
-    if not all_datasets:
-        print("No datasets found for pretraining!")
-        return
+        train_patients = group_patients[group_id]
+        print(f"\n{'='*60}")
+        print(f"Training encoder on group {group_id}: {train_patients}")
+        print(f"(Will be used for patients in group {1 - group_id})")
+        print(f"{'='*60}")
 
-    combined = ConcatDataset(all_datasets)
-    print(f"\nCombined pretraining dataset: {len(combined)} samples from {len(all_datasets)} splits")
+        datasets = []
+        for patient_id in train_patients:
+            dataset_dir = Path("preprocessing") / "data" / patient_id
+            if not dataset_dir.exists():
+                continue
+            for h5_file in dataset_dir.glob("s*_dataset.h5"):
+                datasets.append(EEGDataset(str(h5_file), split=f"pretrain ({patient_id})", augment=True))
 
-    pretrain_loader = DataLoader(
-        combined,
-        batch_size=SEQUENCE_BATCH_SIZE,
-        shuffle=True,
-        num_workers=NUM_WORKERS,
-    )
+        if not datasets:
+            print(f"No datasets for group {group_id}!")
+            continue
 
-    # Initialize model
-    model = ConvTransformerModel(
-        num_input_channels=18,
-        num_classes=2,
-        sequence_length=SEQUENCE_LENGTH,
-        embed_dim=CONV_EMBEDDING_DIM,
-        num_layers=TRANSFORMER_NUM_LAYERS,
-        num_heads=TRANSFORMER_NUM_HEADS,
-        ffn_dim=TRANSFORMER_FFN_DIM,
-        dropout=TRANSFORMER_DROPOUT,
-        use_cls_token=USE_CLS_TOKEN,
-    )
-    model.to(device)
-    print(f"Model Parameters: {sum(p.numel() for p in model.parameters()):,}")
+        combined = ConcatDataset(datasets)
+        print(f"Training data: {len(combined)} samples from {len(datasets)} splits")
 
-    # Compute class weights from combined labels
-    all_labels = torch.cat([ds.labels for ds in all_datasets])
-    counts = torch.bincount(all_labels).float()
-    class_weights = counts.sum() / (len(counts) * counts)
+        loader = DataLoader(combined, batch_size=SEQUENCE_BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
 
-    criterion = FocalLoss(
-        weight=class_weights.to(device), gamma=2.0, label_smoothing=0.05
-    )
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6
-    )
+        model = ConvGRUModel(
+            num_input_channels=18, num_classes=2,
+            embed_dim=CONV_EMBEDDING_DIM, gru_hidden=GRU_HIDDEN_DIM,
+            gru_layers=GRU_NUM_LAYERS, dropout=GRU_DROPOUT,
+        )
+        model.to(device)
+        print(f"Model Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Train
-    for epoch in range(PRETRAINING_EPOCHS):
-        model.train()
-        total_loss = 0.0
-        pbar = tqdm(pretrain_loader, desc=f"Pretrain Epoch {epoch+1}/{PRETRAINING_EPOCHS}")
+        all_labels = torch.cat([ds.labels for ds in datasets])
+        counts = torch.bincount(all_labels).float()
+        class_weights = counts.sum() / (len(counts) * counts)
 
-        for x, labels in pbar:
-            x, labels = x.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(x)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            total_loss += loss.item()
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        criterion = FocalLoss(weight=class_weights.to(device), gamma=2.0, label_smoothing=0.05)
+        optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6)
 
-        avg_loss = total_loss / len(pretrain_loader)
-        scheduler.step(avg_loss)
-        print(f"  Epoch {epoch+1} avg loss: {avg_loss:.4f}")
+        for epoch in range(PRETRAINING_EPOCHS):
+            model.train()
+            total_loss = 0.0
+            pbar = tqdm(loader, desc=f"Group {group_id} Epoch {epoch+1}/{PRETRAINING_EPOCHS}")
 
-    # Save pretrained weights
-    save_dir = Path("model")
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / "pretrained_encoder.pth"
-    torch.save(model.state_dict(), save_path)
-    print(f"\nPretrained encoder saved to {save_path}")
+            for x, labels in pbar:
+                x, labels = x.to(device), labels.to(device)
+                optimizer.zero_grad()
+                outputs = model(x)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                total_loss += loss.item()
+                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+
+            avg_loss = total_loss / len(loader)
+            scheduler.step(avg_loss)
+            print(f"  Epoch {epoch+1} avg loss: {avg_loss:.4f}")
+
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), save_path)
+        print(f"Group {group_id} encoder saved to {save_path}")
+
+        del model, optimizer, scheduler, criterion, loader, combined, datasets
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="EEG Conv-Transformer Training")
+    parser = argparse.ArgumentParser(description="EEG Conv-GRU Training")
     parser.add_argument(
         "--pretrain", action="store_true",
         help="Run cross-patient pretraining instead of per-patient fine-tuning"

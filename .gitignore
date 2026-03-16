@@ -15,8 +15,10 @@ physionet.org/
 model/
 papers/
 result_plots/
+result_text/
 profiling/
 old_data/
+
 
 local/
 DANN*/
@@ -30,5 +32,6 @@ GEMINI.md
 *.csv
 *.txt
 *.txt
+*.pdf
 
 /.venv

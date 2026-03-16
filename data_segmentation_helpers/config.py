@@ -37,11 +37,11 @@ PATIENTS = [
     "chb04",   # 4 seizures
     "chb05",   # 5 seizures
     "chb06",    # 10 seizures  ← top 5
-    "chb07",   # 3 seizures
-    "chb08",   # 5 seizures
-    "chb09",   # 4 seizures
-    "chb10",   # 7 seizures
-    "chb11",   # 3 seizures
+    # "chb07",   # 3 seizures
+    # "chb08",   # 5 seizures
+    # "chb09",   # 4 seizures
+    # "chb10",   # 7 seizures
+    # "chb11",   # 3 seizures
     # "chb13",    # 12 seizures  ← top 5
     # "chb14",    # 8 seizures   ← top 5 (tied)
     # "chb15",    # 20 seizures  ← top 5

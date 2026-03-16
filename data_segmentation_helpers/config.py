@@ -92,7 +92,8 @@ LOW_FREQ_HZ = 0.5
 HIGH_FREQ_HZ = 128  # Extended to capture High Gamma/HFO
 NOTCH_FREQ_HZ = 60
 
-# Dual-Stream Configuration
+# Frequency Bands
+FULL_FREQ_BAND = (0.5, 128.0)  # Full-band for single-stream STFT
 PHASE_FREQ_BAND = (0.0, 5.0)  # Delta/Theta (for Phase)
 AMP_FREQ_BAND = (80.0, 128.0)  # Gamma/HFO (for Amplitude)
 
@@ -130,9 +131,9 @@ TARGET_CHANNELS = [
 # =============================================================================
 
 CONV_EMBEDDING_DIM = 128         # Conv tower output / Transformer d_model
-TRANSFORMER_NUM_LAYERS = 2       # Transformer encoder layers
-TRANSFORMER_NUM_HEADS = 4        # Attention heads (head_dim = 128/4 = 32)
-TRANSFORMER_FFN_DIM = 512        # Feedforward hidden dimension
+TRANSFORMER_NUM_LAYERS = 1       # Transformer encoder layers (reduced from 2)
+TRANSFORMER_NUM_HEADS = 2        # Attention heads (head_dim = 128/2 = 64)
+TRANSFORMER_FFN_DIM = 256        # Feedforward hidden dimension (reduced from 512)
 TRANSFORMER_DROPOUT = 0.3        # Dropout for Transformer + FC head
 USE_CLS_TOKEN = True             # CLS token pooling (vs mean pooling)
 
@@ -140,14 +141,12 @@ USE_CLS_TOKEN = True             # CLS token pooling (vs mean pooling)
 # Training Configuration
 # =============================================================================
 
+PRETRAINING_EPOCHS = 10
 TRAINING_EPOCHS = 5
 SEQUENCE_BATCH_SIZE = 16
-LEARNING_RATE = 0.0001  # Increased from 1e-5 to 1e-4
-WEIGHT_DECAY = 1e-4  # Reduced from 1e-3 back to 1e-4
-# TRAINING_EPOCHS = 4
-# SEQUENCE_BATCH_SIZE = 8
-# LEARNING_RATE = 0.00001
-# WEIGHT_DECAY = 1e-4
+LEARNING_RATE = 1e-4             # Pretraining LR
+FINETUNING_LEARNING_RATE = 5e-4  # Higher LR for fine-tuning (FC head only)
+WEIGHT_DECAY = 1e-4
 
 NUM_WORKERS = 4
 

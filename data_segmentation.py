@@ -17,6 +17,7 @@ from data_segmentation_helpers.config import (
     SEQUENCE_LENGTH,
     SEQUENCE_STRIDE,
     PREICTAL_WINDOW,
+    PREICTAL_ONSET_BUFFER,
     INTERICTAL_BUFFER,
     BASE_PATH,
     ESTIMATED_FILE_DURATION,
@@ -529,192 +530,60 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     interictal_seqs = [s for s in patient_seqs if s["type"] == "interictal"]
 
     seizure_ids = sorted(set(s["seizure_id"] for s in positive_seqs if s.get("seizure_id") is not None))
+    num_seizures = len(seizure_ids)
 
-    if len(seizure_ids) < 2:
-        print(f"\nPatient {patient_id}: Only {len(seizure_ids)} seizure(s), cannot leave one out.")
-        print("  Falling back to randomized split.")
-        # Fallback: randomized split
-        rng = random.Random(random_seed)
-        rng.shuffle(patient_seqs)
-        n = len(patient_seqs)
-        n_train = int(n * TRAIN_RATIO)
-        n_val = int(n * VAL_RATIO)
-        train_sequences = patient_seqs[:n_train]
-        val_sequences = patient_seqs[n_train:n_train + n_val]
-        test_sequences = patient_seqs[n_train + n_val:]
-        for seq in train_sequences:
-            seq["split"] = "train"
-        for seq in val_sequences:
-            seq["split"] = "val"
-        for seq in test_sequences:
-            seq["split"] = "test"
-        splits = {"train": train_sequences, "val": val_sequences, "test": test_sequences}
-        balanced_splits, balance_stats = balance_sequences_across_splits(
-            splits, positive_label, random_seed
-        )
-        retained_sequences = []
-        for split_name in ["train", "val", "test"]:
-            retained_sequences.extend(balanced_splits[split_name])
-        split_counts = {
-            split_name: {
-                "total": len(split_seqs),
-                positive_label: sum(1 for seq in split_seqs if seq["type"] == positive_label),
-                "interictal": sum(1 for seq in split_seqs if seq["type"] == "interictal"),
-            }
-            for split_name, split_seqs in balanced_splits.items()
-        }
-        return retained_sequences, split_counts, balance_stats
+    # 3. Group sequences by seizure ID
+    # Each seizure becomes its own fold for leave-one-seizure-out cross-validation.
+    # Interictal sequences are distributed to the nearest seizure group.
+    seizure_groups = {sid: [] for sid in seizure_ids}
+    unassigned_interictal = []
 
-    # 3. Determine split: 70% Train, 30% Test (Chronological split)
-    if num_seizures > 0:
-        n_train_seizures = int(num_seizures * 0.7)
-        # Ensure we don't have 0 training seizures if we have enough (e.g. 4+ seizures)
-        # But for small counts (1, 2, 3), int(0.7) logic holds:
-        # 1 -> 0 (0 train, 1 test)
-        # 2 -> 1 (1 train, 1 test)
-        # 3 -> 2 (2 train, 1 test)
-    else:
-        n_train_seizures = 0
-    # 3. Determine split: Train on ALL seizures except the LAST one
-    # if num_seizures > 0:
-    #     n_train_seizures = num_seizures - 1
-    # else:
-    #     n_train_seizures = 0
-
-    # train_seizure_ids = set(patient_seizure_ids[:n_train_seizures])
-
-    # 4. Find split point: where the first TEST seizure begins
-    # Default to 0 if no training seizures (e.g. num_seizures is 0 or 1)
-    # split_index = 0
-    # if n_train_seizures > 0:
-    #     split_index = len(patient_seqs)
-    #     for i, seq in enumerate(patient_seqs):
-    #         sid = seq.get("seizure_id")
-    #         if sid is not None and sid not in train_seizure_ids:
-    #             split_index = i
-    #             break
-    
-    # train_sequences = patient_seqs[:split_index]
-    # test_sequences = patient_seqs[split_index:]
-
-    current_sid = None
-    split_start_idx = 0
-    all_splits = {}
-    for i, seq in enumerate(patient_seqs):
+    for seq in patient_seqs:
+        if seq["type"] == positive_label:
             sid = seq.get("seizure_id")
-            if sid is not None:
-                if current_sid is None:
-                    current_sid = sid
-                elif sid != current_sid:
-                    split_end_index = i
-                    split_sequences = patient_seqs[split_start_idx:split_end_index]
-                    all_splits[current_sid] = split_sequences
-                    # 
-                    split_start_idx = split_end_index
-                    current_sid = sid
-    all_splits[current_sid] = patient_seqs[split_start_idx:]
-                
-
-    if num_seizures > 0:
-        print(f"\nPatient {patient_id} Split:")
-        print(f"  Total Seizures: {num_seizures}")
-        # print(
-        #     f"  Train Seizures: {n_train_seizures} (IDs: {patient_seizure_ids[:n_train_seizures]})"
-        # )
-        # print(
-        #     f"  Test Seizures: {num_seizures - n_train_seizures} (IDs: {patient_seizure_ids[n_train_seizures:]})"
-        # )
-        print(
-            f"  IDs: {patient_seizure_ids})"
-        )
-        out_str = f"  Sequences: "
-        for sid in all_splits:
-            out_str = out_str + f"{len(all_splits[sid])}"
-        print(out_str)
-    
-    '''
-    # Check if test set has no interictal data and move from train if necessary
-    test_interictal_count = sum(
-        1 for seq in test_sequences if seq["type"] == "interictal"
-    )
-
-    print(f"  Test positive ({positive_label}): {len(test_positive)} (seizure {test_seizure_id})")
-    print(f"  Train positive: {len(train_positive)}, Val positive: {len(val_positive)}")
-    print(f"  Interictal distribution: train={len(train_interictal)}, val={len(val_interictal)}, test={len(test_interictal)}")
-
-        # Identify available interictal sequences in train
-        train_interictal_indices = [
-            i for i, seq in enumerate(train_sequences) if seq["type"] == "interictal"
-        ]
-
-        if train_interictal_indices:
-            # Determine how many to move: match the number of positive sequences in test
-            test_positive_count = sum(
-                1 for seq in test_sequences if seq["type"] == positive_label
-            )
-            # Default to a small number if no positives (unlikely) or just 10
-            num_to_move = (
-                test_positive_count
-                if test_positive_count > 0
-                else min(10, len(train_interictal_indices))
-            )
-
-            # Don't take more than available
-            num_to_move = min(num_to_move, len(train_interictal_indices))
-
-            if num_to_move > 0:
-                # Take from the end of the train set (closest to test set time-wise)
-                indices_to_move = train_interictal_indices[-num_to_move:]
-                indices_to_move_set = set(indices_to_move)
-
-                # Extract sequences to move
-                moved_sequences = [train_sequences[i] for i in indices_to_move]
-
-                # Update lists: Remove from train, Add to test
-                train_sequences = [
-                    s
-                    for i, s in enumerate(train_sequences)
-                    if i not in indices_to_move_set
-                ]
-                test_sequences.extend(moved_sequences)
-
-                print(
-                    f"  Moved {len(moved_sequences)} interictal sequences from train to test."
-                )
-            else:
-                print("  Warning: Not enough interictal data in train to move.")
+            if sid in seizure_groups:
+                seizure_groups[sid].append(seq)
         else:
-            print("  Warning: Train set also has no interictal data!")
-    '''
-    # Assign split labels
-    # for seq in train_sequences:
-    #     seq["split"] = "train"
-    # for seq in test_sequences:
-    #     seq["split"] = "test"
-    # splits = {"train": train_sequences, "test": test_sequences}
+            # Interictal: assign to the seizure whose preictal zone is closest
+            unassigned_interictal.append(seq)
 
-    # 8. Balance each split by downsampling majority class
+    # Distribute interictal sequences proportionally across seizure groups
+    if unassigned_interictal:
+        rng = random.Random(random_seed)
+        rng.shuffle(unassigned_interictal)
+        n_per_group = len(unassigned_interictal) // num_seizures
+        remainder = len(unassigned_interictal) % num_seizures
+        idx = 0
+        for i, sid in enumerate(seizure_ids):
+            count = n_per_group + (1 if i < remainder else 0)
+            seizure_groups[sid].extend(unassigned_interictal[idx:idx + count])
+            idx += count
+
+    print(f"\nPatient {patient_id}: {num_seizures} seizures, {len(patient_seqs)} total sequences")
+    for sid in seizure_ids:
+        n_pos = sum(1 for s in seizure_groups[sid] if s["type"] == positive_label)
+        n_int = sum(1 for s in seizure_groups[sid] if s["type"] == "interictal")
+        print(f"  Seizure {sid}: {n_pos} {positive_label} + {n_int} interictal")
+
+    # 4. Balance each seizure group independently
     balanced_splits, balance_stats = balance_sequences_across_splits(
-        all_splits, positive_label, random_seed
+        seizure_groups, positive_label, random_seed
     )
 
-    # Flatten sequences
+    # Assign split labels (seizure ID as split name) and flatten
     retained_sequences = []
-    for split_name in all_splits:
-        for seq in balanced_splits[split_name]:
-            seq["split"] = split_name
-        retained_sequences.extend(balanced_splits[split_name])
+    for sid in seizure_ids:
+        for seq in balanced_splits[sid]:
+            seq["split"] = sid
+        retained_sequences.extend(balanced_splits[sid])
 
-    # Compute split counts
     split_counts = {
-        split_name: {
+        sid: {
             "total": len(split_seqs),
-            positive_label: sum(
-                1 for seq in split_seqs if seq["type"] == positive_label
-            ),
+            positive_label: sum(1 for seq in split_seqs if seq["type"] == positive_label),
             "interictal": sum(1 for seq in split_seqs if seq["type"] == "interictal"),
         }
-        for split_name, split_seqs in balanced_splits.items()
+        for sid, split_seqs in balanced_splits.items()
     }
 
     return retained_sequences, split_counts, balance_stats

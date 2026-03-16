@@ -176,55 +176,6 @@ class ConvTransformerModel(nn.Module):
     Conv tower tokenizes each 5s segment into an embedding, then a Transformer
     attends across all time positions to classify the full window.
     """
-    Convolutional Fusion Module:
-    1. Extracts Phase/Amp ribbons over time.
-    2. Fuses them using 1x1 Conv (coupling detection at each time step).
-    3. Pools time dimension ONLY after fusion.
-    """
-
-    def __init__(self, num_input_channels=18, embedding_dim=256):
-        super().__init__()
-
-        # Phase stream uses Sin/Cos (2 channels per EEG channel)
-        self.phase_tower = CompactEEGCNN(num_input_channels * 2, output_channels=64)
-        # Amp stream uses raw power (1 channel per EEG channel)
-        self.amp_tower = CompactEEGCNN(num_input_channels, output_channels=64)
-
-        # Fusion is now a 1x1 Convolution across time steps
-        self.fusion_conv = nn.Sequential(
-            nn.Conv2d(64 + 64, embedding_dim, kernel_size=1),
-            nn.BatchNorm2d(embedding_dim),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-        )
-
-        # Global Time Pooling (Happens AFTER fusion)
-        self.gap_time = nn.AdaptiveAvgPool2d(1)
-
-    def forward(self, x_phase, x_amp):
-        # 1. Extract Features (Time preserved)
-        # Shape: (Batch, 64, 1, Time)
-        feat_p = self.phase_tower(x_phase)
-        feat_a = self.amp_tower(x_amp)
-
-        # 2. Concatenate along Channels
-        # Shape: (Batch, 128, 1, Time)
-        combined = torch.cat((feat_p, feat_a), dim=1)
-
-        # 3. Fuse (Pixel-wise coupling detection)
-        # The Conv1x1 acts as a learnable "Dot Product" at each time step
-        # Shape: (Batch, embedding_dim, 1, Time)
-        fused_map = self.fusion_conv(combined)
-
-        # 4. Now average over time
-        # Shape: (Batch, embedding_dim, 1, 1)
-        out = self.gap_time(fused_map)
-
-        return out.view(out.size(0), -1)
-
-
-class CNN_LSTM_Hybrid_Dual(nn.Module):
-    """Dual-Stream Hybrid Model: Dual CNN -> Fusion -> BiLSTM -> Attention"""
 
     def __init__(
         self,
@@ -246,19 +197,26 @@ class CNN_LSTM_Hybrid_Dual(nn.Module):
         # Per-segment feature extractor
         self.conv_tower = ConvTower(in_channels=num_input_channels, embed_dim=embed_dim)
 
-        # 1. Dual-Stream Encoder
-        self.encoder = DualStreamSpectrogramEncoder(
-            num_input_channels=num_input_channels, embedding_dim=fusion_dim
-        )
+        # CLS token and positional embeddings
+        if use_cls_token:
+            self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))
+            self.pos_embedding = nn.Parameter(
+                torch.randn(1, sequence_length + 1, embed_dim)
+            )
+        else:
+            self.pos_embedding = nn.Parameter(
+                torch.randn(1, sequence_length, embed_dim)
+            )
 
-        # 2. BiLSTM
-        self.lstm = nn.LSTM(
-            input_size=fusion_dim,
-            hidden_size=lstm_hidden_dim,
-            num_layers=lstm_num_layers,
-            batch_first=False,
-            dropout=dropout if lstm_num_layers > 1 else 0,
-            bidirectional=True,
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=ffn_dim,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
@@ -276,16 +234,14 @@ class CNN_LSTM_Hybrid_Dual(nn.Module):
     def forward(self, x):
         """
         Args:
-            x_phase: (batch, seq, channels_phase, h_phase, w)
-            x_amp:   (batch, seq, channels_amp, h_amp, w)
+            x: (batch, seq_len, channels, freq_bins, time_bins)
+        Returns:
+            logits: (batch, num_classes)
         """
-        batch_size, seq_len, c_p, h_p, w = x_phase.shape
-        _, _, c_a, h_a, _ = x_amp.shape
+        B, S, C, H, W = x.shape
 
         # Flatten sequence dimension for CNN processing
-        # (Batch * Seq, C, H, W)
-        x_phase_flat = x_phase.view(batch_size * seq_len, c_p, h_p, w)
-        x_amp_flat = x_amp.view(batch_size * seq_len, c_a, h_a, w)
+        x_flat = x.view(B * S, C, H, W)
 
         # Conv tower: (B*S, embed_dim)
         embeddings = self.conv_tower(x_flat)
@@ -411,7 +367,7 @@ def create_datasets(patients_to_process, skip_missing_class=True):
             all_datasets[pid][split_name] = dataset
         print(f"patient {pid} splits: {all_datasets[pid].keys()}")
     return all_datasets
-    
+
 def get_datasets_lopo(patient_id, all_datasets):
     test_datasets = []
     train_datasets = []
@@ -423,11 +379,12 @@ def get_datasets_lopo(patient_id, all_datasets):
     test_combined_dataset = ConcatDataset(test_datasets)
     train_combined_dataset = ConcatDataset(train_datasets)
     return test_combined_dataset, train_combined_dataset
+
 def get_datasets_per_patient(fold_id, patient_id, all_datasets):
     patient_datasets = all_datasets[patient_id]
     test_datasets = []
     train_datasets = []
-    for sid in  patient_datasets:
+    for sid in patient_datasets:
         if sid == fold_id:
             test_datasets = [patient_datasets[sid]]
         else:
@@ -444,7 +401,7 @@ class EEGCNNTrainer:
         dataset_prefix = patient_config["output_prefix"]
         self.lopo = lopo
         if lopo:
-            self.model_dir = Path("model") / "LOPO" / dataset_prefix 
+            self.model_dir = Path("model") / "LOPO" / dataset_prefix
         else:
             self.model_dir = Path("model") / "per_patient" / dataset_prefix / f"test_seizure_{test_seizure_id}"
         self.model_dir.mkdir(parents=True, exist_ok=True)
@@ -481,16 +438,6 @@ class EEGCNNTrainer:
             pin_memory=(self.device.type == "cuda"),
         )
 
-        val_h5 = self.dataset_dir / "val_dataset.h5"
-        if val_h5.exists():
-            self.val_loader = self._create_dataloader("val")
-        else:
-            print(
-                f"  WARNING: No val split found for {self.patient_id}. "
-                "Falling back to test set for monitoring."
-            )
-            self.val_loader = self._create_dataloader("test")
-
         # Initialize Conv-Transformer Model
         self.model = ConvTransformerModel(
             num_input_channels=18,
@@ -504,26 +451,41 @@ class EEGCNNTrainer:
             use_cls_token=USE_CLS_TOKEN,
         )
 
-        # Load pretrained weights if available
+        # Load pretrained weights if available and freeze encoder
         pretrained_path = Path("model") / "pretrained_encoder.pth"
-        if pretrained_path.exists():
+        if pretrained_path.exists() and not lopo:
             print(f"Loading pretrained encoder from {pretrained_path}")
             self.model.load_state_dict(
                 torch.load(pretrained_path, map_location=self.device, weights_only=False)
             )
+            # Freeze encoder (conv_tower + transformer + embeddings), only train FC head
+            for name, param in self.model.named_parameters():
+                if not name.startswith("fc."):
+                    param.requires_grad = False
+            trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.model.parameters())
+            print(f"  Encoder frozen. Trainable: {trainable:,} / {total:,} params")
 
         self.model.to(self.device)
 
         # Class-weighted focal loss
-        train_labels = self.train_loader.dataset.labels
-        counts = torch.bincount(train_labels).float()
+        train_labels = self.train_loader.dataset
+        if hasattr(train_labels, 'datasets'):
+            # ConcatDataset
+            all_labels = torch.cat([ds.labels for ds in train_labels.datasets])
+        else:
+            all_labels = train_labels.labels
+        counts = torch.bincount(all_labels).float()
         class_weights = counts.sum() / (len(counts) * counts)
         self.criterion = FocalLoss(
             weight=class_weights.to(self.device), gamma=2.0, label_smoothing=0.05
         )
 
+        # Only optimize trainable parameters
         self.optimizer = optim.Adam(
-            self.model.parameters(), lr=FINETUNING_LEARNING_RATE, weight_decay=WEIGHT_DECAY
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=FINETUNING_LEARNING_RATE,
+            weight_decay=WEIGHT_DECAY,
         )
 
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -550,20 +512,6 @@ class EEGCNNTrainer:
             return torch.device("mps")
         print(f"Using CPU")
         return torch.device("cpu")
-
-    # def _create_dataloader(self, split):
-    #     h5_file = self.dataset_dir / f"{split}_dataset.h5"
-    #     if not h5_file.exists():
-    #         raise FileNotFoundError(f"Missing {h5_file}")
-
-    #     dataset = EEGDataset(str(h5_file), split=split)
-    #     return DataLoader(
-    #         dataset,
-    #         batch_size=SEQUENCE_BATCH_SIZE,
-    #         shuffle=(split == "train"),
-    #         num_workers=NUM_WORKERS,
-    #         pin_memory=(self.device.type == "cuda"),
-    #     )
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -676,9 +624,9 @@ class EEGCNNTrainer:
     def train(self):
         print("=" * 60)
         if self.lopo:
-            print(f"STARTING DUAL-STREAM TRAINING: LOPO {self.patient_id}")
+            print(f"STARTING TRAINING: LOPO {self.patient_id}")
         else:
-            print(f"STARTING DUAL-STREAM TRAINING: {self.patient_id} test seizure {self.test_seizure_id}")
+            print(f"STARTING TRAINING: {self.patient_id} test seizure {self.test_seizure_id}")
         print("=" * 60)
 
         start_time = time.time()
@@ -768,21 +716,22 @@ def pretrain():
         device = torch.device("cpu")
     print(f"Device: {device}")
 
-    # Load train datasets from all patients
+    # Load all split datasets from all patients
     all_datasets = []
     for patient_id in PATIENTS:
-        h5_path = Path("preprocessing") / "data" / patient_id / "train_dataset.h5"
-        if h5_path.exists():
-            all_datasets.append(EEGDataset(str(h5_path), split=f"train ({patient_id})", augment=True))
-        else:
-            print(f"  Skipping {patient_id}: no train dataset found")
+        dataset_dir = Path("preprocessing") / "data" / patient_id
+        if not dataset_dir.exists():
+            print(f"  Skipping {patient_id}: no dataset directory")
+            continue
+        for h5_file in dataset_dir.glob("s*_dataset.h5"):
+            all_datasets.append(EEGDataset(str(h5_file), split=f"pretrain ({patient_id})", augment=True))
 
     if not all_datasets:
         print("No datasets found for pretraining!")
         return
 
     combined = ConcatDataset(all_datasets)
-    print(f"\nCombined pretraining dataset: {len(combined)} samples from {len(all_datasets)} patients")
+    print(f"\nCombined pretraining dataset: {len(combined)} samples from {len(all_datasets)} splits")
 
     pretrain_loader = DataLoader(
         combined,
@@ -861,7 +810,7 @@ def main():
         return
 
     n_patients = len(PATIENTS)
-    
+
     if LOPO_FOLD_ID is None:
         # per patient
         if PATIENT_INDEX is None:
@@ -878,7 +827,7 @@ def main():
             if TEST_SEIZURE is not None:
                 test_seizures = [TEST_SEIZURE]
             print("patient:", patient_id, "seizures:", test_seizures)
-            
+
             for sid in test_seizures:
                 try:
                     gc.collect()
@@ -895,19 +844,15 @@ def main():
         all_datasets = create_datasets(patients_to_process)
 
         patient_config = get_patient_config(LOPO_FOLD_ID)
-        print("HERE")
         try:
             gc.collect()
-            EEGCNNTrainer(patient_config, datasets=all_datasets, 
+            EEGCNNTrainer(patient_config, datasets=all_datasets,
                           lopo=True).train()
         except Exception as e:
             print(f"Error LOPO {patient_config['patient_id']} : {e}")
             import traceback
 
             traceback.print_exc()
-
-
-
 
 
 if __name__ == "__main__":

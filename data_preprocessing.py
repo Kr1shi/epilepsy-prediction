@@ -14,6 +14,7 @@ from scipy.signal import spectrogram
 from data_segmentation_helpers.config import (
     TASK_MODE,
     SEGMENT_DURATION,
+    SEQUENCE_LENGTH,
     TARGET_CHANNELS,
     LOW_FREQ_HZ,
     HIGH_FREQ_HZ,
@@ -259,6 +260,15 @@ class EEGPreprocessor:
                 spec_stack = np.stack(
                     [x[:, :, :min_t] for x in spec_list], axis=0
                 )
+
+                # Zero-pad partial sequences to full SEQUENCE_LENGTH
+                if spec_stack.shape[0] < SEQUENCE_LENGTH:
+                    pad_count = SEQUENCE_LENGTH - spec_stack.shape[0]
+                    pad_shape = (pad_count, *spec_stack.shape[1:])
+                    spec_stack = np.concatenate(
+                        [spec_stack, np.zeros(pad_shape, dtype=spec_stack.dtype)],
+                        axis=0,
+                    )
 
                 results.append(
                     {

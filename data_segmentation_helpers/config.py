@@ -12,8 +12,8 @@ Conv-Transformer Architecture:
 
 TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
 PREICTAL_WINDOW = 40 * 60  # 40 minutes before seizure (zone starts at -40min)
-PREICTAL_ONSET_BUFFER = 10 * 60  # 10 minutes before seizure (zone ends at -10min)
-                                  # Effective preictal zone: [-40min, -10min]
+PREICTAL_ONSET_BUFFER = 5 * 60   # 5 minutes before seizure (zone ends at -5min)
+                                  # Effective preictal zone: [-40min, -5min]
 INTERICTAL_BUFFER = 1 * 60 * 60  # 1 hour buffer around seizures
 
 # =============================================================================
@@ -67,6 +67,7 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 
 SEGMENT_DURATION = 5    # seconds per segment
 SEQUENCE_LENGTH = 360   # segments per sequence (360 × 5s = 1800s = 30 min)
+MIN_SEQUENCE_LENGTH = 120  # minimum segments for partial sequences (120 × 5s = 600s = 10 min)
 SEQUENCE_STRIDE = 12    # segments between sequences (12 × 5s = 60s = 1 min stride for preictal)
 
 # =============================================================================
@@ -128,7 +129,7 @@ PRETRAINING_EPOCHS = 60   # Cross-patient pretraining (more epochs for shared en
 TRAINING_EPOCHS = 30      # Per-patient fine-tuning
 SEQUENCE_BATCH_SIZE = 4   # Reduced for 30-min windows (~30MB per sample)
 LEARNING_RATE = 1e-4      # Pretraining LR
-FINETUNING_LEARNING_RATE = 5e-5  # Lower LR for fine-tuning to preserve pretrained features
+FINETUNING_LEARNING_RATE = 1e-4  # Same as pretraining to allow proper calibration adaptation
 WEIGHT_DECAY = 1e-4
 NUM_WORKERS = 0  # Must be 0 for lazy HDF5 loading
 

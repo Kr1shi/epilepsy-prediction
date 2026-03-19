@@ -414,16 +414,17 @@ class EEGTrainer:
 
         self.model.to(self.device)
 
-        # Class-weighted focal loss
+        # Class-weighted cross-entropy (better calibrated than FocalLoss for fine-tuning)
         train_labels = self.train_loader.dataset.labels
         counts = torch.bincount(train_labels).float()
         class_weights = counts.sum() / (len(counts) * counts)
-        self.criterion = FocalLoss(
-            weight=class_weights.to(self.device), gamma=2.0, label_smoothing=0.05
+        self.criterion = nn.CrossEntropyLoss(
+            weight=class_weights.to(self.device), label_smoothing=0.05
         )
 
         self.optimizer = optim.Adam(
-            self.model.parameters(), lr=FINETUNING_LEARNING_RATE, weight_decay=WEIGHT_DECAY
+            self.model.parameters(),
+            lr=FINETUNING_LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -619,20 +620,48 @@ class EEGTrainer:
         if not best_path.exists():
             return
 
-        print(f"\nPerforming final threshold tuning on best model (using Validation Set)...")
         checkpoint = torch.load(best_path, map_location=self.device, weights_only=False)
+
+        # Load temperature from pretrained config
+        pretrained_config_path = Path("model") / "pretrained_config.json"
+        if pretrained_config_path.exists():
+            with open(pretrained_config_path, "r") as f:
+                pretrained_config = json.load(f)
+            temperature = pretrained_config.get("temperature", 1.0)
+        else:
+            temperature = 1.0
+
+        # Tune threshold on per-patient val set (not leakage — val is separate from test)
+        print(f"\nTuning threshold on per-patient val set (temperature={temperature:.2f})...")
         self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.model.to(self.device)
+        self.model.eval()
 
-        val_metrics, tracker = self.validate_epoch(
-            "Final Tuning (Val Set)", loader=self.val_loader
-        )
+        all_logits = []
+        all_labels = []
+        with torch.no_grad():
+            for x, labels in self.val_loader:
+                x, labels = x.to(self.device), labels.to(self.device)
+                outputs = self.model(x)
+                all_logits.extend(outputs.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
 
-        optimal_threshold = val_metrics["optimal_threshold"]
+        logits_np = np.array(all_logits)
+        labels_np = np.array(all_labels)
 
-        all_probs = np.array(tracker.probabilities)
-        all_labels = np.array(tracker.true_labels)
+        # Apply temperature scaling to get calibrated probabilities
+        scaled_logits = torch.FloatTensor(logits_np) / temperature
+        all_probs = torch.softmax(scaled_logits, dim=1)[:, 1].numpy()
+
+        if len(np.unique(labels_np)) > 1:
+            fpr, tpr, thresholds = roc_curve(labels_np, all_probs)
+            j_scores = tpr - fpr
+            optimal_threshold = float(thresholds[np.argmax(j_scores)])
+        else:
+            optimal_threshold = 0.5
+
         optimized_preds = (all_probs >= optimal_threshold).astype(int)
-        best_window, best_count = optimize_running_average(optimized_preds, all_labels)
+        best_window, best_count = optimize_running_average(optimized_preds, labels_np)
 
         if "config" not in checkpoint:
             checkpoint["config"] = {}
@@ -640,6 +669,7 @@ class EEGTrainer:
         checkpoint["config"]["optimal_threshold"] = optimal_threshold
         checkpoint["config"]["smoothing_window"] = best_window
         checkpoint["config"]["smoothing_count"] = best_count
+        checkpoint["config"]["temperature"] = temperature
         checkpoint["config"]["task_mode"] = TASK_MODE
 
         torch.save(checkpoint, best_path)
@@ -647,6 +677,7 @@ class EEGTrainer:
         print(f"   - Optimal Threshold: {optimal_threshold:.4f}")
         print(f"   - Smoothing Window: {best_window}")
         print(f"   - Smoothing Count: {best_count}")
+        print(f"   - Temperature: {temperature:.2f}")
 
 
 def pretrain():
@@ -742,6 +773,81 @@ def pretrain():
     save_path = save_dir / "pretrained_encoder.pth"
     torch.save(model.state_dict(), save_path)
     print(f"\nPretrained encoder saved to {save_path}")
+
+    # Tune threshold on combined validation set (no data leakage)
+    print("\nTuning threshold on combined cross-patient validation set...")
+    val_datasets = []
+    for patient_id in PATIENTS:
+        val_path = Path("preprocessing") / "data" / patient_id / "val_dataset.h5"
+        if val_path.exists():
+            val_datasets.append(EEGDataset(str(val_path), split=f"val ({patient_id})"))
+
+    if val_datasets:
+        combined_val = ConcatDataset(val_datasets)
+        val_loader = DataLoader(
+            combined_val,
+            batch_size=SEQUENCE_BATCH_SIZE,
+            shuffle=False,
+            num_workers=NUM_WORKERS,
+        )
+        print(f"Combined val set: {len(combined_val)} samples from {len(val_datasets)} patients")
+
+        model.eval()
+        all_logits = []
+        all_labels = []
+        with torch.no_grad():
+            for x, labels in tqdm(val_loader, desc="Val inference"):
+                x, labels = x.to(device), labels.to(device)
+                outputs = model(x)
+                all_logits.extend(outputs.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        logits_np = np.array(all_logits)
+        labels_np = np.array(all_labels)
+
+        # Temperature scaling: find T that minimizes NLL on val set
+        print("\nCalibrating temperature scaling on validation set...")
+        best_temperature = 1.0
+        best_nll = float("inf")
+        for t_candidate in np.arange(0.5, 5.05, 0.05):
+            scaled_logits = torch.FloatTensor(logits_np) / t_candidate
+            nll = nn.CrossEntropyLoss()(scaled_logits, torch.LongTensor(labels_np)).item()
+            if nll < best_nll:
+                best_nll = nll
+                best_temperature = float(t_candidate)
+        print(f"  Optimal temperature: {best_temperature:.2f} (NLL: {best_nll:.4f})")
+
+        # Compute calibrated probabilities using temperature
+        scaled_logits = torch.FloatTensor(logits_np) / best_temperature
+        probs_np = torch.softmax(scaled_logits, dim=1)[:, 1].numpy()
+
+        if len(np.unique(labels_np)) > 1:
+            fpr, tpr, thresholds = roc_curve(labels_np, probs_np)
+            j_scores = tpr - fpr
+            optimal_threshold = float(thresholds[np.argmax(j_scores)])
+        else:
+            optimal_threshold = 0.5
+
+        # Optimize smoothing on val predictions
+        optimized_preds = (probs_np >= optimal_threshold).astype(int)
+        best_window, best_count = optimize_running_average(optimized_preds, labels_np)
+
+        pretrained_config = {
+            "optimal_threshold": optimal_threshold,
+            "smoothing_window": best_window,
+            "smoothing_count": best_count,
+            "temperature": best_temperature,
+            "task_mode": TASK_MODE,
+        }
+        config_path = save_dir / "pretrained_config.json"
+        with open(config_path, "w") as f:
+            json.dump(pretrained_config, f, indent=2)
+
+        print(f"  Pretrained threshold: {optimal_threshold:.4f}")
+        print(f"  Smoothing: window={best_window}, count={best_count}")
+        print(f"  Config saved to {config_path}")
+    else:
+        print("  No val datasets found, skipping threshold tuning")
 
 
 def main():

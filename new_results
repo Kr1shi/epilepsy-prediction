@@ -1,0 +1,1306 @@
+============================================================
+EVALUATION: ALL 22 PATIENTS
+============================================================
+Using Apple Silicon GPU (MPS)
+
+============================================================
+PATIENT 0/21: chb01
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb01
+Loading test dataset from preprocessing/data/chb01/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb01/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7616
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8542
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.5000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2381
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         2         0
+       Preictal         2         0
+
+Re-thresholded with test-set optimal: 0.2381
+Re-thresholded Accuracy: 0.7500 (75.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb01/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb01/seizure_01.png
+
+============================================================
+PATIENT 1/21: chb02
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb02
+Loading test dataset from preprocessing/data/chb02/test_dataset.h5...
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+Loading model checkpoint from model/chb02/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7620
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8568
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         3         0
+       Preictal         3         0
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.5000 (50.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb02/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb02/seizure_01.png
+
+============================================================
+PATIENT 2/21: chb03
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb03
+Loading test dataset from preprocessing/data/chb03/test_dataset.h5...
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+Loading model checkpoint from model/chb03/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7523
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8339
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2435
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         3         0
+       Preictal         3         0
+
+Re-thresholded with test-set optimal: 0.2435
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb03/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb03/seizure_01.png
+
+============================================================
+PATIENT 3/21: chb04
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb04
+Loading test dataset from preprocessing/data/chb04/test_dataset.h5...
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loading model checkpoint from model/chb04/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7754
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.2663
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.7673
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         1         0
+       Preictal         1         0
+
+Re-thresholded with test-set optimal: 0.7673
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb04/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb04/seizure_01.png
+
+============================================================
+PATIENT 4/21: chb05
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb05
+Loading test dataset from preprocessing/data/chb05/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb05/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.2377
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8550
+Accuracy:  0.2500 (25.00%)
+Precision: 0.3333
+Recall:    0.5000
+F1 Score:  0.4000
+AUC-ROC:   0.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         0         2
+       Preictal         1         1
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.5000 (50.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb05/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb05/seizure_01.png
+
+============================================================
+PATIENT 5/21: chb06
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb06
+Loading test dataset from preprocessing/data/chb06/test_dataset.h5...
+Loaded test dataset: 16 samples
+  - Class Dist: tensor([8, 8])
+Loading model checkpoint from model/chb06/best_model.pth...
+Model loaded from epoch 3
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.5000
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8607
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.6875
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2331
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         8         0
+       Preictal         8         0
+
+Re-thresholded with test-set optimal: 0.2331
+Re-thresholded Accuracy: 0.7500 (75.00%)
+
+Applying smoothing using HEURISTIC parameters (fallback):
+  - Window Size: 20
+  - Threshold Count: 1 (derived from precision 0.0000)
+
+============================================================
+SMOOTHED PREDICTIONS RESULTS
+============================================================
+Smoothed_Accuracy:  0.0000 (0.00%)
+Smoothed_Precision: 0.0000
+Smoothed_Recall:    0.0000
+Smoothed_F1 Score:  0.0000
+Loaded test dataset: 16 samples
+  - Class Dist: tensor([8, 8])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 2.0000 per hour
+
+  Results saved to model/chb06/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb06/seizure_01.png
+
+============================================================
+PATIENT 6/21: chb07
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb07
+Loading test dataset from preprocessing/data/chb07/test_dataset.h5...
+Loaded test dataset: 18 samples
+  - Class Dist: tensor([9, 9])
+Loading model checkpoint from model/chb07/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7599
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8472
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.5556
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2414
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         9         0
+       Preictal         9         0
+
+Re-thresholded with test-set optimal: 0.2414
+Re-thresholded Accuracy: 0.7778 (77.78%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 18 samples
+  - Class Dist: tensor([9, 9])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.8889 per hour
+
+  Results saved to model/chb07/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb07/seizure_01.png
+
+============================================================
+PATIENT 7/21: chb08
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb08
+Loading test dataset from preprocessing/data/chb08/test_dataset.h5...
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loading model checkpoint from model/chb08/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7652
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8437
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2447
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         1         0
+       Preictal         1         0
+
+Re-thresholded with test-set optimal: 0.2447
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb08/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb08/seizure_01.png
+
+============================================================
+PATIENT 8/21: chb09
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb09
+Loading test dataset from preprocessing/data/chb09/test_dataset.h5...
+Loaded test dataset: 20 samples
+  - Class Dist: tensor([10, 10])
+Loading model checkpoint from model/chb09/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7678
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8625
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.8800
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2312
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal        10         0
+       Preictal        10         0
+
+Re-thresholded with test-set optimal: 0.2312
+Re-thresholded Accuracy: 0.9000 (90.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 20 samples
+  - Class Dist: tensor([10, 10])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.2000 per hour
+
+  Results saved to model/chb09/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb09/seizure_01.png
+
+============================================================
+PATIENT 9/21: chb10
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb10
+Loading test dataset from preprocessing/data/chb10/test_dataset.h5...
+Loaded test dataset: 10 samples
+  - Class Dist: tensor([5, 5])
+Loading model checkpoint from model/chb10/best_model.pth...
+Model loaded from epoch 6
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.5000
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.4531
+Accuracy:  0.8000 (80.00%)
+Precision: 1.0000
+Recall:    0.6000
+F1 Score:  0.7500
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2447
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         5         0
+       Preictal         2         3
+
+Re-thresholded with test-set optimal: 0.2447
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using HEURISTIC parameters (fallback):
+  - Window Size: 20
+  - Threshold Count: 10 (derived from precision 1.0000)
+
+============================================================
+SMOOTHED PREDICTIONS RESULTS
+============================================================
+Smoothed_Accuracy:  0.0000 (0.00%)
+Smoothed_Precision: 0.0000
+Smoothed_Recall:    0.0000
+Smoothed_F1 Score:  0.0000
+Loaded test dataset: 10 samples
+  - Class Dist: tensor([5, 5])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 2.0000 per hour
+
+  Results saved to model/chb10/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb10/seizure_01.png
+
+============================================================
+PATIENT 10/21: chb11
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb11
+Loading test dataset from preprocessing/data/chb11/test_dataset.h5...
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+Loading model checkpoint from model/chb11/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7572
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8661
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         3         0
+       Preictal         3         0
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.5000 (50.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb11/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb11/seizure_01.png
+
+============================================================
+PATIENT 11/21: chb13
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb13
+Loading test dataset from preprocessing/data/chb13/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb13/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7742
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.5664
+Accuracy:  1.0000 (100.00%)
+Precision: 1.0000
+Recall:    1.0000
+F1 Score:  1.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.7749
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         2         0
+       Preictal         0         2
+
+Re-thresholded with test-set optimal: 0.7749
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb13/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb13/seizure_01.png
+
+============================================================
+PATIENT 12/21: chb14
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb14
+Loading test dataset from preprocessing/data/chb14/test_dataset.h5...
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loading model checkpoint from model/chb14/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7569
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8624
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         1         0
+       Preictal         1         0
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.5000 (50.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb14/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb14/seizure_01.png
+
+============================================================
+PATIENT 13/21: chb15
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb15
+Loading test dataset from preprocessing/data/chb15/test_dataset.h5...
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loading model checkpoint from model/chb15/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7705
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8714
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         1         0
+       Preictal         1         0
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.5000 (50.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb15/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb15/seizure_01.png
+
+============================================================
+PATIENT 14/21: chb16
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb16
+Loading test dataset from preprocessing/data/chb16/test_dataset.h5...
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loading model checkpoint from model/chb16/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7657
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.2793
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.7554
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         1         0
+       Preictal         1         0
+
+Re-thresholded with test-set optimal: 0.7554
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb16/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb16/seizure_01.png
+
+============================================================
+PATIENT 15/21: chb17
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb17
+Loading test dataset from preprocessing/data/chb17/test_dataset.h5...
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loading model checkpoint from model/chb17/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7652
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8627
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         1         0
+       Preictal         1         0
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.5000 (50.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb17/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb17/seizure_01.png
+
+============================================================
+PATIENT 16/21: chb18
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb18
+Loading test dataset from preprocessing/data/chb18/test_dataset.h5...
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+Loading model checkpoint from model/chb18/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7684
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.2702
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.7682
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         3         0
+       Preictal         3         0
+
+Re-thresholded with test-set optimal: 0.7682
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb18/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb18/seizure_01.png
+
+============================================================
+PATIENT 17/21: chb19
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb19
+Loading test dataset from preprocessing/data/chb19/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb19/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7592
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.6206
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.5000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.6405
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         2         0
+       Preictal         2         0
+
+Re-thresholded with test-set optimal: 0.6405
+Re-thresholded Accuracy: 0.7500 (75.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 1.0000 per hour
+
+  Results saved to model/chb19/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb19/seizure_01.png
+
+============================================================
+PATIENT 18/21: chb20
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb20
+Loading test dataset from preprocessing/data/chb20/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb20/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7654
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.2703
+Accuracy:  1.0000 (100.00%)
+Precision: 1.0000
+Recall:    1.0000
+F1 Score:  1.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.7662
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         2         0
+       Preictal         0         2
+
+Re-thresholded with test-set optimal: 0.7662
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb20/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb20/seizure_01.png
+
+============================================================
+PATIENT 19/21: chb21
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb21
+Loading test dataset from preprocessing/data/chb21/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb21/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7734
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      1.1304
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         2         0
+       Preictal         2         0
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.2500 (25.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 1.0000 per hour
+
+  Results saved to model/chb21/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb21/seizure_01.png
+
+============================================================
+PATIENT 20/21: chb22
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb22
+Loading test dataset from preprocessing/data/chb22/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb22/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7568
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8006
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   1.0000
+
+Test Set Analysis:
+Test Set Optimal Threshold: 0.2412
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         2         0
+       Preictal         2         0
+
+Re-thresholded with test-set optimal: 0.2412
+Re-thresholded Accuracy: 1.0000 (100.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 1.0000 (1/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb22/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb22/seizure_01.png
+
+============================================================
+PATIENT 21/21: chb23
+============================================================
+Evaluating model: best_model.pth
+Dataset prefix: chb23
+Loading test dataset from preprocessing/data/chb23/test_dataset.h5...
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loading model checkpoint from model/chb23/best_model.pth...
+Model loaded from epoch 0
+Task mode: PREDICTION (preictal vs interictal)
+Using decision threshold: 0.7652
+Loaded smoothing params: Window=1, Count=1
+Total parameters: 549,538
+
+Evaluating on test set...
+
+============================================================
+PATIENT TEST RESULTS
+============================================================
+Loss:      0.8642
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.2500
+
+Test Set Analysis:
+Test Set Optimal Threshold: inf
+
+Confusion Matrix:
+                Predicted
+                Interictal  Preictal
+Actual Interictal         2         0
+       Preictal         2         0
+
+Re-thresholded with test-set optimal: 0.5000
+Re-thresholded Accuracy: 0.5000 (50.00%)
+
+Applying smoothing using TRAINED parameters:
+  - Window Size: 1
+  - Threshold Count: 1
+Loaded test dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+
+============================================================
+PER-SEIZURE ACCURACY RESULTS
+============================================================
+Total Seizures: 1
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
+
+  Results saved to model/chb23/test_results.json
+
+Generating per-seizure dynamics plots...
+Found 1 contiguous seizure events (after sorting).
+  Saved result_plots/chb23/seizure_01.png
+
+============================================================
+BATCH EVALUATION SUMMARY
+============================================================
+Patients evaluated: 22/22
+Mean Accuracy: 0.5477 (+/-0.1655)
+Mean AUC-ROC:  0.5624 (+/-0.4348)
+Mean Smoothed Accuracy: 0.0000 (+/-0.0000)
+Mean Per-Seizure Accuracy: 0.6364 (+/-0.4810)
+Mean False Positive Rate: 0.3222 per hour (+/-0.6233)
+
+  Batch results saved to model/batch_test_results.json

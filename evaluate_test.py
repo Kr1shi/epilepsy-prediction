@@ -119,13 +119,15 @@ def evaluate_model(model_path, test_data_path, device):
     config = checkpoint.get("config", {})
     checkpoint_task_mode = config.get("task_mode", TASK_MODE)
     positive_class = config.get("positive_class", get_positive_label())
-    loaded_threshold = config.get("optimal_threshold", 0.5)
+    loaded_threshold = 0.5  # Fixed natural decision boundary (no per-patient tuning)
     smoothing_window = config.get("smoothing_window")
     smoothing_count = config.get("smoothing_count")
+    temperature = 1.0  # No temperature scaling
 
     print(f"Model loaded from epoch {checkpoint.get('epoch', 'Best')}")
     print(f"Task mode: {checkpoint_task_mode.upper()} ({positive_class} vs interictal)")
     print(f"Using decision threshold: {loaded_threshold:.4f}")
+    print(f"Temperature scaling: {temperature:.2f}")
     if smoothing_window:
         print(
             f"Loaded smoothing params: Window={smoothing_window}, Count={smoothing_count}"
@@ -156,7 +158,7 @@ def evaluate_model(model_path, test_data_path, device):
             total_loss += loss.item()
             num_batches += 1
 
-            probabilities = torch.softmax(outputs, dim=1)[:, 1]
+            probabilities = torch.softmax(outputs / temperature, dim=1)[:, 1]
             predictions = (probabilities >= loaded_threshold).long()
 
             metrics_tracker.update(predictions, labels, probabilities)
@@ -170,16 +172,8 @@ def evaluate_model(model_path, test_data_path, device):
     metrics = metrics_tracker.compute_metrics()
     metrics["loss"] = avg_loss
 
-    # Compute optimal threshold for this specific set (for analysis only)
-    labels_np = np.array(all_labels)
-    probs_np = np.array(all_probabilities)
-    if len(np.unique(labels_np)) > 1:
-        fpr, tpr, thresholds = roc_curve(labels_np, probs_np)
-        j_scores = tpr - fpr
-        best_threshold = thresholds[np.argmax(j_scores)]
-    else:
-        best_threshold = 0.5
-    metrics["test_set_optimal_threshold"] = float(best_threshold)
+    # Record the threshold used (from training, no test-set leakage)
+    metrics["threshold_used"] = float(loaded_threshold)
 
     cm = confusion_matrix(all_labels, all_predictions)
 
@@ -196,7 +190,7 @@ def evaluate_model(model_path, test_data_path, device):
     )
 
 
-def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.5):
+def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.5, temperature=1.0):
     """Plots the model's output probability for each distinct seizure event in the test set."""
     print("\nGenerating per-seizure dynamics plots...")
 
@@ -213,7 +207,7 @@ def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.
         for x, labels in loader:
             x = x.to(device)
             outputs = model(x)
-            probs = torch.softmax(outputs, dim=1)[:, 1]
+            probs = torch.softmax(outputs / temperature, dim=1)[:, 1]
             probabilities.extend(probs.cpu().numpy())
             true_labels.extend(labels.numpy())
 
@@ -398,10 +392,7 @@ def main():
             print(f"F1 Score:  {metrics['f1']:.4f}")
             print(f"AUC-ROC:   {metrics['auc_roc']:.4f}")
 
-            print(f"\nTest Set Analysis:")
-            print(
-                f"Test Set Optimal Threshold: {metrics['test_set_optimal_threshold']:.4f}"
-            )
+            print(f"\nThreshold used (from training): {metrics['threshold_used']:.4f}")
 
             print("\nConfusion Matrix:")
             print("                Predicted")
@@ -419,15 +410,6 @@ def main():
                 "confusion_matrix": cm.tolist(),
                 "model_path": str(model_path),
             }
-
-            # Re-threshold with test-set optimal threshold for smoothing/per-seizure
-            optimal_thresh = metrics["test_set_optimal_threshold"]
-            if not np.isfinite(optimal_thresh):
-                optimal_thresh = 0.5  # fallback for degenerate cases
-            predictions = [1 if p >= optimal_thresh else 0 for p in probabilities]
-            recomp_acc = np.mean(np.array(predictions) == np.array(true_labels))
-            print(f"\nRe-thresholded with test-set optimal: {optimal_thresh:.4f}")
-            print(f"Re-thresholded Accuracy: {recomp_acc:.4f} ({recomp_acc*100:.2f}%)")
 
             # Apply smoothing
             if (
@@ -542,9 +524,8 @@ def main():
             model.load_state_dict(checkpoint["model_state_dict"])
             model.to(device)
 
-            loaded_threshold = checkpoint.get("config", {}).get(
-                "optimal_threshold", 0.5
-            )
+            loaded_threshold = 0.5
+            plot_temperature = 1.0
 
             if "test_dataset" not in locals():
                 test_dataset = EEGDataset(test_data_path, split="test")
@@ -555,6 +536,7 @@ def main():
                 device=device,
                 patient_id=patient_id,
                 threshold=loaded_threshold,
+                temperature=plot_temperature,
             )
 
             batch_results[current_idx] = {

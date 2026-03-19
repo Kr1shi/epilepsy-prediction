@@ -15,6 +15,7 @@ from data_segmentation_helpers.config import (
     TASK_MODE,
     SEGMENT_DURATION,
     SEQUENCE_LENGTH,
+    MIN_SEQUENCE_LENGTH,
     SEQUENCE_STRIDE,
     PREICTAL_WINDOW,
     INTERICTAL_BUFFER,
@@ -139,10 +140,13 @@ def create_sequences_from_file(
     # Identify positive regions (preictal/ictal) to determine stride strategy
     positive_regions = identify_positive_regions(all_seizures_global)
 
+    # Calculate minimum sequence duration for partial sequences
+    min_sequence_duration = SEGMENT_DURATION * MIN_SEQUENCE_LENGTH
+
     # Calculate how many sequences we can extract
-    if file_duration < sequence_duration + (2 * SAFETY_MARGIN):
+    if file_duration < min_sequence_duration + (2 * SAFETY_MARGIN):
         return (
-            sequences  # File too short for even one sequence (including safety margins)
+            sequences  # File too short for even a partial sequence (including safety margins)
         )
 
     # Helper function to check if a position is in a positive region
@@ -155,17 +159,34 @@ def create_sequences_from_file(
 
     # Generate sequence start times using adaptive sliding window
     sequence_start_local = SAFETY_MARGIN
-    while sequence_start_local + sequence_duration + SAFETY_MARGIN <= file_duration:
-        sequence_end_local = sequence_start_local + sequence_duration
+    while sequence_start_local + min_sequence_duration + SAFETY_MARGIN <= file_duration:
+        # Determine how many segments can fit from this start position
+        available_duration = file_duration - sequence_start_local - SAFETY_MARGIN
+        max_segments = min(SEQUENCE_LENGTH, int(available_duration // SEGMENT_DURATION))
+
+        if max_segments < MIN_SEQUENCE_LENGTH:
+            break  # Not enough room for even a partial sequence
+
+        actual_num_segments = max_segments
+        actual_sequence_duration = actual_num_segments * SEGMENT_DURATION
+        sequence_end_local = sequence_start_local + actual_sequence_duration
 
         # Convert to global timeline
         sequence_start_global = file_offset + sequence_start_local
         sequence_end_global = file_offset + sequence_end_local
 
+        # For interictal sequences, require full length (no padding needed)
+        # Only allow partial sequences for positive regions
+        is_partial = actual_num_segments < SEQUENCE_LENGTH
+        if is_partial and not is_in_positive_region(sequence_start_global, sequence_end_global):
+            # Skip partial interictal sequences — we have plenty of interictal data
+            sequence_start_local += non_overlapping_stride
+            continue
+
         # Generate segment start times within this sequence (local to file)
         segment_starts = [
             sequence_start_local + (i * SEGMENT_DURATION)
-            for i in range(SEQUENCE_LENGTH)
+            for i in range(actual_num_segments)
         ]
 
         # Validate all segments have sufficient data
@@ -173,7 +194,6 @@ def create_sequences_from_file(
         if last_segment_end + SAFETY_MARGIN > file_duration:
             # Skip this sequence - insufficient data for complete preprocessing
             skipped_boundary_sequences += 1
-            # Use non-overlapping stride for interictal regions (safest assumption)
             sequence_start_local += non_overlapping_stride
             continue
 
@@ -307,9 +327,10 @@ def create_sequences_from_file(
             "file": filename,
             "sequence_start_sec": sequence_start_local,
             "sequence_end_sec": sequence_end_local,
-            "sequence_duration_sec": sequence_duration,
+            "sequence_duration_sec": actual_sequence_duration,
             "segment_starts": segment_starts,
-            "num_segments": SEQUENCE_LENGTH,
+            "num_segments": actual_num_segments,
+            "is_partial": is_partial,
             "type": sequence_type,
             "task_mode": TASK_MODE,  # Track which mode generated this sequence
         }

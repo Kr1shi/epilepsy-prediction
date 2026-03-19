@@ -190,12 +190,11 @@ def evaluate_model(model_path, test_data_path, device):
     )
 
 
-def evaluate_ensemble(n_seeds, test_data_path, patient_id, device):
-    """Evaluate ensemble by averaging probabilities from N seed models."""
-    print(f"Loading test dataset from {test_data_path}...")
-    test_dataset = EEGDataset(test_data_path, split="test")
-    test_loader = DataLoader(
-        test_dataset,
+def _get_ensemble_probs(n_seeds, data_path, patient_id, device, split="test"):
+    """Get averaged probabilities from N seed models on a given dataset."""
+    dataset = EEGDataset(data_path, split=split)
+    loader = DataLoader(
+        dataset,
         batch_size=SEQUENCE_BATCH_SIZE,
         shuffle=False,
         num_workers=0,
@@ -203,13 +202,12 @@ def evaluate_ensemble(n_seeds, test_data_path, patient_id, device):
     )
 
     all_labels = None
-    ensemble_probs = []  # list of per-seed probability arrays
+    ensemble_probs = []
 
     for seed_idx in range(n_seeds):
         suffix = f"seed{seed_idx}"
         model_path = Path("model") / suffix / patient_id / "best_model.pth"
         if not model_path.exists():
-            print(f"  Skipping {suffix}: {model_path} not found")
             continue
 
         model = _create_model(device)
@@ -225,7 +223,7 @@ def evaluate_ensemble(n_seeds, test_data_path, patient_id, device):
         seed_probs = []
         seed_labels = []
         with torch.no_grad():
-            for x, labels in test_loader:
+            for x, labels in loader:
                 x = x.to(device)
                 outputs = model(x)
                 probs = torch.softmax(outputs, dim=1)[:, 1]
@@ -235,18 +233,64 @@ def evaluate_ensemble(n_seeds, test_data_path, patient_id, device):
         ensemble_probs.append(np.array(seed_probs))
         if all_labels is None:
             all_labels = np.array(seed_labels)
-        print(f"  {suffix}: loaded (epoch {checkpoint.get('epoch', '?')})")
+        if split == "test":
+            print(f"  {suffix}: loaded (epoch {checkpoint.get('epoch', '?')})")
 
     if not ensemble_probs:
+        return None, None, 0
+
+    avg_probs = np.mean(ensemble_probs, axis=0)
+    return avg_probs, all_labels, len(ensemble_probs)
+
+
+def tune_ensemble_threshold(n_seeds, device):
+    """Tune threshold on combined val set using ensemble-averaged probabilities."""
+    print("Tuning ensemble threshold on combined validation set...")
+    all_val_probs = []
+    all_val_labels = []
+
+    for patient_id in PATIENTS:
+        val_path = Path("preprocessing") / "data" / patient_id / "val_dataset.h5"
+        if not val_path.exists():
+            continue
+        probs, labels, n_models = _get_ensemble_probs(
+            n_seeds, str(val_path), patient_id, device, split=f"val ({patient_id})"
+        )
+        if probs is not None:
+            all_val_probs.extend(probs)
+            all_val_labels.extend(labels)
+
+    all_val_probs = np.array(all_val_probs)
+    all_val_labels = np.array(all_val_labels)
+
+    if len(np.unique(all_val_labels)) > 1:
+        fpr, tpr, thresholds = roc_curve(all_val_labels, all_val_probs)
+        j_scores = tpr - fpr
+        optimal_threshold = float(thresholds[np.argmax(j_scores)])
+    else:
+        optimal_threshold = 0.5
+
+    val_auc = roc_auc_score(all_val_labels, all_val_probs)
+    print(f"  Val samples: {len(all_val_labels)}")
+    print(f"  Val AUC: {val_auc:.4f}")
+    print(f"  Optimal threshold (Youden's J): {optimal_threshold:.4f}")
+    return optimal_threshold
+
+
+def evaluate_ensemble(n_seeds, test_data_path, patient_id, device, threshold=0.5):
+    """Evaluate ensemble by averaging probabilities from N seed models."""
+    print(f"Loading test dataset from {test_data_path}...")
+
+    avg_probs, all_labels, n_models = _get_ensemble_probs(
+        n_seeds, test_data_path, patient_id, device, split="test"
+    )
+
+    if avg_probs is None:
         print(f"  No ensemble models found for {patient_id}")
         return None
 
-    n_models = len(ensemble_probs)
     print(f"  Ensemble size: {n_models} models")
 
-    # Average probabilities across seeds
-    avg_probs = np.mean(ensemble_probs, axis=0)
-    threshold = 0.5
     predictions = (avg_probs >= threshold).astype(int)
 
     # Compute metrics
@@ -446,6 +490,11 @@ def main():
         device = torch.device("cpu")
         print("Using CPU")
 
+    # Tune ensemble threshold on val set (before per-patient evaluation)
+    ensemble_threshold = 0.5
+    if args.ensemble:
+        ensemble_threshold = tune_ensemble_threshold(args.ensemble, device)
+
     batch_results = {}
 
     for current_idx in patients_to_process:
@@ -470,7 +519,7 @@ def main():
                 print(f"Evaluating ENSEMBLE ({args.ensemble} seeds)")
                 print(f"Dataset prefix: {current_output_prefix}")
 
-                result = evaluate_ensemble(args.ensemble, test_data_path, patient_id, device)
+                result = evaluate_ensemble(args.ensemble, test_data_path, patient_id, device, threshold=ensemble_threshold)
                 if result is None:
                     continue
 
@@ -525,7 +574,8 @@ def main():
             print("\n" + "=" * 60)
             print("PATIENT TEST RESULTS")
             print("=" * 60)
-            print(f"Loss:      {metrics['loss']:.4f}")
+            if "loss" in metrics:
+                print(f"Loss:      {metrics['loss']:.4f}")
             print(
                 f"Accuracy:  {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)"
             )
@@ -550,8 +600,9 @@ def main():
                 "task_mode": checkpoint_task_mode,
                 "test_metrics": metrics,
                 "confusion_matrix": cm.tolist(),
-                "model_path": str(model_path),
             }
+            if not args.ensemble:
+                patient_results["model_path"] = str(model_path)
 
             # Apply smoothing
             if (

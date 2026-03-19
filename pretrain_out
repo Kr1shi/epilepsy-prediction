@@ -1,0 +1,53 @@
+============================================================
+CROSS-PATIENT PRETRAINING
+============================================================
+Device: mps
+Loaded train (chb01) dataset: 48 samples
+  - Class Dist: tensor([24, 24])
+  Skipping chb02: no train dataset found
+Loaded train (chb03) dataset: 46 samples
+  - Class Dist: tensor([23, 23])
+Loaded train (chb04) dataset: 102 samples
+  - Class Dist: tensor([51, 51])
+Loaded train (chb05) dataset: 42 samples
+  - Class Dist: tensor([21, 21])
+Loaded train (chb06) dataset: 162 samples
+  - Class Dist: tensor([81, 81])
+Loaded train (chb07) dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Loaded train (chb08) dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loaded train (chb09) dataset: 12 samples
+  - Class Dist: tensor([6, 6])
+Loaded train (chb10) dataset: 66 samples
+  - Class Dist: tensor([33, 33])
+  Skipping chb11: no train dataset found
+Loaded train (chb13) dataset: 10 samples
+  - Class Dist: tensor([5, 5])
+Loaded train (chb14) dataset: 26 samples
+  - Class Dist: tensor([13, 13])
+Loaded train (chb15) dataset: 28 samples
+  - Class Dist: tensor([14, 14])
+Loaded train (chb16) dataset: 20 samples
+  - Class Dist: tensor([10, 10])
+Loaded train (chb17) dataset: 22 samples
+  - Class Dist: tensor([11, 11])
+Loaded train (chb18) dataset: 56 samples
+  - Class Dist: tensor([28, 28])
+  Skipping chb19: no train dataset found
+Loaded train (chb20) dataset: 36 samples
+  - Class Dist: tensor([18, 18])
+Loaded train (chb21) dataset: 36 samples
+  - Class Dist: tensor([18, 18])
+Loaded train (chb22) dataset: 32 samples
+  - Class Dist: tensor([16, 16])
+Loaded train (chb23) dataset: 54 samples
+  - Class Dist: tensor([27, 27])
+
+Combined pretraining dataset: 804 samples from 19 patients
+Model Parameters: 549,538
+  Epoch 1 avg loss: 0.1689
+  Epoch 2 avg loss: 0.1592
+  Epoch 3 avg loss: 0.1493
+  Epoch 4 avg loss: 0.1379
+  Epoch 5 avg loss: 0.1427

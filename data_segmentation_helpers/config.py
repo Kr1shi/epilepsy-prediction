@@ -135,9 +135,7 @@ PRETRAINING_EPOCHS = 60  # Cross-patient pretraining (more epochs for shared enc
 TRAINING_EPOCHS = 30  # Per-patient fine-tuning
 SEQUENCE_BATCH_SIZE = 4  # Reduced for 30-min windows (~30MB per sample)
 LEARNING_RATE = 1e-4  # Pretraining LR
-FINETUNING_LEARNING_RATE = (
-    1e-4  # Same as pretraining to allow proper calibration adaptation
-)
+FINETUNING_LEARNING_RATE = 5e-5  # Lower than pretraining to prevent overfitting on small per-patient data
 WEIGHT_DECAY = 1e-4
 NUM_WORKERS = 0  # Must be 0 for lazy HDF5 loading
 

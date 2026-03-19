@@ -108,26 +108,36 @@ class EEGDataset(Dataset):
         return self.length
 
     def _apply_augmentation(self, x):
-        """Apply spectrogram augmentation.
+        """Apply SpecAugment-style augmentation.
         x: (sequence_length, channels, freq_bins, time_bins)
         """
-        # Time masking: zero out random contiguous segments in the sequence
-        if torch.rand(1).item() < 0.5:
-            seq_len = x.shape[0]
-            mask_len = torch.randint(1, max(2, seq_len // 10), (1,)).item()
-            start = torch.randint(0, seq_len - mask_len + 1, (1,)).item()
-            x[start : start + mask_len] = 0.0
+        seq_len = x.shape[0]
+        freq_bins = x.shape[2]
 
-        # Frequency masking: zero out random frequency bands
-        if torch.rand(1).item() < 0.5:
-            freq_bins = x.shape[2]
-            mask_len = torch.randint(1, max(2, freq_bins // 8), (1,)).item()
-            start = torch.randint(0, freq_bins - mask_len + 1, (1,)).item()
-            x[:, :, start : start + mask_len, :] = 0.0
+        # Time masking: zero out 1-2 random contiguous blocks of segments
+        for _ in range(torch.randint(1, 3, (1,)).item()):
+            if torch.rand(1).item() < 0.5:
+                mask_len = torch.randint(1, max(2, seq_len // 8), (1,)).item()
+                start = torch.randint(0, seq_len - mask_len + 1, (1,)).item()
+                x[start : start + mask_len] = 0.0
+
+        # Frequency masking: zero out 1-2 random frequency bands
+        for _ in range(torch.randint(1, 3, (1,)).item()):
+            if torch.rand(1).item() < 0.5:
+                mask_len = torch.randint(1, max(2, freq_bins // 6), (1,)).item()
+                start = torch.randint(0, freq_bins - mask_len + 1, (1,)).item()
+                x[:, :, start : start + mask_len, :] = 0.0
+
+        # Channel masking: zero out 1-3 random channels
+        if torch.rand(1).item() < 0.3:
+            n_channels = x.shape[1]
+            n_mask = torch.randint(1, min(4, n_channels), (1,)).item()
+            channels_to_mask = torch.randperm(n_channels)[:n_mask]
+            x[:, channels_to_mask, :, :] = 0.0
 
         # Gaussian noise
         if torch.rand(1).item() < 0.5:
-            noise_std = 0.05 * x.std()
+            noise_std = 0.1 * x.std()
             x = x + torch.randn_like(x) * noise_std
 
         return x
@@ -420,6 +430,13 @@ class EEGTrainer:
                 torch.load(pretrained_path, map_location=self.device, weights_only=False)
             )
 
+            # Freeze conv tower — only fine-tune transformer + classifier head
+            for param in self.model.conv_tower.parameters():
+                param.requires_grad = False
+            trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.model.parameters())
+            print(f"  Conv tower frozen: {trainable:,}/{total:,} params trainable")
+
         self.model.to(self.device)
 
         # Class-weighted cross-entropy (better calibrated than FocalLoss for fine-tuning)
@@ -430,8 +447,9 @@ class EEGTrainer:
             weight=class_weights.to(self.device), label_smoothing=0.05
         )
 
+        # Only optimize trainable parameters (transformer + head when conv tower is frozen)
         self.optimizer = optim.Adam(
-            self.model.parameters(),
+            filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=FINETUNING_LEARNING_RATE, weight_decay=WEIGHT_DECAY
         )
 

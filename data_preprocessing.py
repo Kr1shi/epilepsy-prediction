@@ -176,9 +176,9 @@ class EEGPreprocessor:
         """
         Extract single-stream full-band power spectrograms from an EDF file.
 
-        1. Identify ALL unique segments required by these sequences.
-        2. Compute STFT for each unique segment ONCE.
-        3. Reassemble sequences from pre-computed segments.
+        Computes STFT once on the full cropped signal (18 FFT calls total),
+        then slices per-segment spectrograms from the precomputed result.
+        This is ~100-1000x fewer FFT calls than computing per-segment.
         """
         try:
             # 1. Collect all unique segment start times
@@ -208,35 +208,55 @@ class EEGPreprocessor:
             self.remove_amplitude_artifacts(raw_cropped)
             data_uv = raw_cropped.get_data() * 1e6
 
-            # 3. Pre-compute frequency mask
+            # 3. Compute full-signal STFT once for all channels (18 calls instead of
+            #    18 × n_segments). Then apply freq mask + power + log in bulk.
+            full_spectrograms = []
+            time_array = None
+
+            for ch in range(data_uv.shape[0]):
+                f, t, Zxx = spectrogram(
+                    data_uv[ch, :],
+                    fs=sampling_rate,
+                    nperseg=STFT_NPERSEG,
+                    noverlap=STFT_NOVERLAP,
+                    nfft=STFT_NFFT,
+                    window="hann",
+                    mode="complex",
+                )
+                full_spectrograms.append(Zxx)
+                if time_array is None:
+                    time_array = t
+
+            # Stack to (n_channels, n_freq, n_time) and apply transforms in bulk
+            full_stft = np.array(full_spectrograms)
+
             freqs = np.fft.rfftfreq(STFT_NFFT, d=1 / sampling_rate)
             freq_mask = (freqs >= FULL_FREQ_BAND[0]) & (freqs <= FULL_FREQ_BAND[1])
+            full_stft = full_stft[:, freq_mask, :]
 
-            # 4. Compute & Cache Unique Segments
+            full_power = np.abs(full_stft) ** 2
+            if APPLY_LOG_TRANSFORM:
+                full_power = np.log10(full_power + LOG_TRANSFORM_EPSILON)
+
+            # Expected time bins per 5s segment (e.g., 9 for nperseg=256, noverlap=128)
+            n_time_bins = int(
+                (SEGMENT_DURATION * sampling_rate - STFT_NPERSEG)
+                / (STFT_NPERSEG - STFT_NOVERLAP)
+            ) + 1
+
+            # 4. Slice per-segment spectrograms from the full result
             segment_cache = {}
+            rel_starts = np.array(sorted_starts) - crop_tmin
+            start_indices = np.searchsorted(time_array, rel_starts)
 
-            for start in tqdm(
-                sorted_starts, desc=f"Processing segments ({filename})", leave=False
-            ):
-                start_rel = start - crop_tmin
-                start_idx = int(start_rel * sampling_rate)
-                end_idx = start_idx + int(SEGMENT_DURATION * sampling_rate)
-
-                if end_idx > data_uv.shape[1]:
+            for start, idx in zip(sorted_starts, start_indices):
+                end_idx = idx + n_time_bins
+                if end_idx > full_power.shape[2]:
                     continue
+                segment_cache[start] = full_power[:, :, idx:end_idx]
 
-                chunk = data_uv[:, start_idx:end_idx]
-
-                # STFT
-                z_chunk, f_chunk, t_chunk = self.apply_stft(chunk, sampling_rate)
-
-                # Single stream: full-band power spectrogram
-                z_band = z_chunk[:, freq_mask, :]
-                power_map = np.abs(z_band) ** 2
-                if APPLY_LOG_TRANSFORM:
-                    power_map = np.log10(power_map + LOG_TRANSFORM_EPSILON)
-
-                segment_cache[start] = {"spectrogram": power_map}
+            # Free the large full-signal arrays
+            del full_stft, full_power, full_spectrograms
 
             # 5. Reassemble Sequences
             results = []
@@ -246,7 +266,7 @@ class EEGPreprocessor:
 
                 for start in seq["segment_starts"]:
                     if start in segment_cache:
-                        spec_list.append(segment_cache[start]["spectrogram"])
+                        spec_list.append(segment_cache[start])
                     else:
                         valid = False
                         break

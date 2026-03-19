@@ -327,6 +327,8 @@ def create_sequences_from_file(
             "file": filename,
             "sequence_start_sec": sequence_start_local,
             "sequence_end_sec": sequence_end_local,
+            "sequence_start_global": sequence_start_global,
+            "sequence_end_global": sequence_end_global,
             "sequence_duration_sec": actual_sequence_duration,
             "segment_starts": segment_starts,
             "num_segments": actual_num_segments,
@@ -526,13 +528,115 @@ def create_sequences_single_patient(patient_id):
         return [], None
 
 
+def associate_interictal_with_seizures(interictal_seqs, positive_seqs, seizure_ids):
+    """Associate interictal sequences with seizures based on temporal proximity.
+
+    Groups interictal sequences into contiguous temporal chunks, then assigns
+    each chunk to the nearest following seizure (the seizure it leads up to).
+    This ensures each split contains a realistic temporal progression:
+    interictal → preictal.
+
+    If a seizure has no interictal chunks assigned, the nearest available chunk
+    is reassigned from a seizure that has multiple chunks.
+
+    Args:
+        interictal_seqs: List of interictal sequence dicts (must have sequence_start_global)
+        positive_seqs: List of positive sequence dicts (for computing seizure time anchors)
+        seizure_ids: Sorted list of seizure IDs
+
+    Returns:
+        Dict mapping seizure_id → list of associated interictal sequences
+    """
+    sequence_duration = SEGMENT_DURATION * SEQUENCE_LENGTH
+
+    if not seizure_ids or not interictal_seqs:
+        return {sid: [] for sid in seizure_ids}
+
+    # 1. Compute each seizure's earliest preictal time as its temporal anchor
+    seizure_anchors = {}
+    for seq in positive_seqs:
+        sid = seq.get("seizure_id")
+        if sid is not None:
+            t = seq["sequence_start_global"]
+            if sid not in seizure_anchors or t < seizure_anchors[sid]:
+                seizure_anchors[sid] = t
+
+    sorted_seizure_times = sorted(
+        [(sid, seizure_anchors[sid]) for sid in seizure_ids if sid in seizure_anchors],
+        key=lambda x: x[1],
+    )
+
+    if not sorted_seizure_times:
+        return {sid: [] for sid in seizure_ids}
+
+    # 2. Sort interictal by global time and group into contiguous chunks
+    sorted_interictal = sorted(interictal_seqs, key=lambda s: s["sequence_start_global"])
+
+    chunks = []
+    current_chunk = [sorted_interictal[0]]
+    for seq in sorted_interictal[1:]:
+        prev_end = current_chunk[-1]["sequence_end_global"]
+        gap = seq["sequence_start_global"] - prev_end
+        if gap <= sequence_duration * 2:
+            current_chunk.append(seq)
+        else:
+            chunks.append(current_chunk)
+            current_chunk = [seq]
+    chunks.append(current_chunk)
+
+    # 3. Assign each chunk to the nearest following seizure (the one it leads into)
+    assigned = {sid: [] for sid in seizure_ids}
+
+    for chunk in chunks:
+        chunk_end = chunk[-1]["sequence_end_global"]
+        best_sid = None
+        for sid, anchor_t in sorted_seizure_times:
+            if anchor_t > chunk_end:
+                best_sid = sid
+                break
+        if best_sid is None:
+            # Chunk is after all seizures — assign to nearest seizure by distance
+            chunk_center = (chunk[0]["sequence_start_global"] + chunk_end) / 2
+            best_sid = min(sorted_seizure_times, key=lambda x: abs(x[1] - chunk_center))[0]
+        assigned[best_sid].append(chunk)
+
+    # 4. If any seizure has no chunks, reassign nearest chunk from a seizure with extras
+    for sid in seizure_ids:
+        if not assigned[sid]:
+            donor = max(
+                (s for s in seizure_ids if len(assigned[s]) > 1),
+                key=lambda s: len(assigned[s]),
+                default=None,
+            )
+            if donor is not None:
+                target_t = seizure_anchors.get(sid, 0)
+                donor_chunks = assigned[donor]
+                nearest_idx = min(
+                    range(len(donor_chunks)),
+                    key=lambda i: abs(
+                        donor_chunks[i][0]["sequence_start_global"] - target_t
+                    ),
+                )
+                assigned[sid].append(donor_chunks.pop(nearest_idx))
+
+    # Flatten chunks into sequence lists per seizure
+    result = {}
+    for sid in seizure_ids:
+        result[sid] = []
+        for chunk in assigned[sid]:
+            result[sid].extend(chunk)
+
+    return result
+
+
 def assign_patient_splits(sequences, patient_id, random_seed=42):
     """Assign sequences to train/val/test splits for a single patient.
 
     Strategy (leave-one-seizure-out for test):
     - One seizure is randomly selected and ALL its positive sequences go to test.
-    - Remaining seizures' positive sequences are split into train/val.
-    - Interictal sequences are distributed proportionally across splits.
+    - Remaining seizures' positive sequences are split into train/val by seizure ID.
+    - Interictal sequences are associated with their nearest following seizure and
+      follow that seizure into the same split (preserving temporal context).
     - Each split is independently class-balanced.
 
     Args:
@@ -556,16 +660,48 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
 
     if len(seizure_ids) < 2:
         print(f"\nPatient {patient_id}: Only {len(seizure_ids)} seizure(s), cannot leave one out.")
-        print("  Falling back to randomized split.")
-        # Fallback: randomized split
+        print("  Keeping all positive sequences in test to prevent overlap leakage.")
+        # All positive sequences go to test (they have ~97% overlap, so they must stay together).
+        # Interictal sequences nearest the seizure go to test (temporal context);
+        # remaining interictal goes to train/val.
         rng = random.Random(random_seed)
-        rng.shuffle(patient_seqs)
-        n = len(patient_seqs)
-        n_train = int(n * TRAIN_RATIO)
-        n_val = int(n * VAL_RATIO)
-        train_sequences = patient_seqs[:n_train]
-        val_sequences = patient_seqs[n_train:n_train + n_val]
-        test_sequences = patient_seqs[n_train + n_val:]
+
+        test_positive = positive_seqs[:]
+        train_positive = []
+        val_positive = []
+
+        if seizure_ids and interictal_seqs:
+            # Associate interictal chunks with the single seizure
+            seizure_interictal = associate_interictal_with_seizures(
+                interictal_seqs, positive_seqs, seizure_ids
+            )
+            # The single seizure's associated interictal → test
+            test_interictal = seizure_interictal.get(seizure_ids[0], [])
+            # Any remaining unassociated interictal → train/val
+            associated_set = set(id(s) for s in test_interictal)
+            remaining_interictal = [s for s in interictal_seqs if id(s) not in associated_set]
+            rng.shuffle(remaining_interictal)
+            n_val_inter = max(1, int(len(remaining_interictal) * VAL_RATIO / (TRAIN_RATIO + VAL_RATIO)))
+            val_interictal = remaining_interictal[:n_val_inter]
+            train_interictal = remaining_interictal[n_val_inter:]
+        else:
+            # No seizures (all interictal) — distribute by ratio
+            rng.shuffle(interictal_seqs)
+            n_total = len(interictal_seqs)
+            n_test_inter = max(1, int(n_total * TEST_RATIO))
+            n_val_inter = max(1, int(n_total * VAL_RATIO))
+            test_interictal = interictal_seqs[:n_test_inter]
+            val_interictal = interictal_seqs[n_test_inter:n_test_inter + n_val_inter]
+            train_interictal = interictal_seqs[n_test_inter + n_val_inter:]
+
+        train_sequences = train_positive + train_interictal
+        val_sequences = val_positive + val_interictal
+        test_sequences = test_positive + test_interictal
+
+        print(f"  Test positive ({positive_label}): {len(test_positive)}")
+        print(f"  Train positive: {len(train_positive)}, Val positive: {len(val_positive)}")
+        print(f"  Interictal distribution: train={len(train_interictal)}, val={len(val_interictal)}, test={len(test_interictal)}")
+
         for seq in train_sequences:
             seq["split"] = "train"
         for seq in val_sequences:
@@ -599,25 +735,34 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     print(f"  Test seizure: {test_seizure_id}")
     print(f"  Train/val seizures: {remaining_seizure_ids}")
 
-    # 4. Split positive sequences by seizure
+    # 4. Split positive sequences by seizure (never split overlapping sequences across splits)
     test_positive = [s for s in positive_seqs if s.get("seizure_id") == test_seizure_id]
-    remaining_positive = [s for s in positive_seqs if s.get("seizure_id") != test_seizure_id]
 
-    # Split remaining positive into train/val (proportional: ~VAL_RATIO of remainder goes to val)
-    rng.shuffle(remaining_positive)
+    # Assign remaining seizures to train/val at the seizure level to prevent overlap leakage.
+    # All sequences from a given seizure stay in the same split.
+    rng.shuffle(remaining_seizure_ids)
     val_ratio_adjusted = VAL_RATIO / (TRAIN_RATIO + VAL_RATIO)
-    n_val_positive = max(1, int(len(remaining_positive) * val_ratio_adjusted))
-    val_positive = remaining_positive[:n_val_positive]
-    train_positive = remaining_positive[n_val_positive:]
+    n_val_seizures = max(1, round(len(remaining_seizure_ids) * val_ratio_adjusted))
+    val_seizure_ids = set(remaining_seizure_ids[:n_val_seizures])
+    train_seizure_ids = set(remaining_seizure_ids[n_val_seizures:])
 
-    # 5. Distribute interictal sequences proportionally
-    rng.shuffle(interictal_seqs)
-    n_total = len(interictal_seqs)
-    n_test_inter = max(1, int(n_total * TEST_RATIO))
-    n_val_inter = max(1, int(n_total * VAL_RATIO))
-    test_interictal = interictal_seqs[:n_test_inter]
-    val_interictal = interictal_seqs[n_test_inter:n_test_inter + n_val_inter]
-    train_interictal = interictal_seqs[n_test_inter + n_val_inter:]
+    val_positive = [s for s in positive_seqs if s.get("seizure_id") in val_seizure_ids]
+    train_positive = [s for s in positive_seqs if s.get("seizure_id") in train_seizure_ids]
+
+    # 5. Distribute interictal by temporal association with seizures.
+    # Each contiguous interictal chunk follows its nearest seizure into the same split,
+    # so each split contains a realistic temporal progression: interictal → preictal.
+    seizure_interictal = associate_interictal_with_seizures(
+        interictal_seqs, positive_seqs, seizure_ids
+    )
+
+    test_interictal = seizure_interictal.get(test_seizure_id, [])
+    val_interictal = []
+    for sid in val_seizure_ids:
+        val_interictal.extend(seizure_interictal.get(sid, []))
+    train_interictal = []
+    for sid in train_seizure_ids:
+        train_interictal.extend(seizure_interictal.get(sid, []))
 
     # 6. Assemble splits
     train_sequences = train_positive + train_interictal
@@ -625,6 +770,7 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     test_sequences = test_positive + test_interictal
 
     print(f"  Test positive ({positive_label}): {len(test_positive)} (seizure {test_seizure_id})")
+    print(f"  Val seizures: {sorted(val_seizure_ids)}, Train seizures: {sorted(train_seizure_ids)}")
     print(f"  Train positive: {len(train_positive)}, Val positive: {len(val_positive)}")
     print(f"  Interictal distribution: train={len(train_interictal)}, val={len(val_interictal)}, test={len(test_interictal)}")
 

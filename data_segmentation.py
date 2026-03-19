@@ -11,6 +11,7 @@ import os
 import json
 import mne
 import random
+import numpy as np
 from data_segmentation_helpers.config import (
     TASK_MODE,
     SEGMENT_DURATION,
@@ -305,6 +306,7 @@ def create_sequences_from_file(
             "file": filename,
             "sequence_start_sec": sequence_start_local,
             "sequence_end_sec": sequence_end_local,
+            "sequence_start_global": sequence_start_global,
             "sequence_duration_sec": sequence_duration,
             "segment_starts": segment_starts,
             "num_segments": SEQUENCE_LENGTH,
@@ -547,17 +549,41 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
             # Interictal: assign to the seizure whose preictal zone is closest
             unassigned_interictal.append(seq)
 
-    # Distribute interictal sequences proportionally across seizure groups
+    # Distribute interictal sequences to the temporally nearest seizure group.
+    # Compute temporal midpoint of each seizure's positive sequences, then
+    # find boundaries halfway between consecutive seizures. Each interictal
+    # sequence is assigned to the seizure whose temporal region it falls in.
     if unassigned_interictal:
-        rng = random.Random(random_seed)
-        rng.shuffle(unassigned_interictal)
-        n_per_group = len(unassigned_interictal) // num_seizures
-        remainder = len(unassigned_interictal) % num_seizures
-        idx = 0
-        for i, sid in enumerate(seizure_ids):
-            count = n_per_group + (1 if i < remainder else 0)
-            seizure_groups[sid].extend(unassigned_interictal[idx:idx + count])
-            idx += count
+        # Compute temporal midpoint per seizure from its positive sequences
+        seizure_midpoints = {}
+        for sid in seizure_ids:
+            pos_in_group = [s for s in seizure_groups[sid] if s["type"] == positive_label]
+            if pos_in_group:
+                seizure_midpoints[sid] = sum(
+                    s["sequence_start_global"] for s in pos_in_group
+                ) / len(pos_in_group)
+            else:
+                seizure_midpoints[sid] = 0.0
+
+        # Sort seizure IDs by temporal midpoint
+        sorted_sids = sorted(seizure_ids, key=lambda sid: seizure_midpoints[sid])
+
+        # Compute boundaries between consecutive seizures (midpoint of midpoints)
+        boundaries = []
+        for i in range(len(sorted_sids) - 1):
+            mid = (seizure_midpoints[sorted_sids[i]] + seizure_midpoints[sorted_sids[i + 1]]) / 2
+            boundaries.append(mid)
+
+        # Assign each interictal sequence to the seizure whose region it falls in
+        for seq in unassigned_interictal:
+            t = seq["sequence_start_global"]
+            # Find which region this falls into
+            assigned_sid = sorted_sids[-1]  # default to last
+            for i, bound in enumerate(boundaries):
+                if t < bound:
+                    assigned_sid = sorted_sids[i]
+                    break
+            seizure_groups[assigned_sid].append(seq)
 
     print(f"\nPatient {patient_id}: {num_seizures} seizures, {len(patient_seqs)} total sequences")
     for sid in seizure_ids:
@@ -589,8 +615,27 @@ def assign_patient_splits(sequences, patient_id, random_seed=42):
     return retained_sequences, split_counts, balance_stats
 
 
+def _uniform_subsample(sequences, target_count):
+    """Uniformly subsample sequences preserving temporal spread.
+
+    Takes every Nth sequence (by chronological order) to retain temporal
+    coverage across the full time range, rather than random selection
+    which can create arbitrary temporal gaps.
+    """
+    if target_count >= len(sequences):
+        return sequences[:]
+    # Sort by global timestamp to ensure chronological order
+    sorted_seqs = sorted(sequences, key=lambda s: s.get("sequence_start_global", 0))
+    # Pick evenly spaced indices
+    indices = np.linspace(0, len(sorted_seqs) - 1, target_count, dtype=int)
+    return [sorted_seqs[i] for i in indices]
+
+
 def balance_sequences_across_splits(splits, positive_label, random_seed=42):
     """Balance each split by downsampling the majority class to match the minority.
+
+    Uses uniform temporal subsampling instead of random selection to preserve
+    chronological coverage within each fold.
 
     Args:
         splits: Dict mapping split name to list of sequences (each with 'type' label).
@@ -600,7 +645,6 @@ def balance_sequences_across_splits(splits, positive_label, random_seed=42):
     Returns:
         Tuple of (balanced_splits_dict, balance_stats)
     """
-    rng = random.Random(random_seed)
     balanced_splits = {}
     balance_stats = {}
 
@@ -628,9 +672,6 @@ def balance_sequences_across_splits(splits, positive_label, random_seed=42):
 
         # Balance classes: downsample whichever is larger
         # With ratio=1.0, target equal counts; with ratio=2.0, allow 2x interictal
-        rng.shuffle(positives)
-        rng.shuffle(interictals)
-
         if len(interictals) >= len(positives):
             # More interictal than positive: downsample interictal (original behavior)
             target_positive = len(positives)
@@ -640,16 +681,17 @@ def balance_sequences_across_splits(splits, positive_label, random_seed=42):
             target_interictal = len(interictals)
             target_positive = min(int(len(interictals) / INTERICTAL_TO_PREICTAL_RATIO), len(positives))
 
-        kept_positive = positives[:target_positive]
-        kept_interictal = interictals[:target_interictal]
-        dropped_positive = len(positives) - target_positive
-        dropped_interictal = len(interictals) - target_interictal
+        # Uniform temporal subsampling (preserves chronological spread)
+        kept_positive = _uniform_subsample(positives, target_positive)
+        kept_interictal = _uniform_subsample(interictals, target_interictal)
+        dropped_positive = len(positives) - len(kept_positive)
+        dropped_interictal = len(interictals) - len(kept_interictal)
 
+        # Combine and sort chronologically
         combined = kept_positive + kept_interictal
-        rng.shuffle(combined)
+        combined.sort(key=lambda s: s.get("sequence_start_global", 0))
 
         if others:
-            # Preserve other sequence types (if any) at the end for completeness
             combined.extend(others)
 
         balanced_splits[split_name] = combined

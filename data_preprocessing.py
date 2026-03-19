@@ -80,30 +80,17 @@ def _remove_amplitude_artifacts(data):
             data[ch, bad_idx] = np.interp(bad_idx, good_idx, data[ch, good_idx])
 
 
-def _apply_stft(data, sampling_rate):
-    """Apply STFT to all channels at once."""
-    _, _, Zxx = spectrogram(
-        data,
-        fs=sampling_rate,
-        nperseg=STFT_NPERSEG,
-        noverlap=STFT_NOVERLAP,
-        nfft=STFT_NFFT,
-        window="hann",
-        mode="complex",
-        axis=-1,
-    )
-    return Zxx
-
-
 def process_single_file(patient_id, filename, sequences, positive_label):
     """Process one EDF file: load, filter, STFT, assemble sequences.
 
     This is a standalone function so it can be called from ProcessPoolExecutor.
+    Computes a single STFT over the entire cropped region and extracts segments
+    by index slicing, avoiding redundant FFT calls for overlapping segments.
 
     Returns:
-        List of result dicts (or None for failed sequences), each containing
-        'spectrogram', 'label', 'patient_id', 'file_name', 'start_sec',
-        'time_to_seizure'.
+        Tuple of (results, stats) where:
+        - results: list of result dicts (or None for failed sequences)
+        - stats: tuple of (sum_v, sum_sq, count) running statistics
     """
     try:
         # 1. Collect all unique segment start times
@@ -141,29 +128,50 @@ def process_single_file(patient_id, filename, sequences, positive_label):
         else:
             freq_mask = FREQ_MASK
 
-        # 3. Compute & Cache Unique Segments
-        segment_cache = {}
-        seg_duration_samples = int(SEGMENT_DURATION * sampling_rate)
+        # 3. Compute STFT once over the entire cropped data
+        _, t_stft, Zxx_full = spectrogram(
+            data_uv,
+            fs=sampling_rate,
+            nperseg=STFT_NPERSEG,
+            noverlap=STFT_NOVERLAP,
+            nfft=STFT_NFFT,
+            window="hann",
+            mode="complex",
+            axis=-1,
+        )
+        # Apply freq mask, compute power, log transform → float32
+        power_full = np.abs(Zxx_full[:, freq_mask, :]) ** 2
+        if APPLY_LOG_TRANSFORM:
+            power_full = np.log10(power_full + LOG_TRANSFORM_EPSILON)
+        power_full = power_full.astype(np.float32)
 
+        # Pre-compute how many STFT bins fall in one segment
+        hop = STFT_NPERSEG - STFT_NOVERLAP
+        seg_duration_samples = int(SEGMENT_DURATION * sampling_rate)
+        seg_n_bins = (seg_duration_samples - STFT_NPERSEG) // hop + 1
+        half_win_sec = STFT_NPERSEG / (2 * sampling_rate)
+
+        # 4. Extract cached segments by slicing from the full STFT
+        segment_cache = {}
         for start in sorted_starts:
             start_rel = start - crop_tmin
-            start_idx = int(start_rel * sampling_rate)
-            end_idx = start_idx + seg_duration_samples
+            # First STFT bin center within this segment
+            first_bin_time = start_rel + half_win_sec
+            i_start = np.searchsorted(t_stft, first_bin_time - 1e-6)
+            i_end = i_start + seg_n_bins
 
-            if end_idx > data_uv.shape[1]:
-                continue
+            if i_end <= power_full.shape[2]:
+                segment_cache[start] = power_full[:, :, i_start:i_end]
 
-            chunk = data_uv[:, start_idx:end_idx]
-            z_chunk = _apply_stft(chunk, sampling_rate)
+        # Free the large full STFT arrays
+        del Zxx_full, power_full
 
-            power_map = np.abs(z_chunk[:, freq_mask, :]) ** 2
-            if APPLY_LOG_TRANSFORM:
-                power_map = np.log10(power_map + LOG_TRANSFORM_EPSILON)
-
-            segment_cache[start] = power_map
-
-        # 4. Reassemble Sequences
+        # 5. Reassemble Sequences and accumulate running stats
         results = []
+        batch_sum_v = np.float64(0.0)
+        batch_sum_sq = np.float64(0.0)
+        batch_count = 0
+
         for seq in sequences:
             spec_list = []
             valid = True
@@ -184,6 +192,11 @@ def process_single_file(patient_id, filename, sequences, positive_label):
                 [x[:, :, :min_t] for x in spec_list], axis=0
             )
 
+            # Accumulate running stats in worker (avoids main-thread loop)
+            batch_sum_v += np.sum(spec_stack, dtype=np.float64)
+            batch_sum_sq += np.sum(spec_stack.astype(np.float64) ** 2)
+            batch_count += spec_stack.size
+
             results.append(
                 {
                     "spectrogram": spec_stack,
@@ -195,13 +208,13 @@ def process_single_file(patient_id, filename, sequences, positive_label):
                 }
             )
 
-        return results
+        return results, (float(batch_sum_v), float(batch_sum_sq), batch_count)
 
     except Exception as e:
         print(f"Error processing file {filename}: {e}")
         import traceback
         traceback.print_exc()
-        return [None] * len(sequences)
+        return [None] * len(sequences), (0.0, 0.0, 0)
 
 
 class EEGPreprocessor:
@@ -323,8 +336,12 @@ class EEGPreprocessor:
             ]
 
     def run_preprocessing(self):
-        """Single-pass preprocessing: process files in parallel, accumulate stats,
-        write unnormalized HDF5, then normalize in a final pass."""
+        """Process EDF files → HDF5 with per-split statistics.
+
+        Data is saved WITHOUT normalization. Per-split running statistics
+        (sum, sum_sq, count) are stored in HDF5 metadata so that training
+        code can compute normalization from training splits only, preventing
+        data leakage from test splits."""
 
         with open(self.input_json_path, "r") as f:
             all_seqs = json.load(f)["sequences"]
@@ -334,39 +351,32 @@ class EEGPreprocessor:
             for s in split_names
         }
 
-        # ── Pass 1: Process EDF files → unnormalized HDF5 + running stats ──
-        # Accumulate Welford running stats across all splits
-        sum_v, sum_sq, count = 0.0, 0.0, 0
-        stats_from_checkpoint = False
+        # Single executor shared across all splits — avoids per-split fork + import overhead
+        with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            for split, sequences in splits.items():
+                final_path = self.data_dir / f"s{split}_dataset.h5"
 
-        if "patient_stats" in self.checkpoint and self.patient_id in self.checkpoint.get("patient_stats", {}):
-            sum_v = self.checkpoint["patient_stats"]["sum_v"]
-            sum_sq = self.checkpoint["patient_stats"]["sum_sq"]
-            count = self.checkpoint["patient_stats"]["count"]
-            stats_from_checkpoint = True
+                if f"pass1_{split}_complete" in self.checkpoint:
+                    continue
 
-        for split, sequences in splits.items():
-            unnorm_path = self.data_dir / f"s{split}_unnorm.h5"
+                groups = self.group_sequences_by_file(sequences)
 
-            if f"pass1_{split}_complete" in self.checkpoint:
-                continue
+                # Filter out already-completed files
+                pending = {
+                    k: v for k, v in groups.items()
+                    if f"p1_{split}_{k[1]}" not in self.checkpoint["completed_files"]
+                }
 
-            groups = self.group_sequences_by_file(sequences)
+                if not pending:
+                    self.checkpoint[f"pass1_{split}_complete"] = True
+                    self.save_checkpoint()
+                    continue
 
-            # Filter out already-completed files
-            pending = {
-                k: v for k, v in groups.items()
-                if f"p1_{split}_{k[1]}" not in self.checkpoint["completed_files"]
-            }
+                # Per-split running stats (for train-only normalization at training time)
+                sum_v, sum_sq, count = 0.0, 0.0, 0
 
-            if not pending:
-                self.checkpoint[f"pass1_{split}_complete"] = True
-                self.save_checkpoint()
-                continue
-
-            # Process files in parallel
-            futures = {}
-            with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                # Submit all files for this split
+                futures = {}
                 for (pid, fname), f_seqs in pending.items():
                     future = executor.submit(
                         process_single_file, pid, fname, f_seqs, self.positive_label
@@ -376,94 +386,50 @@ class EEGPreprocessor:
                 pbar = tqdm(
                     as_completed(futures),
                     total=len(futures),
-                    desc=f"Pass 1: {split}",
+                    desc=f"Processing: {split}",
                 )
                 for future in pbar:
                     pid, fname, split_name = futures[future]
                     file_id = f"p1_{split_name}_{fname}"
 
-                    results = future.result()
+                    results, (file_sum_v, file_sum_sq, file_count) = future.result()
                     batch = [r for r in results if r is not None]
 
                     if batch:
-                        if not unnorm_path.exists():
-                            self._init_hdf5(unnorm_path, batch[0]["spectrogram"].shape)
-                        self._append_to_hdf5(unnorm_path, batch)
+                        if not final_path.exists():
+                            self._init_hdf5(final_path, batch[0]["spectrogram"].shape)
+                        self._append_to_hdf5(final_path, batch)
 
-                        # Accumulate stats from this batch
-                        if not stats_from_checkpoint:
-                            for item in batch:
-                                spec = item["spectrogram"]
-                                sum_v += np.sum(spec)
-                                sum_sq += np.sum(spec ** 2)
-                                count += spec.size
+                    # Stats already computed in worker process
+                    sum_v += file_sum_v
+                    sum_sq += file_sum_sq
+                    count += file_count
 
                     self.checkpoint["completed_files"].add(file_id)
                     pbar.set_postfix({"file": fname})
 
-            self.checkpoint[f"pass1_{split}_complete"] = True
-            self.save_checkpoint()
-
-        # Save stats
-        if not stats_from_checkpoint and count > 0:
-            if "patient_stats" not in self.checkpoint:
-                self.checkpoint["patient_stats"] = {}
-            self.checkpoint["patient_stats"].update(
-                {"sum_v": float(sum_v), "sum_sq": float(sum_sq), "count": float(count)}
-            )
-            self.save_checkpoint()
-
-        if count == 0:
-            self.logger.error("No data processed — cannot compute normalization stats.")
-            return
-
-        mean = float(sum_v / count)
-        std = float(np.sqrt((sum_sq / count) - (mean ** 2)))
-        self.logger.info(f"Normalization stats: mean={mean:.6f}, std={std:.6f}")
-
-        # ── Pass 2: Normalize unnormalized HDF5 → final dataset ──
-        for split in split_names:
-            unnorm_path = self.data_dir / f"s{split}_unnorm.h5"
-            final_path = self.data_dir / f"s{split}_dataset.h5"
-
-            if not unnorm_path.exists():
-                continue
-            if final_path.exists() and f"final_{split}_complete" in self.checkpoint:
-                continue
-
-            self.logger.info(f"Pass 2: Normalizing split {split}...")
-            with h5py.File(unnorm_path, "r") as fin, h5py.File(final_path, "w") as fout:
-                # Copy metadata
-                for k in ["labels", "patient_ids"]:
-                    fout.create_dataset(k, data=fin[k][:])
-                gi, go = fin["segment_info"], fout.create_group("segment_info")
-                for k in gi:
-                    go.create_dataset(k, data=gi[k][:])
-
-                # Normalize spectrograms in chunks
-                spec_in = fin["spectrograms"]
-                spec_out = fout.create_dataset(
-                    "spectrograms", spec_in.shape, dtype=np.float32
-                )
-
-                chunk_size = 100
-                for i in tqdm(range(0, spec_in.shape[0], chunk_size), desc=f"Normalize {split}"):
-                    chunk = spec_in[i : i + chunk_size]
-                    spec_out[i : i + chunk_size] = (
-                        (chunk - mean) / std if std > 1e-8 else chunk - mean
+                # Save per-split stats into HDF5 metadata
+                if final_path.exists() and count > 0:
+                    split_mean = float(sum_v / count)
+                    split_std = float(np.sqrt(max(0, (sum_sq / count) - (split_mean ** 2))))
+                    self.logger.info(
+                        f"Split {split} stats: mean={split_mean:.6f}, std={split_std:.6f}, n={count:.0f}"
                     )
+                    with h5py.File(final_path, "a") as f:
+                        meta = f.require_group("metadata")
+                        meta.attrs.update({
+                            "sum_v": float(sum_v),
+                            "sum_sq": float(sum_sq),
+                            "count": float(count),
+                            "norm": "none",
+                        })
 
-                fout.create_group("metadata").attrs.update(
-                    {"mean": mean, "std": std, "norm": "single_stream_zscore"}
-                )
+                self.checkpoint[f"pass1_{split}_complete"] = True
+                self.save_checkpoint()
 
-            self.checkpoint[f"final_{split}_complete"] = True
-            self.save_checkpoint()
-
-            # Clean up unnormalized file
-            unnorm_path.unlink()
-
-        self.logger.info("Preprocessing complete.")
+        self.logger.info(
+            "Preprocessing complete (unnormalized — normalize at training time using training splits only)."
+        )
 
 
 if __name__ == "__main__":

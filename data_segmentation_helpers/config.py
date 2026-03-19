@@ -11,9 +11,9 @@ Conv-Transformer Architecture:
 # =============================================================================
 
 TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
-PREICTAL_WINDOW = 40 * 60  # 40 minutes before seizure (zone starts at -40min)
-PREICTAL_ONSET_BUFFER = 0  # No onset buffer — preictal zone extends to seizure onset
-                           # Effective preictal zone: [-40min, 0min]
+PREICTAL_WINDOW = 20 * 60  # 20 minutes before seizure (zone starts at -20min)
+PREICTAL_ONSET_BUFFER = 5 * 60  # 5 min onset buffer — exclude data too close to seizure
+# Effective preictal zone: [-20min, -5min]
 INTERICTAL_BUFFER = 30 * 60  # 30 min buffer around seizures (interictal only)
 
 # =============================================================================
@@ -22,7 +22,9 @@ INTERICTAL_BUFFER = 30 * 60  # 30 min buffer around seizures (interictal only)
 
 BASE_PATH = "physionet.org/files/chbmit/1.0.0/"
 ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
-INTERICTAL_TO_PREICTAL_RATIO = 1.0  # Balanced 1:1 ratio of interictal to preictal sequences
+INTERICTAL_TO_PREICTAL_RATIO = (
+    1.0  # Balanced 1:1 ratio of interictal to preictal sequences
+)
 
 # Split ratios (must sum to 1.0)
 TRAIN_RATIO = 0.8
@@ -31,37 +33,54 @@ TEST_RATIO = 0.1
 
 # Patients to include in processing
 PATIENTS = [
-    "chb01",   # 7 seizures
-    "chb02",   # 3 seizures
-    "chb03",   # 7 seizures
-    "chb04",   # 4 seizures
-    "chb05",   # 5 seizures
-    "chb06",    # 10 seizures  ← top 5
-    # "chb07",   # 3 seizures
-    # "chb08",   # 5 seizures
-    # "chb09",   # 4 seizures
-    # "chb10",   # 7 seizures
-    # "chb11",   # 3 seizures
-    # "chb13",    # 12 seizures  ← top 5
-    # "chb14",    # 8 seizures   ← top 5 (tied)
-    # "chb15",    # 20 seizures  ← top 5
-    # "chb16",    # 10 seizures  ← top 5
-    # "chb17",   # 3 seizures
-    # "chb18",   # 6 seizures
-    # "chb19",   # 3 seizures
-    # "chb20",    # 8 seizures   ← top 5 (tied)
-    # "chb21",   # 4 seizures
-    # "chb22",   # 3 seizures
-    # "chb23",   # 7 seizures
+    "chb01",  # 7 seizures
+    "chb02",  # 3 seizures
+    "chb03",  # 7 seizures
+    "chb04",  # 4 seizures
+    "chb05",  # 5 seizures
+    "chb06",  # 10 seizures  ← top 5
+    "chb07",  # 3 seizures
+    "chb08",  # 5 seizures
+    "chb09",  # 4 seizures
+    "chb10",  # 7 seizures
+    "chb11",  # 3 seizures
+    "chb13",  # 12 seizures  ← top 5
+    "chb14",  # 8 seizures   ← top 5 (tied)
+    "chb15",  # 20 seizures  ← top 5
+    "chb16",  # 10 seizures  ← top 5
+    "chb17",  # 3 seizures
+    "chb18",  # 6 seizures
+    "chb19",  # 3 seizures
+    "chb20",  # 8 seizures   ← top 5 (tied)
+    "chb21",  # 4 seizures
+    "chb22",  # 3 seizures
+    "chb23",  # 7 seizures
 ]
 
 ALL_PATIENTS = [
-    "chb01", "chb02", "chb03", "chb04",
-    "chb05", "chb06", "chb07", "chb08",
-    "chb09", "chb10", "chb11", "chb13",
-    "chb14", "chb15", "chb16", "chb17",
-    "chb18", "chb19", "chb20", "chb21",
-    "chb22", "chb23", "chb24"
+    "chb01",
+    "chb02",
+    "chb03",
+    "chb04",
+    "chb05",
+    "chb06",
+    "chb07",
+    "chb08",
+    "chb09",
+    "chb10",
+    "chb11",
+    "chb13",
+    "chb14",
+    "chb15",
+    "chb16",
+    "chb17",
+    "chb18",
+    "chb19",
+    "chb20",
+    "chb21",
+    "chb22",
+    "chb23",
+    "chb24",
 ]
 
 # Current patient index to process (0 to len(PATIENTS)-1, or None for all)
@@ -80,9 +99,11 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 # Sequence Configuration
 # =============================================================================
 
-SEGMENT_DURATION = 5    # seconds per segment
-SEQUENCE_LENGTH = 60    # segments per sequence (60 × 5s = 300s = 5 min)
-SEQUENCE_STRIDE = 12    # segments between sequences (12 × 5s = 60s = 1 min stride for preictal)
+SEGMENT_DURATION = 5  # seconds per segment
+SEQUENCE_LENGTH = 60  # segments per sequence (60 × 5s = 300s = 5 min)
+SEQUENCE_STRIDE = (
+    12  # segments between sequences (12 × 5s = 60s = 1 min stride for preictal)
+)
 
 # =============================================================================
 # Signal Processing
@@ -97,9 +118,9 @@ FULL_FREQ_BAND = (0.5, 128.0)  # Full-band for single-stream STFT
 PHASE_FREQ_BAND = (0.0, 5.0)  # Delta/Theta (for Phase)
 AMP_FREQ_BAND = (80.0, 128.0)  # Gamma/HFO (for Amplitude)
 
-STFT_NPERSEG = 256   # STFT window length
+STFT_NPERSEG = 256  # STFT window length
 STFT_NOVERLAP = 128  # STFT overlap (50%)
-STFT_NFFT = 256      # FFT size (1.0 Hz resolution at 256 Hz sampling rate)
+STFT_NFFT = 256  # FFT size (1.0 Hz resolution at 256 Hz sampling rate)
 
 ARTIFACT_THRESHOLD_STD = 4  # MAD threshold for artifact removal
 LOG_TRANSFORM_EPSILON = 1e-12  # Avoid log(0)
@@ -130,19 +151,19 @@ TARGET_CHANNELS = [
 # Model Configuration (Conv-GRU)
 # =============================================================================
 
-CONV_EMBEDDING_DIM = 128         # Conv tower output dimension
-GRU_HIDDEN_DIM = 64              # BiGRU hidden size (output = 2x this for bidirectional)
-GRU_NUM_LAYERS = 1               # Number of stacked GRU layers
-GRU_DROPOUT = 0.3                # Dropout for GRU + FC head
+CONV_EMBEDDING_DIM = 128  # Conv tower output dimension
+GRU_HIDDEN_DIM = 64  # BiLSTM hidden size (output = 2x this for bidirectional)
+GRU_NUM_LAYERS = 2  # Number of stacked GRU layers
+GRU_DROPOUT = 0.3  # Dropout for GRU + FC head
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
 
-PRETRAINING_EPOCHS = 30
-TRAINING_EPOCHS = 20
+PRETRAINING_EPOCHS = 10
+TRAINING_EPOCHS = 30
 SEQUENCE_BATCH_SIZE = 4
-LEARNING_RATE = 1e-4             # Pretraining LR
+LEARNING_RATE = 1e-4  # Pretraining LR
 FINETUNING_LEARNING_RATE = 3e-4  # Fine-tuning LR (transformer layer + FC head)
 WEIGHT_DECAY = 1e-4
 
@@ -173,7 +194,9 @@ def get_patient_config(patient_index):
     """
     n_patients = len(PATIENTS)
     if patient_index < 0 or patient_index >= n_patients:
-        raise ValueError(f"patient_index must be 0-{n_patients-1}, got {patient_index}")
+        raise ValueError(
+            f"patient_index must be 0-{n_patients - 1}, got {patient_index}"
+        )
 
     patient_id = PATIENTS[patient_index]
 

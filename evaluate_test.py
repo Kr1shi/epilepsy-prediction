@@ -28,7 +28,7 @@ import argparse
 import os
 import gc
 
-from train import EEGDataset, ConvGRUModel, MetricsTracker, create_datasets, get_datasets_per_patient
+from train import EEGDataset, ConvGRUModel, MetricsTracker, create_datasets, get_datasets_per_patient, apply_normalization_to_datasets
 from data_segmentation_helpers.config import *
 
 
@@ -148,16 +148,16 @@ def main():
         patient_config = get_patient_config(current_idx)
         dataset_prefix = patient_config["output_prefix"]
 
-        # Load all datasets for this patient
+        # Load datasets with same filtering as training (skip folds missing a class)
         try:
-            all_datasets = create_datasets([current_idx], skip_missing_class=False)
+            all_datasets = create_datasets([current_idx], skip_missing_class=True)
         except Exception as e:
             print(f"  Skipping {patient_id}: {e}")
             continue
 
         patient_datasets = all_datasets.get(patient_id, {})
-        if not patient_datasets:
-            print(f"  Skipping {patient_id}: no datasets")
+        if len(patient_datasets) < 2:
+            print(f"  Skipping {patient_id}: need at least 2 valid folds, got {len(patient_datasets)}")
             continue
 
         for sid in patient_datasets:
@@ -166,6 +166,14 @@ def main():
 
             if not model_path.exists():
                 continue
+
+            # Compute normalization from training folds only (exclude test fold)
+            train_ds_list = [patient_datasets[s] for s in patient_datasets if s != sid]
+            test_ds_list = [patient_datasets[sid]]
+            if not train_ds_list:
+                print(f"  Skipping {patient_id} fold {sid}: no training folds")
+                continue
+            apply_normalization_to_datasets(train_ds_list, test_ds_list)
 
             # Build test loader for this fold
             test_ds = patient_datasets[sid]

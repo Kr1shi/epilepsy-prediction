@@ -65,6 +65,8 @@ class EEGDataset(Dataset):
         self.split = split
         self.h5_file = None
         self.augment = augment and (split == "train")
+        self.mean = None
+        self.std = None
 
         with h5py.File(h5_file_path, "r") as f:
             if "spectrograms_phase" in f or "spectrograms_amp" in f:
@@ -77,11 +79,24 @@ class EEGDataset(Dataset):
 
             if "metadata" in f:
                 self.metadata = dict(f["metadata"].attrs)
+                self.stats = {
+                    "sum_v": float(f["metadata"].attrs.get("sum_v", 0.0)),
+                    "sum_sq": float(f["metadata"].attrs.get("sum_sq", 0.0)),
+                    "count": float(f["metadata"].attrs.get("count", 0.0)),
+                }
+            else:
+                self.metadata = {}
+                self.stats = {"sum_v": 0.0, "sum_sq": 0.0, "count": 0.0}
 
         print(f"Loaded {self.split} dataset: {self.length} samples")
         print(f"  - Class Dist: {torch.bincount(self.labels)}")
         if self.augment:
             print(f"  - Augmentation: ENABLED")
+
+    def set_normalization(self, mean, std):
+        """Set normalization parameters (computed from training data only)."""
+        self.mean = mean
+        self.std = std
 
     def _open_h5(self):
         if self.h5_file is None:
@@ -121,6 +136,8 @@ class EEGDataset(Dataset):
         """
         self._open_h5()
         x = torch.FloatTensor(self.h5_file["spectrograms"][idx])
+        if self.mean is not None and self.std is not None:
+            x = (x - self.mean) / self.std if self.std > 1e-8 else x - self.mean
         if self.augment:
             x = self._apply_augmentation(x)
         return x, self.labels[idx]
@@ -171,10 +188,10 @@ class ConvTower(nn.Module):
 
 
 class ConvGRUModel(nn.Module):
-    """Single-stream Conv-GRU for EEG sequence classification.
+    """Single-stream Conv-BiLSTM for EEG sequence classification.
 
     Conv tower extracts a 128-dim embedding from each 5s spectrogram segment.
-    BiGRU processes the sequence of 360 embeddings to capture the temporal
+    BiLSTM processes the sequence of embeddings to capture the temporal
     evolution of preictal EEG (gradual buildup toward seizure onset).
     Final hidden states from both directions are concatenated and classified.
     """
@@ -195,8 +212,8 @@ class ConvGRUModel(nn.Module):
         # Per-segment feature extractor
         self.conv_tower = ConvTower(in_channels=num_input_channels, embed_dim=embed_dim)
 
-        # BiGRU: processes sequence of segment embeddings
-        self.gru = nn.GRU(
+        # BiLSTM: processes sequence of segment embeddings
+        self.gru = nn.LSTM(
             input_size=embed_dim,
             hidden_size=gru_hidden,
             num_layers=gru_layers,
@@ -205,7 +222,7 @@ class ConvGRUModel(nn.Module):
             dropout=dropout if gru_layers > 1 else 0,
         )
 
-        # Layer norm on GRU output
+        # Layer norm on LSTM output
         self.norm = nn.LayerNorm(gru_hidden * 2)
 
         # Classification head (input = 2 * gru_hidden for bidirectional)
@@ -234,8 +251,8 @@ class ConvGRUModel(nn.Module):
         # Reshape to sequence: (B, S, embed_dim)
         embeddings = embeddings.view(B, S, self.embed_dim)
 
-        # BiGRU: output shape (B, S, 2*gru_hidden), h_n shape (2*layers, B, gru_hidden)
-        _, h_n = self.gru(embeddings)
+        # BiLSTM: output shape (B, S, 2*gru_hidden), (h_n, c_n) where h_n is (2*layers, B, gru_hidden)
+        _, (h_n, _) = self.gru(embeddings)
 
         # Concatenate final hidden states from forward and backward directions
         # h_n shape: (2*num_layers, B, gru_hidden) → take last layer's forward and backward
@@ -322,6 +339,41 @@ def optimize_running_average(predictions, labels, max_window=30):
     )
     return best_params
 
+def compute_normalization_stats(datasets):
+    """Combine per-split stats from multiple datasets to compute mean/std.
+
+    Only pass training datasets to this function to avoid data leakage.
+    """
+    total_sum = 0.0
+    total_sum_sq = 0.0
+    total_count = 0.0
+    for ds in datasets:
+        total_sum += ds.stats["sum_v"]
+        total_sum_sq += ds.stats["sum_sq"]
+        total_count += ds.stats["count"]
+
+    if total_count == 0:
+        return 0.0, 1.0
+
+    mean = total_sum / total_count
+    std = float(np.sqrt(max(0, (total_sum_sq / total_count) - (mean ** 2))))
+    return float(mean), max(std, 1e-8)
+
+
+def apply_normalization_to_datasets(train_datasets, test_datasets):
+    """Compute normalization from training data only and apply to all datasets."""
+    if not train_datasets:
+        print("  WARNING: no training datasets for normalization, using defaults (0, 1)")
+        mean, std = 0.0, 1.0
+    else:
+        mean, std = compute_normalization_stats(train_datasets)
+        print(f"  Normalization (from training only): mean={mean:.6f}, std={std:.6f}")
+    for ds in train_datasets:
+        ds.set_normalization(mean, std)
+    for ds in test_datasets:
+        ds.set_normalization(mean, std)
+
+
 def create_datasets(patients_to_process, skip_missing_class=True):
     all_datasets = {}
     for idx in patients_to_process:
@@ -330,20 +382,28 @@ def create_datasets(patients_to_process, skip_missing_class=True):
         patient_config = get_patient_config(idx)
         dataset_prefix = patient_config["output_prefix"]
         dataset_dir = Path("preprocessing") / "data" / dataset_prefix
-        h5_files = os.listdir(dataset_dir)
+        if not dataset_dir.exists():
+            print(f"patient {pid}: no preprocessing directory, skipping")
+            continue
+        h5_files = sorted(os.listdir(dataset_dir))
+        skipped = []
         for h5_filename in h5_files:
+            if not h5_filename.endswith("_dataset.h5"):
+                continue
             split_name = h5_filename.strip().removeprefix("s").removesuffix("_dataset.h5")
             h5_file = dataset_dir / h5_filename
             dataset = EEGDataset(str(h5_file), split=split_name)
             if skip_missing_class:
                 class_dist = torch.bincount(dataset.labels)
                 if 0 in class_dist:
-                    print(f"skipping patient {pid} seizure {split_name}: missing label")
+                    skipped.append(split_name)
                     del dataset
                     gc.collect()
                     continue
             all_datasets[pid][split_name] = dataset
-        print(f"patient {pid} splits: {all_datasets[pid].keys()}")
+        if skipped:
+            print(f"patient {pid}: skipped folds {skipped} (missing class)")
+        print(f"patient {pid} valid splits: {sorted(all_datasets[pid].keys())}")
     return all_datasets
 
 def get_datasets_lopo(patient_id, all_datasets):
@@ -354,6 +414,7 @@ def get_datasets_lopo(patient_id, all_datasets):
             test_datasets = list(all_datasets[pid].values())
         else:
             train_datasets = train_datasets + list(all_datasets[pid].values())
+    apply_normalization_to_datasets(train_datasets, test_datasets)
     test_combined_dataset = ConcatDataset(test_datasets)
     train_combined_dataset = ConcatDataset(train_datasets)
     return test_combined_dataset, train_combined_dataset
@@ -367,6 +428,9 @@ def get_datasets_per_patient(fold_id, patient_id, all_datasets):
             test_datasets = [patient_datasets[sid]]
         else:
             train_datasets = train_datasets + [patient_datasets[sid]]
+    if not train_datasets or not test_datasets:
+        return None, None
+    apply_normalization_to_datasets(train_datasets, test_datasets)
     test_combined_dataset = ConcatDataset(test_datasets)
     train_combined_dataset = ConcatDataset(train_datasets)
     return test_combined_dataset, train_combined_dataset
@@ -400,6 +464,12 @@ class EEGCNNTrainer:
             test_dataset, train_dataset = get_datasets_per_patient(self.test_seizure_id,
                                                                    self.patient_id,
                                                                    datasets)
+        if test_dataset is None or train_dataset is None:
+            raise ValueError(
+                f"Insufficient data for {self.patient_id} fold {test_seizure_id}: "
+                f"need at least 1 test fold and 1 train fold with both classes present"
+            )
+
         # Load Data
         self.train_loader = DataLoader(
             train_dataset,
@@ -434,9 +504,10 @@ class EEGCNNTrainer:
             pretrained_path = Path("model") / "pretrained_encoder.pth"
         if pretrained_path.exists() and not lopo:
             print(f"Loading pretrained encoder from {pretrained_path} (patient {self.patient_id} is group {my_group})")
-            self.model.load_state_dict(
-                torch.load(pretrained_path, map_location=self.device, weights_only=False)
-            )
+            pretrained_state = torch.load(pretrained_path, map_location=self.device, weights_only=False)
+            # Only load conv tower weights; GRU/norm/FC may have different dimensions
+            conv_state = {k: v for k, v in pretrained_state.items() if k.startswith("conv_tower.")}
+            self.model.load_state_dict(conv_state, strict=False)
             # Freeze conv tower (learned general spectral features).
             # Keep transformer, norm, and FC head trainable so the model
             # can adapt temporal attention patterns per patient.
@@ -611,7 +682,7 @@ class EEGCNNTrainer:
         print("=" * 60)
 
         start_time = time.time()
-        early_stopping_patience = 5
+        early_stopping_patience = 10
         epochs_no_improve = 0
 
         for epoch in range(TRAINING_EPOCHS):
@@ -652,12 +723,12 @@ class EEGCNNTrainer:
         if not best_path.exists():
             return
 
-        print(f"\nPerforming final threshold tuning on best model (using Validation Set)...")
+        print(f"\nPerforming final threshold tuning on best model (using Training Set)...")
         checkpoint = torch.load(best_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
 
         val_metrics, tracker = self.validate_epoch(
-            "Final Tuning (Val Set)", loader=self.val_loader
+            "Final Tuning (Train Set)", loader=self.train_loader
         )
 
         optimal_threshold = val_metrics["optimal_threshold"]
@@ -746,6 +817,12 @@ def pretrain():
             print(f"No datasets for group {group_id}!")
             continue
 
+        # All pretrain data is training data, so compute stats from all of it
+        mean, std = compute_normalization_stats(datasets)
+        print(f"  Pretrain normalization: mean={mean:.6f}, std={std:.6f}")
+        for ds in datasets:
+            ds.set_normalization(mean, std)
+
         combined = ConcatDataset(datasets)
         print(f"Training data: {len(combined)} samples from {len(datasets)} splits")
 
@@ -823,7 +900,11 @@ def main():
             patient_config = get_patient_config(current_idx)
 
             all_datasets = create_datasets([current_idx], skip_missing_class=True)
-            test_seizures = all_datasets[patient_id].keys()
+            valid_folds = list(all_datasets[patient_id].keys())
+            if len(valid_folds) < 2:
+                print(f"Skipping {patient_id}: need at least 2 valid folds, got {len(valid_folds)}")
+                continue
+            test_seizures = valid_folds
             if TEST_SEIZURE is not None:
                 test_seizures = [TEST_SEIZURE]
             print("patient:", patient_id, "seizures:", test_seizures)

@@ -258,37 +258,30 @@ class EEGPreprocessor:
             # Free the large full-signal arrays
             del full_stft, full_power, full_spectrograms
 
-            # 5. Reassemble Sequences
+            # 5. Reassemble Sequences — pre-allocate arrays instead of list + np.stack
+            #    to avoid repeated allocation for files with many overlapping sequences.
+            ref_shape = next(iter(segment_cache.values())).shape  # (18, n_freq, n_time)
+
             results = []
             for seq in sequences:
-                spec_list = []
+                num_segs = seq["num_segments"]
+                spec_stack = np.zeros(
+                    (SEQUENCE_LENGTH, ref_shape[0], ref_shape[1], ref_shape[2]),
+                    dtype=np.float32,
+                )
                 valid = True
 
-                for start in seq["segment_starts"]:
+                for i, start in enumerate(seq["segment_starts"]):
                     if start in segment_cache:
-                        spec_list.append(segment_cache[start])
+                        seg = segment_cache[start]
+                        spec_stack[i, :, :, :seg.shape[2]] = seg
                     else:
                         valid = False
                         break
 
-                if not valid or not spec_list:
+                if not valid:
                     results.append(None)
                     continue
-
-                # Pad/Trim time dimensions if inconsistent
-                min_t = min(x.shape[2] for x in spec_list)
-                spec_stack = np.stack(
-                    [x[:, :, :min_t] for x in spec_list], axis=0
-                )
-
-                # Zero-pad partial sequences to full SEQUENCE_LENGTH
-                if spec_stack.shape[0] < SEQUENCE_LENGTH:
-                    pad_count = SEQUENCE_LENGTH - spec_stack.shape[0]
-                    pad_shape = (pad_count, *spec_stack.shape[1:])
-                    spec_stack = np.concatenate(
-                        [spec_stack, np.zeros(pad_shape, dtype=spec_stack.dtype)],
-                        axis=0,
-                    )
 
                 results.append(
                     {
@@ -339,14 +332,25 @@ class EEGPreprocessor:
             for k in ["start_times", "file_names", "time_to_seizure"]:
                 f[f"segment_info/{k}"].resize(n_old + n_new, axis=0)
 
-            for i, item in enumerate(batch):
-                idx = n_old + i
-                f["spectrograms"][idx] = item["spectrogram"]
-                f["labels"][idx] = item["label"]
-                f["patient_ids"][idx] = item["patient_id"].encode("utf-8")
-                f["segment_info/start_times"][idx] = item["start_sec"]
-                f["segment_info/file_names"][idx] = item["file_name"].encode("utf-8")
-                f["segment_info/time_to_seizure"][idx] = item["time_to_seizure"]
+            # Batch write: single HDF5 I/O call per dataset instead of per-sample
+            f["spectrograms"][n_old:n_old + n_new] = np.array(
+                [item["spectrogram"] for item in batch], dtype=np.float32
+            )
+            f["labels"][n_old:n_old + n_new] = np.array(
+                [item["label"] for item in batch], dtype=np.int32
+            )
+            f["patient_ids"][n_old:n_old + n_new] = np.array(
+                [item["patient_id"].encode("utf-8") for item in batch]
+            )
+            f["segment_info/start_times"][n_old:n_old + n_new] = np.array(
+                [item["start_sec"] for item in batch], dtype=np.float32
+            )
+            f["segment_info/file_names"][n_old:n_old + n_new] = np.array(
+                [item["file_name"].encode("utf-8") for item in batch]
+            )
+            f["segment_info/time_to_seizure"][n_old:n_old + n_new] = np.array(
+                [item["time_to_seizure"] for item in batch], dtype=np.float32
+            )
 
     def create_intermediate_datasets(self, splits):
         for split, sequences in splits.items():

@@ -11,7 +11,7 @@ Conv-BiGRU Architecture:
 # =============================================================================
 
 PREICTAL_WINDOW = 20 * 60  # 20 minutes before seizure (zone starts at -20min)
-PREICTAL_ONSET_BUFFER = 5 * 60  # 5 min onset buffer — exclude data too close to seizure
+PREICTAL_ONSET_BUFFER = 0 * 60  # 0 min onset buffer — exclude data too close to seizure
 # Effective preictal zone: [-20min, -5min]
 INTERICTAL_BUFFER = 30 * 60  # 30 min buffer around seizures (interictal only)
 

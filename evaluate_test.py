@@ -190,6 +190,104 @@ def evaluate_model(model_path, test_data_path, device):
     )
 
 
+def evaluate_ensemble(n_seeds, test_data_path, patient_id, device):
+    """Evaluate ensemble by averaging probabilities from N seed models."""
+    print(f"Loading test dataset from {test_data_path}...")
+    test_dataset = EEGDataset(test_data_path, split="test")
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=SEQUENCE_BATCH_SIZE,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=True if device.type == "cuda" else False,
+    )
+
+    all_labels = None
+    ensemble_probs = []  # list of per-seed probability arrays
+
+    for seed_idx in range(n_seeds):
+        suffix = f"seed{seed_idx}"
+        model_path = Path("model") / suffix / patient_id / "best_model.pth"
+        if not model_path.exists():
+            print(f"  Skipping {suffix}: {model_path} not found")
+            continue
+
+        model = _create_model(device)
+        try:
+            checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+        except TypeError:
+            checkpoint = torch.load(model_path, map_location=device)
+
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.to(device)
+        model.eval()
+
+        seed_probs = []
+        seed_labels = []
+        with torch.no_grad():
+            for x, labels in test_loader:
+                x = x.to(device)
+                outputs = model(x)
+                probs = torch.softmax(outputs, dim=1)[:, 1]
+                seed_probs.extend(probs.cpu().numpy())
+                seed_labels.extend(labels.numpy())
+
+        ensemble_probs.append(np.array(seed_probs))
+        if all_labels is None:
+            all_labels = np.array(seed_labels)
+        print(f"  {suffix}: loaded (epoch {checkpoint.get('epoch', '?')})")
+
+    if not ensemble_probs:
+        print(f"  No ensemble models found for {patient_id}")
+        return None
+
+    n_models = len(ensemble_probs)
+    print(f"  Ensemble size: {n_models} models")
+
+    # Average probabilities across seeds
+    avg_probs = np.mean(ensemble_probs, axis=0)
+    threshold = 0.5
+    predictions = (avg_probs >= threshold).astype(int)
+
+    # Compute metrics
+    if len(np.unique(all_labels)) > 1:
+        auc = roc_auc_score(all_labels, avg_probs)
+    else:
+        auc = 0.5
+
+    metrics = {
+        "accuracy": accuracy_score(all_labels, predictions),
+        "precision": precision_score(all_labels, predictions, zero_division=0),
+        "recall": recall_score(all_labels, predictions, zero_division=0),
+        "f1": f1_score(all_labels, predictions, zero_division=0),
+        "auc_roc": auc,
+        "threshold_used": threshold,
+        "ensemble_size": n_models,
+    }
+
+    cm = confusion_matrix(all_labels, predictions)
+    positive_class = get_positive_label()
+
+    # Use smoothing params from first seed's checkpoint
+    first_model_path = Path("model") / "seed0" / patient_id / "best_model.pth"
+    ckpt = torch.load(first_model_path, map_location=device, weights_only=False)
+    config = ckpt.get("config", {})
+    smoothing_window = config.get("smoothing_window")
+    smoothing_count = config.get("smoothing_count")
+
+    return (
+        metrics,
+        cm,
+        all_labels.tolist(),
+        predictions.tolist(),
+        avg_probs.tolist(),
+        TASK_MODE,
+        positive_class,
+        smoothing_window,
+        smoothing_count,
+    )
+
+
 def plot_preictal_dynamics(model, test_dataset, device, patient_id, threshold=0.5, temperature=1.0):
     """Plots the model's output probability for each distinct seizure event in the test set."""
     print("\nGenerating per-seizure dynamics plots...")
@@ -300,11 +398,33 @@ def main():
         default=None,
         help="Epoch number to evaluate. If not specified, loads best_model.pth",
     )
+    parser.add_argument(
+        "--patient",
+        type=str,
+        default=None,
+        help="Evaluate a specific patient by ID (e.g., --patient chb07)",
+    )
+    parser.add_argument(
+        "--ensemble",
+        type=int,
+        default=None,
+        help="Evaluate ensemble of N seed models by averaging probabilities. "
+             "Example: --ensemble 5",
+    )
     args = parser.parse_args()
 
     n_patients = len(PATIENTS)
 
-    if PATIENT_INDEX is None:
+    if args.patient:
+        if args.patient not in PATIENTS:
+            print(f"Error: {args.patient} not in PATIENTS list")
+            return
+        patient_idx = PATIENTS.index(args.patient)
+        patients_to_process = [patient_idx]
+        print("=" * 60)
+        print(f"EVALUATION: Patient {patient_idx} ({args.patient})")
+        print("=" * 60)
+    elif PATIENT_INDEX is None:
         patients_to_process = list(range(n_patients))
         print("=" * 60)
         print(f"EVALUATION: ALL {n_patients} PATIENTS")
@@ -338,46 +458,68 @@ def main():
         print(f"{'='*60}")
 
         try:
-            if args.epoch is not None:
-                model_filename = f"epoch_{args.epoch:03d}.pth"
-            else:
-                model_filename = "best_model.pth"
-
-            model_path = Path(f"model/{current_output_prefix}/{model_filename}")
             dataset_dir = Path("preprocessing") / "data" / current_output_prefix
             test_data_path = dataset_dir / "test_dataset.h5"
-
-            if not model_path.exists():
-                last_epoch = Path(
-                    f"model/{current_output_prefix}/epoch_{TRAINING_EPOCHS:03d}.pth"
-                )
-                if args.epoch is None and last_epoch.exists():
-                    print(
-                        f"  'best_model.pth' not found. Falling back to last epoch: {last_epoch}"
-                    )
-                    model_path = last_epoch
-                else:
-                    print(f"  Model not found: {model_path}")
-                    continue
 
             if not test_data_path.exists():
                 print(f"  Test dataset not found: {test_data_path}")
                 continue
 
-            print(f"Evaluating model: {model_path.name}")
-            print(f"Dataset prefix: {current_output_prefix}")
+            if args.ensemble:
+                # Ensemble evaluation: average probabilities from N seed models
+                print(f"Evaluating ENSEMBLE ({args.ensemble} seeds)")
+                print(f"Dataset prefix: {current_output_prefix}")
 
-            (
-                metrics,
-                cm,
-                true_labels,
-                predictions,
-                probabilities,
-                checkpoint_task_mode,
-                positive_class,
-                ckpt_window,
-                ckpt_count,
-            ) = evaluate_model(model_path, test_data_path, device)
+                result = evaluate_ensemble(args.ensemble, test_data_path, patient_id, device)
+                if result is None:
+                    continue
+
+                (
+                    metrics,
+                    cm,
+                    true_labels,
+                    predictions,
+                    probabilities,
+                    checkpoint_task_mode,
+                    positive_class,
+                    ckpt_window,
+                    ckpt_count,
+                ) = result
+            else:
+                if args.epoch is not None:
+                    model_filename = f"epoch_{args.epoch:03d}.pth"
+                else:
+                    model_filename = "best_model.pth"
+
+                model_path = Path(f"model/{current_output_prefix}/{model_filename}")
+
+                if not model_path.exists():
+                    last_epoch = Path(
+                        f"model/{current_output_prefix}/epoch_{TRAINING_EPOCHS:03d}.pth"
+                    )
+                    if args.epoch is None and last_epoch.exists():
+                        print(
+                            f"  'best_model.pth' not found. Falling back to last epoch: {last_epoch}"
+                        )
+                        model_path = last_epoch
+                    else:
+                        print(f"  Model not found: {model_path}")
+                        continue
+
+                print(f"Evaluating model: {model_path.name}")
+                print(f"Dataset prefix: {current_output_prefix}")
+
+                (
+                    metrics,
+                    cm,
+                    true_labels,
+                    predictions,
+                    probabilities,
+                    checkpoint_task_mode,
+                    positive_class,
+                    ckpt_window,
+                    ckpt_count,
+                ) = evaluate_model(model_path, test_data_path, device)
 
             # Print results
             print("\n" + "=" * 60)
@@ -505,39 +647,48 @@ def main():
                 f"False Positive Rate: {seizure_accuracy_metrics['fp_rate_per_hour']:.4f} per hour"
             )
 
-            patient_results_path = Path(
-                f"model/{current_output_prefix}/test_results.json"
-            )
+            if args.ensemble:
+                results_dir = Path("model") / "ensemble"
+                results_dir.mkdir(parents=True, exist_ok=True)
+                patient_results_path = results_dir / f"{current_output_prefix}_test_results.json"
+            else:
+                patient_results_path = Path(
+                    f"model/{current_output_prefix}/test_results.json"
+                )
             with open(patient_results_path, "w") as f:
                 json.dump(patient_results, f, indent=2)
 
             print(f"\n  Results saved to {patient_results_path}")
 
             # Generate Dynamics Plot
-            model = _create_model(device)
-            try:
-                checkpoint = torch.load(
-                    model_path, map_location=device, weights_only=False
+            if args.ensemble:
+                # For ensemble, use seed0 model for plotting
+                plot_model_path = Path("model") / "seed0" / patient_id / "best_model.pth"
+            else:
+                plot_model_path = model_path
+
+            if plot_model_path.exists():
+                model = _create_model(device)
+                try:
+                    checkpoint = torch.load(
+                        plot_model_path, map_location=device, weights_only=False
+                    )
+                except TypeError:
+                    checkpoint = torch.load(plot_model_path, map_location=device)
+                model.load_state_dict(checkpoint["model_state_dict"])
+                model.to(device)
+
+                if "test_dataset" not in locals():
+                    test_dataset = EEGDataset(test_data_path, split="test")
+
+                plot_preictal_dynamics(
+                    model=model,
+                    test_dataset=test_dataset,
+                    device=device,
+                    patient_id=patient_id,
+                    threshold=0.5,
+                    temperature=1.0,
                 )
-            except TypeError:
-                checkpoint = torch.load(model_path, map_location=device)
-            model.load_state_dict(checkpoint["model_state_dict"])
-            model.to(device)
-
-            loaded_threshold = 0.5
-            plot_temperature = 1.0
-
-            if "test_dataset" not in locals():
-                test_dataset = EEGDataset(test_data_path, split="test")
-
-            plot_preictal_dynamics(
-                model=model,
-                test_dataset=test_dataset,
-                device=device,
-                patient_id=patient_id,
-                threshold=loaded_threshold,
-                temperature=plot_temperature,
-            )
 
             batch_results[current_idx] = {
                 "patient_id": patient_id,

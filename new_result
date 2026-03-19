@@ -24,12 +24,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      1.0212
+Loss:      0.5947
 Accuracy:  0.7500 (75.00%)
 Precision: 1.0000
 Recall:    0.5000
 F1 Score:  0.6667
-AUC-ROC:   0.7500
+AUC-ROC:   0.5000
 
 Threshold used (from training): 0.5000
 
@@ -79,19 +79,19 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      2.2894
-Accuracy:  0.3333 (33.33%)
+Loss:      0.7555
+Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.3333
+AUC-ROC:   0.2222
 
 Threshold used (from training): 0.5000
 
 Confusion Matrix:
                 Predicted
                 Interictal  Preictal
-Actual Interictal         2         1
+Actual Interictal         3         0
        Preictal         3         0
 
 Applying smoothing using TRAINED parameters:
@@ -105,7 +105,7 @@ PER-SEIZURE ACCURACY RESULTS
 ============================================================
 Total Seizures: 1
 Per-Seizure Accuracy: 0.0000 (0/1)
-False Positive Rate: 0.6667 per hour
+False Positive Rate: 0.0000 per hour
 
   Results saved to model/chb02/test_results.json
 
@@ -134,7 +134,7 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.0191
+Loss:      0.2301
 Accuracy:  1.0000 (100.00%)
 Precision: 1.0000
 Recall:    1.0000
@@ -177,7 +177,7 @@ Loading test dataset from preprocessing/data/chb04/test_dataset.h5...
 Loaded test dataset: 42 samples
   - Class Dist: tensor([21, 21])
 Loading model checkpoint from model/chb04/best_model.pth...
-Model loaded from epoch 2
+Model loaded from epoch 0
 Task mode: PREDICTION (preictal vs interictal)
 Using decision threshold: 0.5000
 Temperature scaling: 1.00
@@ -188,32 +188,32 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.1936
-Accuracy:  0.9524 (95.24%)
-Precision: 0.9524
+Loss:      0.2228
+Accuracy:  0.9762 (97.62%)
+Precision: 1.0000
 Recall:    0.9524
-F1 Score:  0.9524
-AUC-ROC:   0.9819
+F1 Score:  0.9756
+AUC-ROC:   0.9637
 
 Threshold used (from training): 0.5000
 
 Confusion Matrix:
                 Predicted
                 Interictal  Preictal
-Actual Interictal        20         1
+Actual Interictal        21         0
        Preictal         1        20
 
 Applying smoothing using HEURISTIC parameters (fallback):
   - Window Size: 20
-  - Threshold Count: 10 (derived from precision 0.9524)
+  - Threshold Count: 10 (derived from precision 1.0000)
 
 ============================================================
 SMOOTHED PREDICTIONS RESULTS
 ============================================================
-Smoothed_Accuracy:  0.5217 (52.17%)
-Smoothed_Precision: 0.1538
+Smoothed_Accuracy:  0.5652 (56.52%)
+Smoothed_Precision: 0.1667
 Smoothed_Recall:    1.0000
-Smoothed_F1 Score:  0.2667
+Smoothed_F1 Score:  0.2857
 Loaded test dataset: 42 samples
   - Class Dist: tensor([21, 21])
 
@@ -251,12 +251,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.9913
+Loss:      0.5878
 Accuracy:  0.7500 (75.00%)
 Precision: 1.0000
 Recall:    0.5000
 F1 Score:  0.6667
-AUC-ROC:   0.5000
+AUC-ROC:   0.7500
 
 Threshold used (from training): 0.5000
 
@@ -294,7 +294,7 @@ Loading test dataset from preprocessing/data/chb06/test_dataset.h5...
 Loaded test dataset: 16 samples
   - Class Dist: tensor([8, 8])
 Loading model checkpoint from model/chb06/best_model.pth...
-Model loaded from epoch 3
+Model loaded from epoch 4
 Task mode: PREDICTION (preictal vs interictal)
 Using decision threshold: 0.5000
 Temperature scaling: 1.00
@@ -305,12 +305,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      2.0069
+Loss:      1.8981
 Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.0000
+AUC-ROC:   0.4219
 
 Threshold used (from training): 0.5000
 
@@ -368,20 +368,20 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.4326
-Accuracy:  0.9000 (90.00%)
-Precision: 0.8333
-Recall:    1.0000
-F1 Score:  0.9091
-AUC-ROC:   0.9400
+Loss:      0.9987
+Accuracy:  0.5000 (50.00%)
+Precision: 0.0000
+Recall:    0.0000
+F1 Score:  0.0000
+AUC-ROC:   0.7600
 
 Threshold used (from training): 0.5000
 
 Confusion Matrix:
                 Predicted
                 Interictal  Preictal
-Actual Interictal         8         2
-       Preictal         0        10
+Actual Interictal        10         0
+       Preictal        10         0
 
 Applying smoothing using TRAINED parameters:
   - Window Size: 1
@@ -393,8 +393,8 @@ Loaded test dataset: 20 samples
 PER-SEIZURE ACCURACY RESULTS
 ============================================================
 Total Seizures: 1
-Per-Seizure Accuracy: 1.0000 (1/1)
-False Positive Rate: 0.4000 per hour
+Per-Seizure Accuracy: 0.0000 (0/1)
+False Positive Rate: 0.0000 per hour
 
   Results saved to model/chb07/test_results.json
 
@@ -423,11 +423,11 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      1.8667
-Accuracy:  0.5000 (50.00%)
-Precision: 0.0000
-Recall:    0.0000
-F1 Score:  0.0000
+Loss:      0.2534
+Accuracy:  1.0000 (100.00%)
+Precision: 1.0000
+Recall:    1.0000
+F1 Score:  1.0000
 AUC-ROC:   1.0000
 
 Threshold used (from training): 0.5000
@@ -436,7 +436,7 @@ Confusion Matrix:
                 Predicted
                 Interictal  Preictal
 Actual Interictal         1         0
-       Preictal         1         0
+       Preictal         0         1
 
 Applying smoothing using TRAINED parameters:
   - Window Size: 1
@@ -448,7 +448,7 @@ Loaded test dataset: 2 samples
 PER-SEIZURE ACCURACY RESULTS
 ============================================================
 Total Seizures: 1
-Per-Seizure Accuracy: 0.0000 (0/1)
+Per-Seizure Accuracy: 1.0000 (1/1)
 False Positive Rate: 0.0000 per hour
 
   Results saved to model/chb08/test_results.json
@@ -477,19 +477,19 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      2.3379
-Accuracy:  0.4000 (40.00%)
+Loss:      1.0376
+Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.1900
+AUC-ROC:   0.7000
 
 Threshold used (from training): 0.5000
 
 Confusion Matrix:
                 Predicted
                 Interictal  Preictal
-Actual Interictal         8         2
+Actual Interictal        10         0
        Preictal        10         0
 
 Applying smoothing using HEURISTIC parameters (fallback):
@@ -499,7 +499,7 @@ Applying smoothing using HEURISTIC parameters (fallback):
 ============================================================
 SMOOTHED PREDICTIONS RESULTS
 ============================================================
-Smoothed_Accuracy:  0.0000 (0.00%)
+Smoothed_Accuracy:  1.0000 (100.00%)
 Smoothed_Precision: 0.0000
 Smoothed_Recall:    0.0000
 Smoothed_F1 Score:  0.0000
@@ -510,7 +510,7 @@ Loaded test dataset: 20 samples
 PER-SEIZURE ACCURACY RESULTS
 ============================================================
 Total Seizures: 1
-Per-Seizure Accuracy: 1.0000 (1/1)
+Per-Seizure Accuracy: 0.0000 (0/1)
 False Positive Rate: 0.0000 per hour
 
   Results saved to model/chb09/test_results.json
@@ -539,12 +539,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      1.6661
+Loss:      0.8996
 Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.8000
+AUC-ROC:   0.2400
 
 Threshold used (from training): 0.5000
 
@@ -602,19 +602,19 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      2.6264
-Accuracy:  0.1667 (16.67%)
+Loss:      0.7877
+Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.3333
+AUC-ROC:   0.0000
 
 Threshold used (from training): 0.5000
 
 Confusion Matrix:
                 Predicted
                 Interictal  Preictal
-Actual Interictal         1         2
+Actual Interictal         3         0
        Preictal         3         0
 
 Applying smoothing using TRAINED parameters:
@@ -628,7 +628,7 @@ PER-SEIZURE ACCURACY RESULTS
 ============================================================
 Total Seizures: 1
 Per-Seizure Accuracy: 0.0000 (0/1)
-False Positive Rate: 1.3333 per hour
+False Positive Rate: 0.0000 per hour
 
   Results saved to model/chb11/test_results.json
 
@@ -657,12 +657,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      1.9512
+Loss:      0.9344
 Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.0000
+AUC-ROC:   0.2500
 
 Threshold used (from training): 0.5000
 
@@ -712,12 +712,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      1.9791
+Loss:      0.9303
 Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   1.0000
+AUC-ROC:   0.0000
 
 Threshold used (from training): 0.5000
 
@@ -767,7 +767,7 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.0183
+Loss:      0.2339
 Accuracy:  1.0000 (100.00%)
 Precision: 1.0000
 Recall:    1.0000
@@ -822,7 +822,7 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.0187
+Loss:      0.2475
 Accuracy:  1.0000 (100.00%)
 Precision: 1.0000
 Recall:    1.0000
@@ -877,12 +877,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      1.9853
+Loss:      0.9087
 Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.0000
+AUC-ROC:   1.0000
 
 Threshold used (from training): 0.5000
 
@@ -932,7 +932,7 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.0208
+Loss:      0.2072
 Accuracy:  1.0000 (100.00%)
 Precision: 1.0000
 Recall:    1.0000
@@ -987,12 +987,12 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      2.0157
+Loss:      0.9300
 Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
-AUC-ROC:   0.7500
+AUC-ROC:   0.5000
 
 Threshold used (from training): 0.5000
 
@@ -1042,7 +1042,7 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.0190
+Loss:      0.2564
 Accuracy:  1.0000 (100.00%)
 Precision: 1.0000
 Recall:    1.0000
@@ -1097,8 +1097,8 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      2.8449
-Accuracy:  0.2500 (25.00%)
+Loss:      0.9574
+Accuracy:  0.5000 (50.00%)
 Precision: 0.0000
 Recall:    0.0000
 F1 Score:  0.0000
@@ -1109,7 +1109,7 @@ Threshold used (from training): 0.5000
 Confusion Matrix:
                 Predicted
                 Interictal  Preictal
-Actual Interictal         1         1
+Actual Interictal         2         0
        Preictal         2         0
 
 Applying smoothing using TRAINED parameters:
@@ -1123,7 +1123,7 @@ PER-SEIZURE ACCURACY RESULTS
 ============================================================
 Total Seizures: 1
 Per-Seizure Accuracy: 0.0000 (0/1)
-False Positive Rate: 1.0000 per hour
+False Positive Rate: 0.0000 per hour
 
   Results saved to model/chb21/test_results.json
 
@@ -1152,7 +1152,7 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.0222
+Loss:      0.2185
 Accuracy:  1.0000 (100.00%)
 Precision: 1.0000
 Recall:    1.0000
@@ -1207,7 +1207,7 @@ Evaluating on test set...
 ============================================================
 PATIENT TEST RESULTS
 ============================================================
-Loss:      0.0220
+Loss:      0.2188
 Accuracy:  1.0000 (100.00%)
 Precision: 1.0000
 Recall:    1.0000
@@ -1245,10 +1245,10 @@ Found 1 contiguous seizure events (after sorting).
 BATCH EVALUATION SUMMARY
 ============================================================
 Patients evaluated: 22/22
-Mean Accuracy: 0.6819 (+/-0.2798)
-Mean AUC-ROC:  0.6854 (+/-0.3715)
-Mean Smoothed Accuracy: 0.6304 (+/-0.4130)
-Mean Per-Seizure Accuracy: 0.5455 (+/-0.4979)
-Mean False Positive Rate: 0.2455 per hour (+/-0.5247)
+Mean Accuracy: 0.7262 (+/-0.2361)
+Mean AUC-ROC:  0.6731 (+/-0.3496)
+Mean Smoothed Accuracy: 0.8913 (+/-0.1883)
+Mean Per-Seizure Accuracy: 0.5000 (+/-0.5000)
+Mean False Positive Rate: 0.0909 per hour (+/-0.4166)
 
   Batch results saved to model/batch_test_results.json

@@ -363,11 +363,14 @@ def optimize_running_average(predictions, labels, max_window=30):
 
 
 class EEGTrainer:
-    def __init__(self, patient_config: Dict):
+    def __init__(self, patient_config: Dict, pretrained_path=None, model_subdir=None):
         self.patient_id = patient_config["patient_id"]
         dataset_prefix = patient_config["output_prefix"]
 
-        self.model_dir = Path("model") / dataset_prefix
+        if model_subdir:
+            self.model_dir = Path("model") / model_subdir / dataset_prefix
+        else:
+            self.model_dir = Path("model") / dataset_prefix
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_prefix = dataset_prefix
         self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
@@ -405,7 +408,12 @@ class EEGTrainer:
         )
 
         # Load pretrained weights if available
-        pretrained_path = Path("model") / "pretrained_encoder.pth"
+        if pretrained_path is None:
+            pretrained_path = Path("model") / "pretrained_encoder.pth"
+        else:
+            pretrained_path = Path(pretrained_path)
+        # Store pretrained config directory (for temperature loading)
+        self.pretrained_config_path = pretrained_path.parent / "pretrained_config.json"
         if pretrained_path.exists():
             print(f"Loading pretrained encoder from {pretrained_path}")
             self.model.load_state_dict(
@@ -623,7 +631,7 @@ class EEGTrainer:
         checkpoint = torch.load(best_path, map_location=self.device, weights_only=False)
 
         # Load temperature from pretrained config
-        pretrained_config_path = Path("model") / "pretrained_config.json"
+        pretrained_config_path = self.pretrained_config_path
         if pretrained_config_path.exists():
             with open(pretrained_config_path, "r") as f:
                 pretrained_config = json.load(f)
@@ -661,6 +669,10 @@ class EEGTrainer:
             optimal_threshold = 0.5
 
         optimized_preds = (all_probs >= optimal_threshold).astype(int)
+        # Ensure same length (edge case with batching)
+        min_len = min(len(optimized_preds), len(labels_np))
+        optimized_preds = optimized_preds[:min_len]
+        labels_np = labels_np[:min_len]
         best_window, best_count = optimize_running_average(optimized_preds, labels_np)
 
         if "config" not in checkpoint:
@@ -680,11 +692,35 @@ class EEGTrainer:
         print(f"   - Temperature: {temperature:.2f}")
 
 
-def pretrain():
-    """Cross-patient pretraining: train shared encoder on ALL patients."""
+def set_seed(seed):
+    """Set random seed for reproducibility."""
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    import random
+    random.seed(seed)
+
+
+def pretrain(exclude_patient=None, seed=None, save_suffix=None):
+    """Cross-patient pretraining: train shared encoder on ALL patients.
+
+    Args:
+        exclude_patient: If set, exclude this patient from pretraining (for LOPO).
+        seed: Random seed for reproducibility (for ensemble).
+        save_suffix: Suffix for save directory (e.g., "seed0" for ensemble).
+    """
     print("=" * 60)
-    print("CROSS-PATIENT PRETRAINING")
+    if exclude_patient:
+        print(f"LOPO PRETRAINING (excluding {exclude_patient})")
+    elif save_suffix:
+        print(f"ENSEMBLE PRETRAINING ({save_suffix}, seed={seed})")
+    else:
+        print("CROSS-PATIENT PRETRAINING")
     print("=" * 60)
+
+    if seed is not None:
+        set_seed(seed)
+        print(f"Random seed: {seed}")
 
     # Device
     if torch.cuda.is_available():
@@ -695,9 +731,12 @@ def pretrain():
         device = torch.device("cpu")
     print(f"Device: {device}")
 
-    # Load train datasets from all patients
+    # Load train datasets from all patients (except excluded)
     all_datasets = []
     for patient_id in PATIENTS:
+        if patient_id == exclude_patient:
+            print(f"  LOPO: Excluding {patient_id} from pretraining")
+            continue
         h5_path = Path("preprocessing") / "data" / patient_id / "train_dataset.h5"
         if h5_path.exists():
             all_datasets.append(EEGDataset(str(h5_path), split=f"train ({patient_id})", augment=True))
@@ -768,7 +807,12 @@ def pretrain():
         print(f"  Epoch {epoch+1} avg loss: {avg_loss:.4f}")
 
     # Save pretrained weights
-    save_dir = Path("model")
+    if exclude_patient:
+        save_dir = Path("model") / f"lopo_{exclude_patient}"
+    elif save_suffix:
+        save_dir = Path("model") / save_suffix
+    else:
+        save_dir = Path("model")
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / "pretrained_encoder.pth"
     torch.save(model.state_dict(), save_path)
@@ -778,6 +822,8 @@ def pretrain():
     print("\nTuning threshold on combined cross-patient validation set...")
     val_datasets = []
     for patient_id in PATIENTS:
+        if patient_id == exclude_patient:
+            continue
         val_path = Path("preprocessing") / "data" / patient_id / "val_dataset.h5"
         if val_path.exists():
             val_datasets.append(EEGDataset(str(val_path), split=f"val ({patient_id})"))
@@ -856,7 +902,86 @@ def main():
         "--pretrain", action="store_true",
         help="Run cross-patient pretraining instead of per-patient fine-tuning"
     )
+    parser.add_argument(
+        "--lopo", type=str, default=None,
+        help="Leave-One-Patient-Out: pretrain excluding this patient, then fine-tune on it. "
+             "Example: --lopo chb01"
+    )
+    parser.add_argument(
+        "--ensemble", type=int, default=None,
+        help="Train an ensemble of N pretrained encoders with different seeds, "
+             "then fine-tune each on all patients. Example: --ensemble 5"
+    )
     args = parser.parse_args()
+
+    if args.ensemble:
+        n_seeds = args.ensemble
+        print("=" * 60)
+        print(f"ENSEMBLE TRAINING: {n_seeds} seeds")
+        print("=" * 60)
+
+        # Step 1: Pretrain N encoders with different seeds
+        for seed_idx in range(n_seeds):
+            seed = 42 + seed_idx * 100  # spread seeds apart
+            suffix = f"seed{seed_idx}"
+            print(f"\n{'='*60}")
+            print(f"ENSEMBLE: Pretraining seed {seed_idx+1}/{n_seeds} (seed={seed})")
+            print(f"{'='*60}")
+            pretrain(seed=seed, save_suffix=suffix)
+
+        # Step 2: Fine-tune each encoder on all patients
+        n_patients = len(PATIENTS)
+        if PATIENT_INDEX is None:
+            patients_to_process = list(range(n_patients))
+        else:
+            patients_to_process = [PATIENT_INDEX]
+
+        for seed_idx in range(n_seeds):
+            suffix = f"seed{seed_idx}"
+            encoder_path = Path("model") / suffix / "pretrained_encoder.pth"
+            print(f"\n{'='*60}")
+            print(f"ENSEMBLE: Fine-tuning with {suffix}")
+            print(f"{'='*60}")
+
+            for current_idx in patients_to_process:
+                patient_config = get_patient_config(current_idx)
+                try:
+                    EEGTrainer(
+                        patient_config,
+                        pretrained_path=encoder_path,
+                        model_subdir=suffix,
+                    ).train()
+                except Exception as e:
+                    print(f"Error {patient_config['patient_id']} ({suffix}): {e}")
+                    import traceback
+                    traceback.print_exc()
+        return
+
+    if args.lopo:
+        # LOPO mode: pretrain excluding target patient, then fine-tune on it
+        target_patient = args.lopo
+        if target_patient not in PATIENTS:
+            print(f"Error: {target_patient} not in PATIENTS list")
+            return
+
+        print("=" * 60)
+        print(f"LEAVE-ONE-PATIENT-OUT: {target_patient}")
+        print("=" * 60)
+
+        # Step 1: Pretrain excluding target patient
+        pretrain(exclude_patient=target_patient)
+
+        # Step 2: Fine-tune on target patient using LOPO encoder
+        lopo_encoder_path = Path("model") / f"lopo_{target_patient}" / "pretrained_encoder.pth"
+        patient_idx = PATIENTS.index(target_patient)
+        patient_config = get_patient_config(patient_idx)
+        try:
+            EEGTrainer(patient_config, pretrained_path=lopo_encoder_path).train()
+        except Exception as e:
+            print(f"Error {target_patient}: {e}")
+            import traceback
+            traceback.print_exc()
+        return
 
     if args.pretrain:
         pretrain()

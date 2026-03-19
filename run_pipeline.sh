@@ -1,29 +1,25 @@
 #!/bin/bash
 
-# Define log file
-LOG_FILE="pipeline_log.txt"
+caffeinate -dims &
+CAFFEINE_PID=$!
+echo "Caffeinate started (PID: $CAFFEINE_PID)"
 
-# Run the pipeline and redirect both stdout and stderr to the log file
 {
     echo "Starting pipeline at $(date)"
     echo "----------------------------------------"
 
-    echo "Cleaning up previous models and preprocessed data..."
-    rm -rf model/
-    rm -rf preprocessing/
+    echo "Running pretraining (FocalLoss)..."
+    python3 train.py --pretrain
 
-    echo "Running data segmentation..."
-    python3 data_segmentation.py
+    echo "Running per-patient fine-tuning..."
+    python3 train.py
 
-    echo "Running data preprocessing..."
-    python3 data_preprocessing.py
-
-    echo "Running model training..."
-    python3 train.py > output.txt
-    
-    echo "Evaluating..."
+    echo "Running evaluation..."
     python3 evaluate_test.py
 
     echo "----------------------------------------"
     echo "Pipeline finished at $(date)"
-} 2>&1 | tee "$LOG_FILE"
+} 2>&1 | tee pipeline_log.txt
+
+kill $CAFFEINE_PID 2>/dev/null
+echo "Done. Caffeinate stopped."

@@ -519,8 +519,8 @@ def assign_patient_splits(sequences, patient_id, seizures_global, random_seed=42
         n_int = sum(1 for s in seizure_groups[sid] if s["type"] == "interictal")
         print(f"  Seizure {sid}: {n_pre} preictal + {n_ict} ictal + {n_int} interictal")
 
-    # 4. Cap interictal per fold at 2x positive (preictal + ictal) count
-    INTERICTAL_CAP_RATIO = 2
+    # 4. Cap interictal per fold at 1:1 with positive (preictal + ictal) count
+    INTERICTAL_CAP_RATIO = 1
     for sid in seizure_ids:
         seqs = seizure_groups[sid]
         positive_count = sum(1 for s in seqs if s["type"] in ("preictal", "ictal"))

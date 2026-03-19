@@ -58,9 +58,16 @@ class FocalLoss(nn.Module):
 
 
 class EEGDataset(Dataset):
-    """Single-Stream Dataset with lazy HDF5 loading for large 30-min windows."""
+    """Single-Stream Dataset with lazy HDF5 loading.
 
-    def __init__(self, h5_file_path, split="train", augment=False):
+    Labels in HDF5: 0=interictal, 1=preictal, 2=ictal.
+    Stage filtering remaps to binary for training:
+      - stage="pretrain": keeps ictal(2)+interictal(0), remaps 2→1
+      - stage="finetune": keeps preictal(1)+interictal(0), labels already 0/1
+      - stage=None: keeps all (no filtering)
+    """
+
+    def __init__(self, h5_file_path, split="train", augment=False, stage=None):
         self.h5_file_path = h5_file_path
         self.split = split
         self.h5_file = None
@@ -69,13 +76,7 @@ class EEGDataset(Dataset):
         self.std = None
 
         with h5py.File(h5_file_path, "r") as f:
-            if "spectrograms_phase" in f or "spectrograms_amp" in f:
-                raise ValueError(
-                    f"HDF5 file {h5_file_path} uses old dual-stream format. "
-                    "Re-run data_preprocessing.py to generate single-stream datasets."
-                )
-            self.labels = torch.LongTensor(f["labels"][:])
-            self.length = len(self.labels)
+            raw_labels = torch.LongTensor(f["labels"][:])
 
             if "metadata" in f:
                 self.metadata = dict(f["metadata"].attrs)
@@ -88,7 +89,24 @@ class EEGDataset(Dataset):
                 self.metadata = {}
                 self.stats = {"sum_v": 0.0, "sum_sq": 0.0, "count": 0.0}
 
-        print(f"Loaded {self.split} dataset: {self.length} samples")
+        # Stage-based filtering
+        if stage == "pretrain":
+            # Keep ictal (2) + interictal (0), remap ictal 2→1
+            mask = (raw_labels == 0) | (raw_labels == 2)
+            self.valid_indices = torch.where(mask)[0]
+            self.labels = (raw_labels[self.valid_indices] == 2).long()
+        elif stage == "finetune":
+            # Keep preictal (1) + interictal (0)
+            mask = (raw_labels == 0) | (raw_labels == 1)
+            self.valid_indices = torch.where(mask)[0]
+            self.labels = raw_labels[self.valid_indices]
+        else:
+            self.valid_indices = torch.arange(len(raw_labels))
+            self.labels = raw_labels
+
+        self.length = len(self.labels)
+
+        print(f"Loaded {self.split} dataset: {self.length} samples (stage={stage})")
         print(f"  - Class Dist: {torch.bincount(self.labels)}")
         if self.augment:
             print(f"  - Augmentation: ENABLED")
@@ -135,7 +153,8 @@ class EEGDataset(Dataset):
         spectrogram: (sequence_length, channels, freq_bins, time_bins)
         """
         self._open_h5()
-        x = torch.FloatTensor(self.h5_file["spectrograms"][idx])
+        real_idx = self.valid_indices[idx].item()
+        x = torch.FloatTensor(self.h5_file["spectrograms"][real_idx])
         if self.mean is not None and self.std is not None:
             x = (x - self.mean) / self.std if self.std > 1e-8 else x - self.mean
         if self.augment:
@@ -150,25 +169,26 @@ class EEGDataset(Dataset):
 class ConvTower(nn.Module):
     """Conv tower that extracts a fixed-size embedding from a single spectrogram segment.
 
-    Input:  (batch, 18, 128, 9)
+    Input:  (batch, 18, 50, 50)  — channels, freq_bins, time_bins per 5s segment
     Output: (batch, embed_dim)
+
+    Feature map progression: (50,50) → (25,25) → (13,13) → AdaptiveAvgPool → (1,1)
+    Uses strided convolutions instead of MaxPool to learn downsampling.
     """
 
     def __init__(self, in_channels=18, embed_dim=128):
         super().__init__()
 
         self.block1 = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels, 32, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(32),
             nn.GELU(),
-            nn.MaxPool2d(2),
         )
 
         self.block2 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.GELU(),
-            nn.MaxPool2d(2),
         )
 
         self.block3 = nn.Sequential(
@@ -188,10 +208,11 @@ class ConvTower(nn.Module):
 
 
 class ConvGRUModel(nn.Module):
-    """Single-stream Conv-BiLSTM for EEG sequence classification.
+    """Single-stream Conv-BiGRU for EEG sequence classification.
 
+    Input: (batch, 30, 18, 50, 50) — 30 segments × 5s = 2.5 min sequences.
     Conv tower extracts a 128-dim embedding from each 5s spectrogram segment.
-    BiLSTM processes the sequence of embeddings to capture the temporal
+    BiGRU processes the sequence of embeddings to capture the temporal
     evolution of preictal EEG (gradual buildup toward seizure onset).
     Final hidden states from both directions are concatenated and classified.
     """
@@ -374,7 +395,7 @@ def apply_normalization_to_datasets(train_datasets, test_datasets):
         ds.set_normalization(mean, std)
 
 
-def create_datasets(patients_to_process, skip_missing_class=True):
+def create_datasets(patients_to_process, skip_missing_class=True, stage="finetune"):
     all_datasets = {}
     for idx in patients_to_process:
         pid = PATIENTS[idx]
@@ -392,7 +413,7 @@ def create_datasets(patients_to_process, skip_missing_class=True):
                 continue
             split_name = h5_filename.strip().removeprefix("s").removesuffix("_dataset.h5")
             h5_file = dataset_dir / h5_filename
-            dataset = EEGDataset(str(h5_file), split=split_name)
+            dataset = EEGDataset(str(h5_file), split=split_name, stage=stage)
             if skip_missing_class:
                 class_dist = torch.bincount(dataset.labels)
                 if 0 in class_dist:
@@ -448,7 +469,6 @@ class EEGCNNTrainer:
             self.model_dir = Path("model") / "per_patient" / dataset_prefix / f"test_seizure_{test_seizure_id}"
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_prefix = dataset_prefix
-        self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
 
         print(f"Dataset: {self.dataset_prefix}")
         print(f"Patient: {self.patient_id}")
@@ -508,9 +528,9 @@ class EEGCNNTrainer:
             # Only load conv tower weights; GRU/norm/FC may have different dimensions
             conv_state = {k: v for k, v in pretrained_state.items() if k.startswith("conv_tower.")}
             self.model.load_state_dict(conv_state, strict=False)
-            # Freeze conv tower (learned general spectral features).
-            # Keep transformer, norm, and FC head trainable so the model
-            # can adapt temporal attention patterns per patient.
+            # Freeze conv tower (learned seizure spectral features from detection data).
+            # Keep BiGRU, norm, and FC head trainable so the model
+            # can learn preictal temporal buildup patterns per patient.
             for name, param in self.model.named_parameters():
                 if name.startswith("conv_tower."):
                     param.requires_grad = False
@@ -550,10 +570,6 @@ class EEGCNNTrainer:
 
         print(f"Model Parameters: {sum(p.numel() for p in self.model.parameters()):,}")
 
-
-    @property
-    def positive_label(self):
-        return "preictal" if TASK_MODE == "prediction" else "ictal"
 
     def _get_device(self):
         if torch.cuda.is_available():
@@ -747,7 +763,7 @@ class EEGCNNTrainer:
         checkpoint["config"]["optimal_threshold"] = optimal_threshold
         checkpoint["config"]["smoothing_window"] = best_window
         checkpoint["config"]["smoothing_count"] = best_count
-        checkpoint["config"]["task_mode"] = TASK_MODE
+        checkpoint["config"]["stage"] = "finetune"
 
         torch.save(checkpoint, best_path)
         print(f"  Best model checkpoint updated:")
@@ -767,7 +783,12 @@ def get_pretrain_path(group_id):
 
 
 def pretrain():
-    """Cross-patient pretraining with two-group split for leak-free evaluation.
+    """Cross-patient pretraining on DETECTION data with two-group split.
+
+    Uses ictal vs interictal (ground-truth seizure labels) to train the
+    conv tower to recognize abnormal EEG spectral patterns. Detection
+    labels are clinician-annotated, unlike prediction labels which depend
+    on an estimated preictal boundary.
 
     Group 0: even-indexed patients, Group 1: odd-indexed patients.
     Trains two encoders — each on one group. When fine-tuning a patient
@@ -775,7 +796,7 @@ def pretrain():
     encoder has never seen any of the fine-tuning patient's data.
     """
     print("=" * 60)
-    print("CROSS-PATIENT PRETRAINING (two-group split)")
+    print("CROSS-PATIENT PRETRAINING ON DETECTION DATA (two-group split)")
     print("=" * 60)
 
     if torch.cuda.is_available():
@@ -811,7 +832,7 @@ def pretrain():
             if not dataset_dir.exists():
                 continue
             for h5_file in dataset_dir.glob("s*_dataset.h5"):
-                datasets.append(EEGDataset(str(h5_file), split=f"pretrain ({patient_id})", augment=True))
+                datasets.append(EEGDataset(str(h5_file), split=f"pretrain ({patient_id})", augment=True, stage="pretrain"))
 
         if not datasets:
             print(f"No datasets for group {group_id}!")
@@ -899,7 +920,7 @@ def main():
             patient_id = PATIENTS[current_idx]
             patient_config = get_patient_config(current_idx)
 
-            all_datasets = create_datasets([current_idx], skip_missing_class=True)
+            all_datasets = create_datasets([current_idx], skip_missing_class=True, stage="finetune")
             valid_folds = list(all_datasets[patient_id].keys())
             if len(valid_folds) < 2:
                 print(f"Skipping {patient_id}: need at least 2 valid folds, got {len(valid_folds)}")
@@ -922,7 +943,7 @@ def main():
         patients_to_process = list(range(n_patients))
         assert(LOPO_FOLD_ID < n_patients)
 
-        all_datasets = create_datasets(patients_to_process)
+        all_datasets = create_datasets(patients_to_process, stage="finetune")
 
         patient_config = get_patient_config(LOPO_FOLD_ID)
         try:

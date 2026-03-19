@@ -26,7 +26,6 @@ import argparse
 from train import EEGDataset, ConvTransformerModel
 from total_accuracy import calculate_per_seizure_accuracy, apply_smoothing
 from data_segmentation_helpers.config import (
-    TASK_MODE,
     SEQUENCE_LENGTH,
     SEQUENCE_BATCH_SIZE,
     CONV_EMBEDDING_DIM,

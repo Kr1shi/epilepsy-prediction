@@ -1,16 +1,15 @@
 """Configuration for seizure prediction pipeline
 
-Conv-Transformer Architecture:
+Conv-BiGRU Architecture:
 - Single-stream full-band STFT spectrograms
-- Conv tower for local spectral patterns → Transformer for long-range temporal attention
-- Cross-patient pretraining, then per-patient fine-tuning
+- Conv tower for local spectral patterns → BiGRU for temporal sequence modeling
+- Per-patient training with leave-one-seizure-out cross-validation
 """
 
 # =============================================================================
 # Task Configuration
 # =============================================================================
 
-TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection' (ictal vs interictal)
 PREICTAL_WINDOW = 20 * 60  # 20 minutes before seizure (zone starts at -20min)
 PREICTAL_ONSET_BUFFER = 5 * 60  # 5 min onset buffer — exclude data too close to seizure
 # Effective preictal zone: [-20min, -5min]
@@ -22,9 +21,6 @@ INTERICTAL_BUFFER = 30 * 60  # 30 min buffer around seizures (interictal only)
 
 BASE_PATH = "physionet.org/files/chbmit/1.0.0/"
 ESTIMATED_FILE_DURATION = 3600  # 1 hour (fallback if file duration unavailable)
-INTERICTAL_TO_PREICTAL_RATIO = (
-    1.0  # Balanced 1:1 ratio of interictal to preictal sequences
-)
 
 # Split ratios (must sum to 1.0)
 TRAIN_RATIO = 0.8
@@ -100,27 +96,24 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 # =============================================================================
 
 SEGMENT_DURATION = 5  # seconds per segment
-SEQUENCE_LENGTH = 60  # segments per sequence (60 × 5s = 300s = 5 min)
-SEQUENCE_STRIDE = (
-    12  # segments between sequences (12 × 5s = 60s = 1 min stride for preictal)
-)
+SEQUENCE_LENGTH = 30  # segments per sequence (30 × 5s = 150s = 2.5 min)
+SEQUENCE_STRIDE = 6  # segments between sequences (6 × 5s = 30s stride for preictal)
 
 # =============================================================================
 # Signal Processing
 # =============================================================================
 
 LOW_FREQ_HZ = 0.5
-HIGH_FREQ_HZ = 128  # Extended to capture High Gamma/HFO
-NOTCH_FREQ_HZ = 60
+HIGH_FREQ_HZ = 50  # Upper cutoff for clinical EEG bands
 
 # Frequency Bands
-FULL_FREQ_BAND = (0.5, 128.0)  # Full-band for single-stream STFT
+FULL_FREQ_BAND = (0.5, 50.0)  # 0.5–50 Hz clinical EEG range
 PHASE_FREQ_BAND = (0.0, 5.0)  # Delta/Theta (for Phase)
-AMP_FREQ_BAND = (80.0, 128.0)  # Gamma/HFO (for Amplitude)
+AMP_FREQ_BAND = (30.0, 50.0)  # Low Gamma (for Amplitude)
 
-STFT_NPERSEG = 256  # STFT window length
-STFT_NOVERLAP = 128  # STFT overlap (50%)
-STFT_NFFT = 256  # FFT size (1.0 Hz resolution at 256 Hz sampling rate)
+STFT_NPERSEG = 104  # STFT window length (~0.4s at 256 Hz, ~2.5 Hz spectral resolution)
+STFT_NOVERLAP = 80  # 76.9% overlap (hop = 24 samples)
+STFT_NFFT = 256  # FFT size (1.0 Hz bin spacing at 256 Hz; 50 bins after freq mask)
 
 ARTIFACT_THRESHOLD_STD = 4  # MAD threshold for artifact removal
 LOG_TRANSFORM_EPSILON = 1e-12  # Avoid log(0)
@@ -152,7 +145,7 @@ TARGET_CHANNELS = [
 # =============================================================================
 
 CONV_EMBEDDING_DIM = 128  # Conv tower output dimension
-GRU_HIDDEN_DIM = 64  # BiLSTM hidden size (output = 2x this for bidirectional)
+GRU_HIDDEN_DIM = 64  # BiGRU hidden size (output = 2x this for bidirectional)
 GRU_NUM_LAYERS = 2  # Number of stacked GRU layers
 GRU_DROPOUT = 0.3  # Dropout for GRU + FC head
 
@@ -161,7 +154,7 @@ GRU_DROPOUT = 0.3  # Dropout for GRU + FC head
 # =============================================================================
 
 PRETRAINING_EPOCHS = 10
-TRAINING_EPOCHS = 30
+TRAINING_EPOCHS = 15
 SEQUENCE_BATCH_SIZE = 4
 LEARNING_RATE = 1e-4  # Pretraining LR
 FINETUNING_LEARNING_RATE = 3e-4  # Fine-tuning LR (transformer layer + FC head)

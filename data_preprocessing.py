@@ -10,11 +10,11 @@ from tqdm import tqdm
 from scipy.signal import spectrogram
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from data_segmentation_helpers.config import (
-    TASK_MODE,
     SEGMENT_DURATION,
     TARGET_CHANNELS,
     FULL_FREQ_BAND,
-    NOTCH_FREQ_HZ,
+    LOW_FREQ_HZ,
+    HIGH_FREQ_HZ,
     STFT_NPERSEG,
     STFT_NOVERLAP,
     STFT_NFFT,
@@ -80,7 +80,10 @@ def _remove_amplitude_artifacts(data):
             data[ch, bad_idx] = np.interp(bad_idx, good_idx, data[ch, good_idx])
 
 
-def process_single_file(patient_id, filename, sequences, positive_label):
+LABEL_MAP = {"interictal": 0, "preictal": 1, "ictal": 2}
+
+
+def process_single_file(patient_id, filename, sequences):
     """Process one EDF file: load, filter, STFT, assemble sequences.
 
     This is a standalone function so it can be called from ProcessPoolExecutor.
@@ -111,10 +114,12 @@ def process_single_file(patient_id, filename, sequences, positive_label):
             raw_selected.times[-1], max(sorted_starts) + SEGMENT_DURATION + 5.0
         )
 
-        # Load & filter
+        # Load & bandpass filter (0.5–50 Hz removes DC drift and muscle artifact)
+        # n_jobs=1 here since parallelism is at the file level via ProcessPoolExecutor
         raw_cropped = raw_selected.crop(tmin=crop_tmin, tmax=crop_tmax).load_data()
-        raw_cropped.notch_filter(
-            freqs=NOTCH_FREQ_HZ, n_jobs=MNE_N_JOBS, verbose=False
+        raw_cropped.filter(
+            l_freq=LOW_FREQ_HZ, h_freq=HIGH_FREQ_HZ,
+            n_jobs=1, verbose=False
         )
 
         data = raw_cropped.get_data()
@@ -128,19 +133,20 @@ def process_single_file(patient_id, filename, sequences, positive_label):
         else:
             freq_mask = FREQ_MASK
 
-        # 3. Compute STFT once over the entire cropped data
-        _, t_stft, Zxx_full = spectrogram(
+        # 3. Compute STFT once over the entire cropped data (PSD mode skips complex intermediary)
+        _, t_stft, power_full_raw = spectrogram(
             data_uv,
             fs=sampling_rate,
             nperseg=STFT_NPERSEG,
             noverlap=STFT_NOVERLAP,
             nfft=STFT_NFFT,
             window="hann",
-            mode="complex",
+            mode="psd",
             axis=-1,
         )
-        # Apply freq mask, compute power, log transform → float32
-        power_full = np.abs(Zxx_full[:, freq_mask, :]) ** 2
+        # Apply freq mask
+        power_full = power_full_raw[:, freq_mask, :]
+        del power_full_raw
         if APPLY_LOG_TRANSFORM:
             power_full = np.log10(power_full + LOG_TRANSFORM_EPSILON)
         power_full = power_full.astype(np.float32)
@@ -163,8 +169,8 @@ def process_single_file(patient_id, filename, sequences, positive_label):
             if i_end <= power_full.shape[2]:
                 segment_cache[start] = power_full[:, :, i_start:i_end]
 
-        # Free the large full STFT arrays
-        del Zxx_full, power_full
+        # Free the large full STFT array
+        del power_full
 
         # 5. Reassemble Sequences and accumulate running stats
         results = []
@@ -193,14 +199,15 @@ def process_single_file(patient_id, filename, sequences, positive_label):
             )
 
             # Accumulate running stats in worker (avoids main-thread loop)
-            batch_sum_v += np.sum(spec_stack, dtype=np.float64)
-            batch_sum_sq += np.sum(spec_stack.astype(np.float64) ** 2)
+            spec_f64 = spec_stack.astype(np.float64)
+            batch_sum_v += spec_f64.sum()
+            batch_sum_sq += (spec_f64 * spec_f64).sum()
             batch_count += spec_stack.size
 
             results.append(
                 {
                     "spectrogram": spec_stack,
-                    "label": 1 if seq["type"] == positive_label else 0,
+                    "label": LABEL_MAP[seq["type"]],
                     "patient_id": patient_id,
                     "file_name": filename,
                     "start_sec": seq["sequence_start_sec"],
@@ -223,7 +230,7 @@ class EEGPreprocessor:
         self.patient_id = patient_config["patient_id"]
         output_prefix = patient_config["output_prefix"]
 
-        self.input_json_path = f"{output_prefix}_sequences_{TASK_MODE}.json"
+        self.input_json_path = f"{output_prefix}_sequences.json"
 
         # Directories
         self.output_dir = Path("preprocessing")
@@ -237,10 +244,6 @@ class EEGPreprocessor:
         self.checkpoint = self.load_checkpoint()
 
         self.logger.info(f"EEG Preprocessor initialized for {self.patient_id}")
-
-    @property
-    def positive_label(self):
-        return "preictal" if TASK_MODE == "prediction" else "ictal"
 
     @staticmethod
     def group_sequences_by_file(
@@ -289,51 +292,48 @@ class EEGPreprocessor:
         with open(self.checkpoint_file, "w") as f:
             json.dump(checkpoint_copy, f, indent=2)
 
-    def _init_hdf5(self, path, spec_shape):
+    def _create_hdf5(self, path, spec_shape, total_sequences):
+        """Pre-allocate HDF5 datasets to final size (avoids repeated resize + flush)."""
+        n = total_sequences
+        chunk_size = min(32, n)  # explicit chunk size for sequential training reads
         with h5py.File(path, "w") as f:
             f.create_dataset(
                 "spectrograms",
-                (0, *spec_shape),
-                maxshape=(None, *spec_shape),
+                (n, *spec_shape),
                 dtype=np.float32,
-                chunks=True,
+                chunks=(chunk_size, *spec_shape),
             )
-            f.create_dataset("labels", (0,), maxshape=(None,), dtype=np.int32)
-            f.create_dataset("patient_ids", (0,), maxshape=(None,), dtype="S10")
+            f.create_dataset("labels", (n,), dtype=np.int32)
+            f.create_dataset("patient_ids", (n,), dtype="S10")
             si = f.create_group("segment_info")
             for k, dt in [
                 ("start_times", np.float32),
                 ("file_names", "S20"),
                 ("time_to_seizure", np.float32),
             ]:
-                si.create_dataset(k, (0,), maxshape=(None,), dtype=dt)
+                si.create_dataset(k, (n,), dtype=dt)
 
-    def _append_to_hdf5(self, path, batch):
-        with h5py.File(path, "a") as f:
-            n_old = f["spectrograms"].shape[0]
-            n_new = len(batch)
+    def _write_to_hdf5(self, h5_file, write_idx, batch):
+        """Write batch at pre-allocated index (no resize, no open/close)."""
+        n = len(batch)
+        end = write_idx + n
 
-            for ds_name in ["spectrograms", "labels", "patient_ids"]:
-                f[ds_name].resize(n_old + n_new, axis=0)
-            for k in ["start_times", "file_names", "time_to_seizure"]:
-                f[f"segment_info/{k}"].resize(n_old + n_new, axis=0)
-
-            # Batch write
-            specs = np.stack([item["spectrogram"] for item in batch], axis=0)
-            f["spectrograms"][n_old:n_old + n_new] = specs
-            f["labels"][n_old:n_old + n_new] = [item["label"] for item in batch]
-            f["patient_ids"][n_old:n_old + n_new] = [
-                item["patient_id"].encode("utf-8") for item in batch
-            ]
-            f["segment_info/start_times"][n_old:n_old + n_new] = [
-                item["start_sec"] for item in batch
-            ]
-            f["segment_info/file_names"][n_old:n_old + n_new] = [
-                item["file_name"].encode("utf-8") for item in batch
-            ]
-            f["segment_info/time_to_seizure"][n_old:n_old + n_new] = [
-                item["time_to_seizure"] for item in batch
-            ]
+        specs = np.stack([item["spectrogram"] for item in batch], axis=0)
+        h5_file["spectrograms"][write_idx:end] = specs
+        h5_file["labels"][write_idx:end] = [item["label"] for item in batch]
+        h5_file["patient_ids"][write_idx:end] = [
+            item["patient_id"].encode("utf-8") for item in batch
+        ]
+        h5_file["segment_info/start_times"][write_idx:end] = [
+            item["start_sec"] for item in batch
+        ]
+        h5_file["segment_info/file_names"][write_idx:end] = [
+            item["file_name"].encode("utf-8") for item in batch
+        ]
+        h5_file["segment_info/time_to_seizure"][write_idx:end] = [
+            item["time_to_seizure"] for item in batch
+        ]
+        return end
 
     def run_preprocessing(self):
         """Process EDF files → HDF5 with per-split statistics.
@@ -351,7 +351,17 @@ class EEGPreprocessor:
             for s in split_names
         }
 
-        # Single executor shared across all splits — avoids per-split fork + import overhead
+        # Infer spectrogram shape from STFT config (avoids needing a probe run)
+        hop = STFT_NPERSEG - STFT_NOVERLAP
+        seg_duration_samples = int(SEGMENT_DURATION * _ASSUMED_SFREQ)
+        seg_n_bins = (seg_duration_samples - STFT_NPERSEG) // hop + 1
+        n_freq = int(np.sum(FREQ_MASK))
+        n_channels = len(TARGET_CHANNELS)
+        from data_segmentation_helpers.config import SEQUENCE_LENGTH
+        spec_shape = (SEQUENCE_LENGTH, n_channels, n_freq, seg_n_bins)
+        self.logger.info(f"Spectrogram shape per sequence: {spec_shape}")
+
+        # Single executor shared across all splits
         with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
             for split, sequences in splits.items():
                 final_path = self.data_dir / f"s{split}_dataset.h5"
@@ -372,51 +382,62 @@ class EEGPreprocessor:
                     self.save_checkpoint()
                     continue
 
-                # Per-split running stats (for train-only normalization at training time)
+                # Pre-allocate HDF5 to total sequence count (no resize during writes)
+                total_seqs = sum(len(v) for v in pending.values())
+                if not final_path.exists():
+                    self._create_hdf5(final_path, spec_shape, total_seqs)
+
+                # Per-split running stats
                 sum_v, sum_sq, count = 0.0, 0.0, 0
 
                 # Submit all files for this split
                 futures = {}
                 for (pid, fname), f_seqs in pending.items():
                     future = executor.submit(
-                        process_single_file, pid, fname, f_seqs, self.positive_label
+                        process_single_file, pid, fname, f_seqs
                     )
                     futures[future] = (pid, fname, split)
 
-                pbar = tqdm(
-                    as_completed(futures),
-                    total=len(futures),
-                    desc=f"Processing: {split}",
-                )
-                for future in pbar:
-                    pid, fname, split_name = futures[future]
-                    file_id = f"p1_{split_name}_{fname}"
-
-                    results, (file_sum_v, file_sum_sq, file_count) = future.result()
-                    batch = [r for r in results if r is not None]
-
-                    if batch:
-                        if not final_path.exists():
-                            self._init_hdf5(final_path, batch[0]["spectrogram"].shape)
-                        self._append_to_hdf5(final_path, batch)
-
-                    # Stats already computed in worker process
-                    sum_v += file_sum_v
-                    sum_sq += file_sum_sq
-                    count += file_count
-
-                    self.checkpoint["completed_files"].add(file_id)
-                    pbar.set_postfix({"file": fname})
-
-                # Save per-split stats into HDF5 metadata
-                if final_path.exists() and count > 0:
-                    split_mean = float(sum_v / count)
-                    split_std = float(np.sqrt(max(0, (sum_sq / count) - (split_mean ** 2))))
-                    self.logger.info(
-                        f"Split {split} stats: mean={split_mean:.6f}, std={split_std:.6f}, n={count:.0f}"
+                # Keep HDF5 open for all writes in this split (single open/close)
+                write_idx = 0
+                with h5py.File(final_path, "a") as h5f:
+                    pbar = tqdm(
+                        as_completed(futures),
+                        total=len(futures),
+                        desc=f"Processing: {split}",
                     )
-                    with h5py.File(final_path, "a") as f:
-                        meta = f.require_group("metadata")
+                    for future in pbar:
+                        pid, fname, split_name = futures[future]
+                        file_id = f"p1_{split_name}_{fname}"
+
+                        results, (file_sum_v, file_sum_sq, file_count) = future.result()
+                        batch = [r for r in results if r is not None]
+
+                        if batch:
+                            write_idx = self._write_to_hdf5(h5f, write_idx, batch)
+
+                        sum_v += file_sum_v
+                        sum_sq += file_sum_sq
+                        count += file_count
+
+                        self.checkpoint["completed_files"].add(file_id)
+                        pbar.set_postfix({"file": fname})
+
+                    # Trim datasets if some sequences failed (write_idx < total_seqs)
+                    if write_idx < total_seqs:
+                        for ds_name in ["spectrograms", "labels", "patient_ids"]:
+                            h5f[ds_name].resize(write_idx, axis=0)
+                        for k in ["start_times", "file_names", "time_to_seizure"]:
+                            h5f[f"segment_info/{k}"].resize(write_idx, axis=0)
+
+                    # Save per-split stats into HDF5 metadata
+                    if count > 0:
+                        split_mean = float(sum_v / count)
+                        split_std = float(np.sqrt(max(0, (sum_sq / count) - (split_mean ** 2))))
+                        self.logger.info(
+                            f"Split {split} stats: mean={split_mean:.6f}, std={split_std:.6f}, n={count:.0f}"
+                        )
+                        meta = h5f.require_group("metadata")
                         meta.attrs.update({
                             "sum_v": float(sum_v),
                             "sum_sq": float(sum_sq),

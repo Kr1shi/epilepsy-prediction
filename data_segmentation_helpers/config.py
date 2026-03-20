@@ -79,6 +79,16 @@ ALL_PATIENTS = [
     "chb24",
 ]
 
+# Patients excluded from fine-tuning (used only for pretraining)
+# These have insufficient per-fold data for leave-one-seizure-out evaluation
+PRETRAIN_ONLY_PATIENTS = {
+    "chb04",   # Mean AUC 0.49 — preictal patterns not distinguishable
+    "chb05",   # Mean AUC 0.49 — preictal patterns not distinguishable
+    "chb09",   # Mean AUC 0.54 — preictal patterns not distinguishable
+    "chb14",   # Mean AUC 0.56 — folds 0/2/3 have 0 interictal (clustered seizures)
+    "chb19",   # Mean AUC 0.36 — only 3 seizures, tiny folds (18-46 samples)
+}
+
 # Current patient index to process (0 to len(PATIENTS)-1, or None for all)
 # PATIENT_INDEX = None
 PATIENT_INDEX = None

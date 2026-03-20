@@ -29,6 +29,7 @@ warnings.filterwarnings("ignore")
 import gc
 
 from data_segmentation_helpers.config import *
+from data_segmentation_helpers.config import PRETRAIN_ONLY_PATIENTS
 
 
 class FocalLoss(nn.Module):
@@ -918,6 +919,9 @@ def main():
 
         for current_idx in patients_to_process:
             patient_id = PATIENTS[current_idx]
+            if patient_id in PRETRAIN_ONLY_PATIENTS:
+                print(f"Skipping {patient_id}: pretrain-only patient")
+                continue
             patient_config = get_patient_config(current_idx)
 
             all_datasets = create_datasets([current_idx], skip_missing_class=True, stage="finetune")

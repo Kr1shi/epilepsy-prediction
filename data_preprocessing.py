@@ -291,6 +291,8 @@ class EEGPreprocessor:
                         "file_name": filename,
                         "start_sec": seq["sequence_start_sec"],
                         "time_to_seizure": seq.get("time_to_seizure", -1),
+                        "seizure_id": seq.get("seizure_id") if seq.get("seizure_id") is not None else -1,
+                        "sequence_start_global": seq.get("sequence_start_global", 0.0),
                     }
                 )
 
@@ -319,6 +321,8 @@ class EEGPreprocessor:
                 ("start_times", np.float32),
                 ("file_names", "S20"),
                 ("time_to_seizure", np.float32),
+                ("seizure_ids", np.int32),
+                ("sequence_start_global", np.float64),
             ]:
                 si.create_dataset(k, (0,), maxshape=(None,), dtype=dt)
 
@@ -329,7 +333,7 @@ class EEGPreprocessor:
 
             for ds_name in ["spectrograms", "labels", "patient_ids"]:
                 f[ds_name].resize(n_old + n_new, axis=0)
-            for k in ["start_times", "file_names", "time_to_seizure"]:
+            for k in ["start_times", "file_names", "time_to_seizure", "seizure_ids", "sequence_start_global"]:
                 f[f"segment_info/{k}"].resize(n_old + n_new, axis=0)
 
             # Batch write: single HDF5 I/O call per dataset instead of per-sample
@@ -350,6 +354,12 @@ class EEGPreprocessor:
             )
             f["segment_info/time_to_seizure"][n_old:n_old + n_new] = np.array(
                 [item["time_to_seizure"] for item in batch], dtype=np.float32
+            )
+            f["segment_info/seizure_ids"][n_old:n_old + n_new] = np.array(
+                [item["seizure_id"] for item in batch], dtype=np.int32
+            )
+            f["segment_info/sequence_start_global"][n_old:n_old + n_new] = np.array(
+                [item["sequence_start_global"] for item in batch], dtype=np.float64
             )
 
     def create_intermediate_datasets(self, splits):
@@ -429,7 +439,58 @@ class EEGPreprocessor:
                     {"mean": mean, "std": std, "norm": "single_stream_zscore"}
                 )
 
-    def run_preprocessing(self):
+    def create_master_dataset(self):
+        """Create a single unnormalized HDF5 with ALL sequences (no split).
+
+        Used for LOSO-CV: spectrograms are preprocessed once, then split
+        and normalized per fold at training time.
+        """
+        with open(self.input_json_path, "r") as f:
+            all_seqs = json.load(f)["sequences"]
+
+        master_path = self.data_dir / "master_unnormalized.h5"
+        if master_path.exists() and "master_complete" in self.checkpoint:
+            self.logger.info(f"Master dataset already exists: {master_path}")
+            return
+
+        groups = self.group_sequences_by_file(all_seqs)
+        for (pid, fname), f_seqs in tqdm(
+            groups.items(), desc=f"Master preprocessing: {self.patient_id}"
+        ):
+            file_id = f"master_{fname}"
+            if file_id in self.checkpoint["completed_files"]:
+                continue
+
+            batch = [
+                b
+                for b in self.extract_spectrograms_from_file(pid, fname, f_seqs)
+                if b is not None
+            ]
+            if batch:
+                if not master_path.exists():
+                    self._init_hdf5(master_path, batch[0]["spectrogram"].shape)
+                self._append_to_hdf5(master_path, batch)
+            self.checkpoint["completed_files"].add(file_id)
+            self.save_checkpoint()
+
+        self.checkpoint["master_complete"] = True
+        self.save_checkpoint()
+        self.logger.info(f"Master dataset saved: {master_path}")
+
+        with h5py.File(master_path, "r") as f:
+            n = f["spectrograms"].shape[0]
+            n_pos = int(np.sum(f["labels"][:] == 1))
+            n_neg = int(np.sum(f["labels"][:] == 0))
+            seizure_ids = f["segment_info/seizure_ids"][:]
+            unique_seizures = sorted(set(int(s) for s in seizure_ids if s >= 0))
+        self.logger.info(f"  Total samples: {n} (positive: {n_pos}, interictal: {n_neg})")
+        self.logger.info(f"  Seizures: {len(unique_seizures)} (IDs: {unique_seizures})")
+
+    def run_preprocessing(self, master_only=False):
+        if master_only:
+            self.create_master_dataset()
+            return
+
         with open(self.input_json_path, "r") as f:
             all_seqs = json.load(f)["sequences"]
         splits = {
@@ -458,11 +519,17 @@ class EEGPreprocessor:
 
 
 if __name__ == "__main__":
+    import argparse as _argparse
+    _parser = _argparse.ArgumentParser()
+    _parser.add_argument("--master", action="store_true",
+                         help="Create master unnormalized HDF5 for LOSO-CV (no split)")
+    _args = _parser.parse_args()
+
     for i in range(len(PATIENTS)):
         if PATIENT_INDEX is not None and i != PATIENT_INDEX:
             continue
         cfg = get_patient_config(i)
         try:
-            EEGPreprocessor(cfg).run_preprocessing()
+            EEGPreprocessor(cfg).run_preprocessing(master_only=_args.master)
         except Exception as e:
             print(f"Error {cfg['patient_id']}: {e}")

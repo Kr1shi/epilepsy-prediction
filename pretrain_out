@@ -51,3 +51,108 @@ Model Parameters: 549,538
   Epoch 3 avg loss: 0.1493
   Epoch 4 avg loss: 0.1379
   Epoch 5 avg loss: 0.1427
+  Epoch 6 avg loss: 0.1317
+  Epoch 7 avg loss: 0.1319
+  Epoch 8 avg loss: 0.1228
+  Epoch 9 avg loss: 0.1207
+  Epoch 10 avg loss: 0.1138
+  Epoch 11 avg loss: 0.1040
+  Epoch 12 avg loss: 0.1054
+  Epoch 13 avg loss: 0.1008
+  Epoch 14 avg loss: 0.0917
+  Epoch 15 avg loss: 0.0930
+  Epoch 16 avg loss: 0.0888
+  Epoch 17 avg loss: 0.0804
+  Epoch 18 avg loss: 0.0786
+  Epoch 19 avg loss: 0.0815
+  Epoch 20 avg loss: 0.0761
+  Epoch 21 avg loss: 0.0839
+  Epoch 22 avg loss: 0.0762
+  Epoch 23 avg loss: 0.0710
+  Epoch 24 avg loss: 0.0760
+  Epoch 25 avg loss: 0.0789
+  Epoch 26 avg loss: 0.0753
+  Epoch 27 avg loss: 0.0726
+  Epoch 28 avg loss: 0.0661
+  Epoch 29 avg loss: 0.0611
+  Epoch 30 avg loss: 0.0656
+  Epoch 31 avg loss: 0.0666
+  Epoch 32 avg loss: 0.0652
+  Epoch 33 avg loss: 0.0632
+  Epoch 34 avg loss: 0.0604
+  Epoch 35 avg loss: 0.0612
+  Epoch 36 avg loss: 0.0614
+  Epoch 37 avg loss: 0.0596
+  Epoch 38 avg loss: 0.0630
+  Epoch 39 avg loss: 0.0629
+  Epoch 40 avg loss: 0.0594
+  Epoch 41 avg loss: 0.0609
+  Epoch 42 avg loss: 0.0626
+  Epoch 43 avg loss: 0.0574
+  Epoch 44 avg loss: 0.0612
+  Epoch 45 avg loss: 0.0614
+  Epoch 46 avg loss: 0.0575
+  Epoch 47 avg loss: 0.0604
+  Epoch 48 avg loss: 0.0593
+  Epoch 49 avg loss: 0.0570
+  Epoch 50 avg loss: 0.0616
+  Epoch 51 avg loss: 0.0600
+  Epoch 52 avg loss: 0.0576
+  Epoch 53 avg loss: 0.0605
+  Epoch 54 avg loss: 0.0586
+  Epoch 55 avg loss: 0.0601
+  Epoch 56 avg loss: 0.0599
+  Epoch 57 avg loss: 0.0570
+  Epoch 58 avg loss: 0.0607
+  Epoch 59 avg loss: 0.0588
+  Epoch 60 avg loss: 0.0596
+
+Pretrained encoder saved to model/pretrained_encoder.pth
+
+Tuning threshold on combined cross-patient validation set...
+Loaded val (chb01) dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+Loaded val (chb03) dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loaded val (chb04) dataset: 20 samples
+  - Class Dist: tensor([10, 10])
+Loaded val (chb05) dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+Loaded val (chb06) dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loaded val (chb07) dataset: 44 samples
+  - Class Dist: tensor([22, 22])
+Loaded val (chb08) dataset: 8 samples
+  - Class Dist: tensor([4, 4])
+Loaded val (chb09) dataset: 48 samples
+  - Class Dist: tensor([24, 24])
+Loaded val (chb10) dataset: 34 samples
+  - Class Dist: tensor([ 0, 34])
+Loaded val (chb13) dataset: 10 samples
+  - Class Dist: tensor([5, 5])
+Loaded val (chb14) dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loaded val (chb15) dataset: 16 samples
+  - Class Dist: tensor([ 0, 16])
+Loaded val (chb16) dataset: 25 samples
+  - Class Dist: tensor([ 0, 25])
+Loaded val (chb17) dataset: 8 samples
+  - Class Dist: tensor([4, 4])
+Loaded val (chb18) dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loaded val (chb20) dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loaded val (chb21) dataset: 2 samples
+  - Class Dist: tensor([1, 1])
+Loaded val (chb22) dataset: 6 samples
+  - Class Dist: tensor([3, 3])
+Loaded val (chb23) dataset: 4 samples
+  - Class Dist: tensor([2, 2])
+Combined val set: 247 samples from 19 patients
+
+Calibrating temperature scaling on validation set...
+  Optimal temperature: 5.00 (NLL: 0.6922)
+  Best Smoothing Params (Train): Window=20, Threshold=1, F1=0.7892
+  Pretrained threshold: 0.4433
+  Smoothing: window=20, count=1
+  Config saved to model/pretrained_config.json

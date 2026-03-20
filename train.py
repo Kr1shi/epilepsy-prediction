@@ -354,7 +354,9 @@ def optimize_running_average(predictions, labels, max_window=30):
         print(f"  Skipping smoothing optimization (only {min_len} samples)")
         return best_params
 
-    for window_size in range(5, max_window + 1):
+    # Cap max window at sample count to prevent np.convolve from returning longer output
+    effective_max = min(max_window, min_len)
+    for window_size in range(5, effective_max + 1):
         kernel = np.ones(window_size)
         smoothed_sums = np.convolve(preds_np, kernel, mode="same")
 

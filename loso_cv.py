@@ -340,9 +340,12 @@ def train_fold(
     val_probs_np = np.array(val_probs)
 
     if not no_finetune:
-        # Freeze conv tower during fine-tuning
+        # Freeze only conv tower — transformer + attn_pool + FC are trainable
         for param in model.conv_tower.parameters():
             param.requires_grad = False
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in model.parameters())
+        print(f"    Trainable: {trainable:,}/{total:,} params (transformer + head)", flush=True)
 
         # Loss, optimizer
         train_ds = FoldDataset(master_h5_path, splits["train"], mean, std, augment=True)
@@ -362,8 +365,8 @@ def train_fold(
             lr=FINETUNING_LEARNING_RATE,
             weight_decay=WEIGHT_DECAY,
         )
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="max", factor=0.5, patience=3, min_lr=1e-6
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=TRAINING_EPOCHS, eta_min=1e-6
         )
 
         # Training loop
@@ -410,7 +413,7 @@ def train_fold(
             else:
                 val_auc = 0.5
 
-            scheduler.step(val_auc)
+            scheduler.step()
 
             avg_loss = total_loss / max(len(train_loader), 1)
             marker = ""

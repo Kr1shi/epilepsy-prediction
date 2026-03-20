@@ -373,6 +373,103 @@ class ConvTransformerModel(nn.Module):
 
         return self.fc(pooled)
 
+    def encode(self, x):
+        """Return pooled embedding before FC head (for contrastive learning)."""
+        B, S, C, H, W = x.shape
+        x_flat = x.view(B * S, C, H, W)
+        embeddings = self.conv_tower(x_flat)
+        embeddings = embeddings.view(B, S, self.embed_dim)
+        if self.use_cls_token:
+            cls_tokens = self.cls_token.expand(B, -1, -1)
+            embeddings = torch.cat([cls_tokens, embeddings], dim=1)
+        embeddings = embeddings + self.pos_embedding
+        out = self.transformer(embeddings)
+        out = self.norm(out)
+        if self.use_cls_token:
+            return out[:, 0]
+        elif self.attn_pool is not None:
+            return self.attn_pool(out)
+        else:
+            return out.mean(dim=1)
+
+
+# =============================================================================
+# Contrastive Pretraining Components
+# =============================================================================
+
+
+class ProjectionHead(nn.Module):
+    """MLP projection head for contrastive learning. Discarded after pretraining."""
+
+    def __init__(self, input_dim=128, hidden_dim=128, output_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def forward(self, x):
+        return F.normalize(self.net(x), dim=1)
+
+
+class SupConLoss(nn.Module):
+    """Supervised Contrastive Loss (Khosla et al. 2020).
+
+    Pulls same-class embeddings together, pushes different-class apart.
+    """
+
+    def __init__(self, temperature=0.07):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, features, labels):
+        """
+        Args:
+            features: (2N, proj_dim) — concatenated projections from both views
+            labels: (2N,) — duplicated labels
+        """
+        device = features.device
+        batch_size = features.shape[0]
+
+        features = F.normalize(features, dim=1)
+
+        # Similarity matrix
+        sim = torch.matmul(features, features.T) / self.temperature
+
+        # Mask out self-similarity
+        mask_self = torch.eye(batch_size, dtype=torch.bool, device=device)
+        sim.masked_fill_(mask_self, -1e9)
+
+        # Positive mask: same label, different sample
+        labels_col = labels.unsqueeze(0)
+        labels_row = labels.unsqueeze(1)
+        pos_mask = (labels_col == labels_row) & ~mask_self
+
+        # Log-softmax over non-self entries
+        exp_sim = torch.exp(sim)
+        log_prob = sim - torch.log(exp_sim.sum(dim=1, keepdim=True))
+
+        # Average log-prob over positive pairs
+        n_pos = pos_mask.sum(dim=1).clamp(min=1)
+        loss = -(pos_mask * log_prob).sum(dim=1) / n_pos
+
+        return loss.mean()
+
+
+class ContrastiveEEGDataset(EEGDataset):
+    """Returns two independently augmented views of each sample."""
+
+    def __init__(self, h5_file_path, split="train"):
+        super().__init__(h5_file_path, split=split, augment=False)
+
+    def __getitem__(self, idx):
+        self._open_h5()
+        x = torch.FloatTensor(self.h5_file["spectrograms"][idx])
+        view1 = self._apply_augmentation(x.clone())
+        view2 = self._apply_augmentation(x.clone())
+        return view1, view2, self.labels[idx]
+
 
 class MetricsTracker:
     def __init__(self):
@@ -457,9 +554,9 @@ class EEGTrainer:
         dataset_prefix = patient_config["output_prefix"]
 
         if model_subdir:
-            self.model_dir = Path("model") / model_subdir / dataset_prefix
+            self.model_dir = Path("model") / "contrastive" / model_subdir / dataset_prefix
         else:
-            self.model_dir = Path("model") / dataset_prefix
+            self.model_dir = Path("model") / "contrastive" / dataset_prefix
         self.model_dir.mkdir(parents=True, exist_ok=True)
         self.dataset_prefix = dataset_prefix
         self.dataset_dir = Path("preprocessing") / "data" / self.dataset_prefix
@@ -498,7 +595,7 @@ class EEGTrainer:
 
         # Load pretrained weights if available
         if pretrained_path is None:
-            pretrained_path = Path("model") / "pretrained_encoder.pth"
+            pretrained_path = Path("model") / "contrastive" / "pretrained_encoder.pth"
         else:
             pretrained_path = Path(pretrained_path)
         # Store pretrained config directory (for temperature loading)
@@ -799,20 +896,27 @@ def set_seed(seed):
 
 
 def pretrain(exclude_patient=None, seed=None, save_suffix=None):
-    """Cross-patient pretraining: train shared encoder on ALL patients.
+    """Supervised contrastive pretraining on ALL patients.
+
+    Phase 1: SupCon loss with two augmented views per sample.
+    Phase 2: Brief linear probe (train FC head) for downstream threshold tuning.
 
     Args:
         exclude_patient: If set, exclude this patient from pretraining (for LOPO).
         seed: Random seed for reproducibility (for ensemble).
         save_suffix: Suffix for save directory (e.g., "seed0" for ensemble).
     """
+    CONTRASTIVE_TEMPERATURE = 0.07
+    PROJECTION_DIM = 64
+    LINEAR_PROBE_EPOCHS = 10
+
     print("=" * 60)
     if exclude_patient:
-        print(f"LOPO PRETRAINING (excluding {exclude_patient})")
+        print(f"CONTRASTIVE LOPO PRETRAINING (excluding {exclude_patient})")
     elif save_suffix:
-        print(f"ENSEMBLE PRETRAINING ({save_suffix}, seed={seed})")
+        print(f"CONTRASTIVE ENSEMBLE PRETRAINING ({save_suffix}, seed={seed})")
     else:
-        print("CROSS-PATIENT PRETRAINING")
+        print("CONTRASTIVE CROSS-PATIENT PRETRAINING")
     print("=" * 60)
 
     if seed is not None:
@@ -828,33 +932,36 @@ def pretrain(exclude_patient=None, seed=None, save_suffix=None):
         device = torch.device("cpu")
     print(f"Device: {device}")
 
-    # Load train datasets from all patients (except excluded)
-    all_datasets = []
+    # Load contrastive datasets (two augmented views per sample)
+    contrastive_datasets = []
     for patient_id in PATIENTS:
         if patient_id == exclude_patient:
             print(f"  LOPO: Excluding {patient_id} from pretraining")
             continue
         h5_path = Path("preprocessing") / "data" / patient_id / "train_dataset.h5"
         if h5_path.exists():
-            all_datasets.append(EEGDataset(str(h5_path), split=f"train ({patient_id})", augment=True))
+            contrastive_datasets.append(
+                ContrastiveEEGDataset(str(h5_path), split=f"train ({patient_id})")
+            )
         else:
             print(f"  Skipping {patient_id}: no train dataset found")
 
-    if not all_datasets:
+    if not contrastive_datasets:
         print("No datasets found for pretraining!")
         return
 
-    combined = ConcatDataset(all_datasets)
-    print(f"\nCombined pretraining dataset: {len(combined)} samples from {len(all_datasets)} patients")
+    combined = ConcatDataset(contrastive_datasets)
+    print(f"\nContrastive dataset: {len(combined)} samples from {len(contrastive_datasets)} patients")
 
     pretrain_loader = DataLoader(
         combined,
         batch_size=SEQUENCE_BATCH_SIZE,
         shuffle=True,
         num_workers=NUM_WORKERS,
+        drop_last=True,  # SupCon needs at least 2 samples per class in batch
     )
 
-    # Initialize model
+    # Initialize model + projection head
     model = ConvTransformerModel(
         num_input_channels=18,
         num_classes=2,
@@ -867,17 +974,20 @@ def pretrain(exclude_patient=None, seed=None, save_suffix=None):
         use_cls_token=USE_CLS_TOKEN,
     )
     model.to(device)
-    print(f"Model Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Compute class weights from combined labels
-    all_labels = torch.cat([ds.labels for ds in all_datasets])
-    counts = torch.bincount(all_labels).float()
-    class_weights = counts.sum() / (len(counts) * counts)
+    proj_head = ProjectionHead(
+        input_dim=CONV_EMBEDDING_DIM,
+        hidden_dim=CONV_EMBEDDING_DIM,
+        output_dim=PROJECTION_DIM,
+    ).to(device)
 
-    criterion = nn.CrossEntropyLoss(
-        weight=class_weights.to(device), label_smoothing=0.05
-    )
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    encoder_params = sum(p.numel() for p in model.parameters())
+    proj_params = sum(p.numel() for p in proj_head.parameters())
+    print(f"Encoder params: {encoder_params:,}  |  Projection head: {proj_params:,}")
+
+    criterion = SupConLoss(temperature=CONTRASTIVE_TEMPERATURE)
+    all_params = list(model.parameters()) + list(proj_head.parameters())
+    optimizer = optim.Adam(all_params, lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     warmup = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=5)
     cosine = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=PRETRAINING_EPOCHS - 5, eta_min=1e-6
@@ -886,40 +996,114 @@ def pretrain(exclude_patient=None, seed=None, save_suffix=None):
         optimizer, [warmup, cosine], milestones=[5]
     )
 
-    # Train
+    # ===================== Phase 1: Contrastive Pretraining =====================
+    print(f"\n--- Phase 1: Supervised Contrastive Learning ({PRETRAINING_EPOCHS} epochs) ---")
     for epoch in range(PRETRAINING_EPOCHS):
         model.train()
+        proj_head.train()
         total_loss = 0.0
-        pbar = tqdm(pretrain_loader, desc=f"Pretrain Epoch {epoch+1}/{PRETRAINING_EPOCHS}")
+        pbar = tqdm(pretrain_loader, desc=f"SupCon Epoch {epoch+1}/{PRETRAINING_EPOCHS}")
 
-        for x, labels in pbar:
-            x, labels = x.to(device), labels.to(device)
+        for view1, view2, labels in pbar:
+            view1, view2 = view1.to(device), view2.to(device)
+            labels = labels.to(device)
+
             optimizer.zero_grad()
-            outputs = model(x)
-            loss = criterion(outputs, labels)
+
+            # Encode both views
+            z1 = model.encode(view1)  # (B, embed_dim)
+            z2 = model.encode(view2)  # (B, embed_dim)
+
+            # Project
+            p1 = proj_head(z1)  # (B, proj_dim)
+            p2 = proj_head(z2)  # (B, proj_dim)
+
+            # Concatenate views: (2B, proj_dim) and (2B,) labels
+            features = torch.cat([p1, p2], dim=0)
+            labels_2x = torch.cat([labels, labels], dim=0)
+
+            loss = criterion(features, labels_2x)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
             optimizer.step()
             total_loss += loss.item()
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
         avg_loss = total_loss / len(pretrain_loader)
         scheduler.step()
-        print(f"  Epoch {epoch+1} avg loss: {avg_loss:.4f}  lr: {optimizer.param_groups[0]['lr']:.2e}")
+        print(f"  Epoch {epoch+1} avg SupCon loss: {avg_loss:.4f}  lr: {optimizer.param_groups[0]['lr']:.2e}")
 
-    # Save pretrained weights
+    # ===================== Phase 2: Linear Probe =====================
+    # Freeze encoder, train FC head briefly so we can tune threshold
+    print(f"\n--- Phase 2: Linear Probe ({LINEAR_PROBE_EPOCHS} epochs) ---")
+
+    # Load regular (non-contrastive) datasets for CE training
+    regular_datasets = []
+    for patient_id in PATIENTS:
+        if patient_id == exclude_patient:
+            continue
+        h5_path = Path("preprocessing") / "data" / patient_id / "train_dataset.h5"
+        if h5_path.exists():
+            regular_datasets.append(
+                EEGDataset(str(h5_path), split=f"train ({patient_id})", augment=True)
+            )
+
+    combined_regular = ConcatDataset(regular_datasets)
+    probe_loader = DataLoader(
+        combined_regular,
+        batch_size=SEQUENCE_BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+    )
+
+    # Freeze encoder, only train FC head
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.fc.parameters():
+        param.requires_grad = True
+
+    all_labels = torch.cat([ds.labels for ds in regular_datasets])
+    counts = torch.bincount(all_labels).float()
+    class_weights = counts.sum() / (len(counts) * counts)
+    ce_criterion = nn.CrossEntropyLoss(
+        weight=class_weights.to(device), label_smoothing=0.05
+    )
+    probe_optimizer = optim.Adam(model.fc.parameters(), lr=1e-3, weight_decay=WEIGHT_DECAY)
+
+    for epoch in range(LINEAR_PROBE_EPOCHS):
+        model.train()
+        total_loss = 0.0
+        pbar = tqdm(probe_loader, desc=f"Probe Epoch {epoch+1}/{LINEAR_PROBE_EPOCHS}")
+        for x, labels in pbar:
+            x, labels = x.to(device), labels.to(device)
+            probe_optimizer.zero_grad()
+            outputs = model(x)
+            loss = ce_criterion(outputs, labels)
+            loss.backward()
+            probe_optimizer.step()
+            total_loss += loss.item()
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        avg_loss = total_loss / len(probe_loader)
+        print(f"  Probe Epoch {epoch+1} avg loss: {avg_loss:.4f}")
+
+    # Unfreeze all params before saving (so fine-tuning can train everything)
+    for param in model.parameters():
+        param.requires_grad = True
+
+    # ===================== Save =====================
     if exclude_patient:
-        save_dir = Path("model") / f"lopo_{exclude_patient}"
+        save_dir = Path("model") / "contrastive" / f"lopo_{exclude_patient}"
     elif save_suffix:
-        save_dir = Path("model") / save_suffix
+        save_dir = Path("model") / "contrastive" / save_suffix
     else:
-        save_dir = Path("model")
+        save_dir = Path("model") / "contrastive"
     save_dir.mkdir(parents=True, exist_ok=True)
     save_path = save_dir / "pretrained_encoder.pth"
+    # Save only encoder (no projection head — it's discarded)
     torch.save(model.state_dict(), save_path)
-    print(f"\nPretrained encoder saved to {save_path}")
+    print(f"\nContrastive pretrained encoder saved to {save_path}")
 
-    # Tune threshold on combined validation set (no data leakage)
+    # ===================== Threshold Tuning =====================
     print("\nTuning threshold on combined cross-patient validation set...")
     val_datasets = []
     for patient_id in PATIENTS:
@@ -952,7 +1136,7 @@ def pretrain(exclude_patient=None, seed=None, save_suffix=None):
         logits_np = np.array(all_logits)
         labels_np = np.array(all_labels)
 
-        # Temperature scaling: find T that minimizes NLL on val set
+        # Temperature scaling
         print("\nCalibrating temperature scaling on validation set...")
         best_temperature = 1.0
         best_nll = float("inf")
@@ -964,7 +1148,6 @@ def pretrain(exclude_patient=None, seed=None, save_suffix=None):
                 best_temperature = float(t_candidate)
         print(f"  Optimal temperature: {best_temperature:.2f} (NLL: {best_nll:.4f})")
 
-        # Compute calibrated probabilities using temperature
         scaled_logits = torch.FloatTensor(logits_np) / best_temperature
         probs_np = torch.softmax(scaled_logits, dim=1)[:, 1].numpy()
 
@@ -975,7 +1158,6 @@ def pretrain(exclude_patient=None, seed=None, save_suffix=None):
         else:
             optimal_threshold = 0.5
 
-        # Optimize smoothing on val predictions
         optimized_preds = (probs_np >= optimal_threshold).astype(int)
         best_window, best_count = optimize_running_average(optimized_preds, labels_np)
 
@@ -1039,7 +1221,7 @@ def main():
 
         for seed_idx in range(n_seeds):
             suffix = f"seed{seed_idx}"
-            encoder_path = Path("model") / suffix / "pretrained_encoder.pth"
+            encoder_path = Path("model") / "contrastive" / suffix / "pretrained_encoder.pth"
             print(f"\n{'='*60}")
             print(f"ENSEMBLE: Fine-tuning with {suffix}")
             print(f"{'='*60}")
@@ -1073,7 +1255,7 @@ def main():
         pretrain(exclude_patient=target_patient)
 
         # Step 2: Fine-tune on target patient using LOPO encoder
-        lopo_encoder_path = Path("model") / f"lopo_{target_patient}" / "pretrained_encoder.pth"
+        lopo_encoder_path = Path("model") / "contrastive" / f"lopo_{target_patient}" / "pretrained_encoder.pth"
         patient_idx = PATIENTS.index(target_patient)
         patient_config = get_patient_config(patient_idx)
         try:

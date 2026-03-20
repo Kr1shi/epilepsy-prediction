@@ -68,7 +68,7 @@ from data_segmentation_helpers.seizure_counts import SEIZURE_COUNTS
 # =============================================================================
 
 SEGMENT_DURATION = 5  # seconds per segment
-SEQUENCE_LENGTH = 360  # segments per sequence (360 × 5s = 1800s = 30 min)
+SEQUENCE_LENGTH = 180  # segments per sequence (180 × 5s = 900s = 15 min)
 MIN_SEQUENCE_LENGTH = (
     120  # minimum segments for partial sequences (120 × 5s = 600s = 10 min)
 )
@@ -121,17 +121,17 @@ TARGET_CHANNELS = [
 # =============================================================================
 
 CONV_EMBEDDING_DIM = 128  # Conv tower output / Transformer d_model
-TRANSFORMER_NUM_LAYERS = 2  # Transformer encoder layers
+TRANSFORMER_NUM_LAYERS = 4  # Transformer encoder layers
 TRANSFORMER_NUM_HEADS = 4  # Attention heads (head_dim = 128/4 = 32)
 TRANSFORMER_FFN_DIM = 512  # Feedforward hidden dimension
 TRANSFORMER_DROPOUT = 0.3  # Dropout for Transformer + FC head
-USE_CLS_TOKEN = True  # CLS token pooling (vs mean pooling)
+USE_CLS_TOKEN = False  # Attention pooling (replaces CLS token)
 
 # =============================================================================
 # Training Configuration
 # =============================================================================
 
-PRETRAINING_EPOCHS = 60  # Cross-patient pretraining (more epochs for shared encoder)
+PRETRAINING_EPOCHS = 100  # Cross-patient pretraining (more epochs for shared encoder)
 TRAINING_EPOCHS = 30  # Per-patient fine-tuning
 SEQUENCE_BATCH_SIZE = 4  # Reduced for 30-min windows (~30MB per sample)
 LEARNING_RATE = 1e-4  # Pretraining LR

@@ -1,0 +1,156 @@
+Device: mps
+Pretrained encoder: model/pretrained_encoder.pth
+Mode: pretrained-only (no fine-tuning)
+
+============================================================
+LOSO-CV: chb01 — 7 seizures: [0, 1, 2, 3, 4, 5, 6]
+============================================================
+
+  --- Fold 1/7 (test seizure 0) ---
+  Fold seizure 0: train=46, val=8, test=7
+    AUC=1.0000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 2/7 (test seizure 1) ---
+  Fold seizure 1: train=48, val=9, test=3
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 3/7 (test seizure 2) ---
+  Fold seizure 2: train=34, val=8, test=12
+    AUC=1.0000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 4/7 (test seizure 3) ---
+  Fold seizure 3: train=48, val=9, test=7
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 5/7 (test seizure 4) ---
+  Fold seizure 4: train=48, val=9, test=6
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 6/7 (test seizure 5) ---
+  Fold seizure 5: train=48, val=6, test=35
+    AUC=0.5000  Acc=0.5714  F1=0.7273  Detected=1
+
+  --- Fold 7/7 (test seizure 6) ---
+  Fold seizure 6: train=18, val=7, test=19
+    AUC=1.0000  Acc=0.9474  F1=0.8000  Detected=1
+
+  chb01 LOSO-CV Summary:
+    Mean AUC: 0.7143 (+/- 0.2474)
+    Mean Acc: 0.7884
+    Mean F1:  0.7896
+    Seizure Detection: 85.71%
+
+============================================================
+LOSO-CV: chb02 — 2 seizures: [1, 2]
+============================================================
+
+  --- Fold 1/2 (test seizure 1) ---
+  Fold seizure 1: train=30, val=4, test=30
+    AUC=0.0000  Acc=0.5000  F1=0.0000  Detected=0
+
+  --- Fold 2/2 (test seizure 2) ---
+  Fold seizure 2: train=26, val=4, test=34
+    AUC=0.7751  Acc=0.5000  F1=0.0000  Detected=0
+
+  chb02 LOSO-CV Summary:
+    Mean AUC: 0.3875 (+/- 0.3875)
+    Mean Acc: 0.5000
+    Mean F1:  0.0000
+    Seizure Detection: 0.00%
+
+============================================================
+LOSO-CV: chb03 — 6 seizures: [1, 2, 3, 4, 5, 6]
+============================================================
+
+  --- Fold 1/6 (test seizure 1) ---
+  Fold seizure 1: train=44, val=5, test=6
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 2/6 (test seizure 2) ---
+  Fold seizure 2: train=30, val=5, test=13
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 3/6 (test seizure 3) ---
+  Fold seizure 3: train=52, val=6, test=1
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 4/6 (test seizure 4) ---
+  Fold seizure 4: train=2, val=3, test=34
+    AUC=0.9762  Acc=0.8235  F1=0.0000  Detected=0
+
+  --- Fold 5/6 (test seizure 5) ---
+  Fold seizure 5: train=48, val=6, test=3
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 6/6 (test seizure 6) ---
+  Fold seizure 6: train=50, val=6, test=3
+    AUC=1.0000  Acc=0.6667  F1=0.0000  Detected=0
+
+  chb03 LOSO-CV Summary:
+    Mean AUC: 0.6627 (+/- 0.2302)
+    Mean Acc: 0.7484
+    Mean F1:  0.5000
+    Seizure Detection: 50.00%
+
+============================================================
+LOSO-CV: chb04 — 4 seizures: [0, 1, 2, 3]
+============================================================
+
+  --- Fold 1/4 (test seizure 0) ---
+  Fold seizure 0: train=130, val=14, test=20
+    AUC=0.7200  Acc=0.4500  F1=0.0000  Detected=0
+
+  --- Fold 2/4 (test seizure 1) ---
+  Fold seizure 1: train=116, val=14, test=21
+    AUC=1.0000  Acc=0.5238  F1=0.6154  Detected=1
+
+  --- Fold 3/4 (test seizure 2) ---
+  Fold seizure 2: train=110, val=12, test=42
+    AUC=0.8277  Acc=0.8571  F1=0.8696  Detected=1
+
+  --- Fold 4/4 (test seizure 3) ---
+  Fold seizure 3: train=62, val=8, test=81
+    AUC=1.0000  Acc=0.9877  F1=0.9846  Detected=1
+
+  chb04 LOSO-CV Summary:
+    Mean AUC: 0.8869 (+/- 0.1193)
+    Mean Acc: 0.7047
+    Mean F1:  0.6174
+    Seizure Detection: 75.00%
+
+============================================================
+LOSO-CV: chb05 — 5 seizures: [0, 1, 2, 3, 4]
+============================================================
+
+  --- Fold 1/5 (test seizure 0) ---
+  Fold seizure 0: train=44, val=4, test=8
+    AUC=0.6250  Acc=0.5000  F1=0.0000  Detected=0
+
+  --- Fold 2/5 (test seizure 1) ---
+  Fold seizure 1: train=36, val=4, test=12
+    AUC=1.0000  Acc=0.8333  F1=0.8571  Detected=1
+
+  --- Fold 3/5 (test seizure 2) ---
+  Fold seizure 2: train=46, val=5, test=4
+    AUC=1.0000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 4/5 (test seizure 3) ---
+  Fold seizure 3: train=44, val=5, test=4
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 5/5 (test seizure 4) ---
+  Fold seizure 4: train=16, val=3, test=28
+    AUC=0.8947  Acc=0.6429  F1=0.0000  Detected=0
+
+  chb05 LOSO-CV Summary:
+    Mean AUC: 0.8039 (+/- 0.2047)
+    Mean Acc: 0.5952
+    Mean F1:  0.3714
+    Seizure Detection: 40.00%
+
+============================================================
+LOSO-CV: chb06 — 8 seizures: [1, 2, 3, 4, 5, 6, 8, 9]
+============================================================
+
+  --- Fold 1/8 (test seizure 1) ---
+  Fold seizure 1: train=148, val=18, test=16

@@ -1,0 +1,228 @@
+Device: mps
+Pretrained encoder: model/pretrained_encoder.pth
+
+============================================================
+LOSO-CV: chb01 — 7 seizures: [0, 1, 2, 3, 4, 5, 6]
+============================================================
+
+  --- Fold 1/7 (test seizure 0) ---
+  Fold seizure 0: train=46, val=8, test=7
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.4626  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4892  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4679  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4557  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.3983  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.3873  val_auc=1.0000  best=1.0000
+    AUC=1.0000  Acc=0.7143  F1=0.8333  Detected=1
+
+  --- Fold 2/7 (test seizure 1) ---
+  Fold seizure 1: train=48, val=9, test=3
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.4787  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4289  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4769  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4625  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4155  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.5224  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 3/7 (test seizure 2) ---
+  Fold seizure 2: train=34, val=8, test=12
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.4048  val_auc=0.9167  best=0.9167 *
+    Ep  2/30  loss=0.4762  val_auc=0.9167  best=0.9167
+    Ep  3/30  loss=0.4563  val_auc=0.9167  best=0.9167
+    Ep  4/30  loss=0.4039  val_auc=0.9167  best=0.9167
+    Ep  5/30  loss=0.4661  val_auc=0.9167  best=0.9167
+    Ep  6/30  loss=0.3429  val_auc=0.9167  best=0.9167
+    AUC=1.0000  Acc=0.6667  F1=0.0000  Detected=0
+
+  --- Fold 4/7 (test seizure 3) ---
+  Fold seizure 3: train=48, val=9, test=7
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.4281  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4039  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.3295  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4808  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4606  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.3844  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 5/7 (test seizure 4) ---
+  Fold seizure 4: train=48, val=9, test=6
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.4994  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4637  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.6038  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4778  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4779  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.4980  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 6/7 (test seizure 5) ---
+  Fold seizure 5: train=48, val=6, test=35
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.3918  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.3704  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.3052  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.3473  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.2603  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.2953  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 7/7 (test seizure 6) ---
+  Fold seizure 6: train=18, val=7, test=19
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.3835  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4726  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4524  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.2996  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.2947  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.2771  val_auc=1.0000  best=1.0000
+    AUC=1.0000  Acc=0.1053  F1=0.1905  Detected=1
+
+  chb01 LOSO-CV Summary:
+    Mean AUC: 0.7143 (+/- 0.2474)
+    Mean Acc: 0.4980
+    Mean F1:  0.4320
+    Seizure Detection: 57.14%
+
+============================================================
+LOSO-CV: chb02 — 2 seizures: [1, 2]
+============================================================
+
+  --- Fold 1/2 (test seizure 1) ---
+  Fold seizure 1: train=30, val=4, test=30
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.8038  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.7175  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.7079  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.7385  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.6787  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.7374  val_auc=1.0000  best=1.0000
+    AUC=0.0000  Acc=0.5000  F1=0.0000  Detected=0
+
+  --- Fold 2/2 (test seizure 2) ---
+  Fold seizure 2: train=26, val=4, test=34
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=1.0320  val_auc=0.0000  best=0.0000
+    Ep  2/30  loss=0.9506  val_auc=0.0000  best=0.0000
+    Ep  3/30  loss=1.0580  val_auc=0.0000  best=0.0000
+    Ep  4/30  loss=0.7991  val_auc=0.2500  best=0.2500 *
+    Ep  5/30  loss=0.8353  val_auc=0.2500  best=0.2500
+    Ep  6/30  loss=0.8078  val_auc=0.5000  best=0.5000 *
+    Ep  7/30  loss=0.8477  val_auc=0.5000  best=0.5000
+    Ep  8/30  loss=0.8762  val_auc=0.5000  best=0.5000
+    Ep  9/30  loss=0.8770  val_auc=0.5000  best=0.5000
+    Ep 10/30  loss=0.8613  val_auc=0.5000  best=0.5000
+    Ep 11/30  loss=0.8236  val_auc=1.0000  best=1.0000 *
+    Ep 12/30  loss=0.7899  val_auc=1.0000  best=1.0000
+    Ep 13/30  loss=0.7096  val_auc=1.0000  best=1.0000
+    Ep 14/30  loss=0.8534  val_auc=1.0000  best=1.0000
+    Ep 15/30  loss=0.6943  val_auc=1.0000  best=1.0000
+    Ep 16/30  loss=0.8289  val_auc=1.0000  best=1.0000
+    AUC=0.8789  Acc=0.7941  F1=0.7879  Detected=1
+
+  chb02 LOSO-CV Summary:
+    Mean AUC: 0.4394 (+/- 0.4394)
+    Mean Acc: 0.6471
+    Mean F1:  0.3939
+    Seizure Detection: 50.00%
+
+============================================================
+LOSO-CV: chb03 — 6 seizures: [1, 2, 3, 4, 5, 6]
+============================================================
+
+  --- Fold 1/6 (test seizure 1) ---
+  Fold seizure 1: train=44, val=5, test=6
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.5628  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.5514  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.5676  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.5731  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.5265  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.5860  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 2/6 (test seizure 2) ---
+  Fold seizure 2: train=30, val=5, test=13
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.4844  val_auc=0.8333  best=0.8333 *
+    Ep  2/30  loss=0.5235  val_auc=0.8333  best=0.8333
+    Ep  3/30  loss=0.4580  val_auc=0.8333  best=0.8333
+    Ep  4/30  loss=0.5302  val_auc=0.8333  best=0.8333
+    Ep  5/30  loss=0.4594  val_auc=0.8333  best=0.8333
+    Ep  6/30  loss=0.5256  val_auc=0.8333  best=0.8333
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 3/6 (test seizure 3) ---
+  Fold seizure 3: train=52, val=6, test=1
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.4720  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4879  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4361  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4487  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.3928  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.5369  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 4/6 (test seizure 4) ---
+  Fold seizure 4: train=2, val=3, test=34
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.8431  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.8560  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.9392  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=1.0711  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.8295  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.8380  val_auc=1.0000  best=1.0000
+    AUC=0.9643  Acc=0.8235  F1=0.0000  Detected=0
+
+  --- Fold 5/6 (test seizure 5) ---
+  Fold seizure 5: train=48, val=6, test=3
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.5648  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4982  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.5153  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4891  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4389  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.4614  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 6/6 (test seizure 6) ---
+  Fold seizure 6: train=50, val=6, test=3
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.5203  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.5176  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.6038  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4977  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4871  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.4525  val_auc=1.0000  best=1.0000
+    AUC=1.0000  Acc=0.6667  F1=0.0000  Detected=0
+
+  chb03 LOSO-CV Summary:
+    Mean AUC: 0.6607 (+/- 0.2275)
+    Mean Acc: 0.4150
+    Mean F1:  0.1667
+    Seizure Detection: 16.67%
+
+============================================================
+LOSO-CV: chb04 — 4 seizures: [0, 1, 2, 3]
+============================================================
+
+  --- Fold 1/4 (test seizure 0) ---
+  Fold seizure 0: train=130, val=14, test=20
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.3933  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4295  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4416  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4310  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4102  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.4066  val_auc=1.0000  best=1.0000
+    AUC=0.8000  Acc=0.5000  F1=0.0000  Detected=0
+
+  --- Fold 2/4 (test seizure 1) ---
+  Fold seizure 1: train=116, val=14, test=21
+    Trainable: 8,386/549,538 params (classifier head only)
+    Ep  1/30  loss=0.5335  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.5391  val_auc=1.0000  best=1.0000

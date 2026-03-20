@@ -455,6 +455,13 @@ def main():
         help="Evaluate ensemble of N seed models by averaging probabilities. "
              "Example: --ensemble 5",
     )
+    parser.add_argument(
+        "--pretrained",
+        type=str,
+        default=None,
+        help="Evaluate pretrained encoder directly (no fine-tuned model needed). "
+             "Example: --pretrained model/pretrained_encoder.pth",
+    )
     args = parser.parse_args()
 
     n_patients = len(PATIENTS)
@@ -514,7 +521,85 @@ def main():
                 print(f"  Test dataset not found: {test_data_path}")
                 continue
 
-            if args.ensemble:
+            if args.pretrained:
+                # Pretrained-only evaluation: load raw state dict
+                print(f"Evaluating PRETRAINED encoder: {args.pretrained}")
+                print(f"Dataset prefix: {current_output_prefix}")
+
+                model = _create_model(device)
+                model.load_state_dict(
+                    torch.load(args.pretrained, map_location=device, weights_only=False)
+                )
+                model.to(device)
+                model.eval()
+
+                # Load pretrained config for threshold/smoothing
+                pretrained_config_path = Path(args.pretrained).parent / "pretrained_config.json"
+                if pretrained_config_path.exists():
+                    with open(pretrained_config_path) as f:
+                        pt_config = json.load(f)
+                    loaded_threshold = pt_config.get("optimal_threshold", 0.5)
+                    temperature = pt_config.get("temperature", 1.0)
+                    ckpt_window = pt_config.get("smoothing_window")
+                    ckpt_count = pt_config.get("smoothing_count")
+                else:
+                    loaded_threshold = 0.5
+                    temperature = 1.0
+                    ckpt_window = None
+                    ckpt_count = None
+
+                print(f"Threshold: {loaded_threshold:.4f}, Temperature: {temperature:.2f}")
+
+                test_dataset = EEGDataset(test_data_path, split="test")
+                test_loader = DataLoader(
+                    test_dataset, batch_size=SEQUENCE_BATCH_SIZE, shuffle=False, num_workers=0
+                )
+
+                all_predictions = []
+                all_labels = []
+                all_probabilities = []
+                total_loss = 0.0
+                criterion = nn.CrossEntropyLoss()
+
+                with torch.no_grad():
+                    for x, labels in tqdm(test_loader, desc="Testing"):
+                        x, labels = x.to(device), labels.to(device)
+                        outputs = model(x)
+                        loss = criterion(outputs, labels)
+                        total_loss += loss.item()
+                        probabilities = torch.softmax(outputs / temperature, dim=1)[:, 1]
+                        preds = (probabilities >= loaded_threshold).long()
+                        all_predictions.extend(preds.cpu().numpy())
+                        all_labels.extend(labels.cpu().numpy())
+                        all_probabilities.extend(probabilities.cpu().numpy())
+
+                true_labels = all_labels
+                predictions = all_predictions
+                probabilities = all_probabilities
+
+                labels_np = np.array(all_labels)
+                probs_np = np.array(all_probabilities)
+                preds_np = np.array(all_predictions)
+
+                if len(np.unique(labels_np)) > 1:
+                    auc = roc_auc_score(labels_np, probs_np)
+                else:
+                    auc = 0.5
+
+                metrics = {
+                    "accuracy": accuracy_score(labels_np, preds_np),
+                    "precision": precision_score(labels_np, preds_np, zero_division=0),
+                    "recall": recall_score(labels_np, preds_np, zero_division=0),
+                    "f1": f1_score(labels_np, preds_np, zero_division=0),
+                    "auc_roc": auc,
+                    "loss": total_loss / max(len(test_loader), 1),
+                    "threshold_used": loaded_threshold,
+                }
+                cm = confusion_matrix(labels_np, preds_np)
+                checkpoint_task_mode = TASK_MODE
+                positive_class = get_positive_label()
+
+            elif args.ensemble:
                 # Ensemble evaluation: average probabilities from N seed models
                 print(f"Evaluating ENSEMBLE ({args.ensemble} seeds)")
                 print(f"Dataset prefix: {current_output_prefix}")
@@ -601,7 +686,9 @@ def main():
                 "test_metrics": metrics,
                 "confusion_matrix": cm.tolist(),
             }
-            if not args.ensemble:
+            if args.pretrained:
+                patient_results["model_path"] = args.pretrained
+            elif not args.ensemble:
                 patient_results["model_path"] = str(model_path)
 
             # Apply smoothing
@@ -712,13 +799,17 @@ def main():
             print(f"\n  Results saved to {patient_results_path}")
 
             # Generate Dynamics Plot
-            if args.ensemble:
-                # For ensemble, use seed0 model for plotting
+            if args.pretrained:
+                plot_model_path = Path(args.pretrained)
+            elif args.ensemble:
                 plot_model_path = Path("model") / "seed0" / patient_id / "best_model.pth"
             else:
                 plot_model_path = model_path
 
-            if plot_model_path.exists():
+            if args.pretrained:
+                # Model already loaded above
+                pass
+            elif plot_model_path.exists():
                 model = _create_model(device)
                 try:
                     checkpoint = torch.load(

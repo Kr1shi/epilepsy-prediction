@@ -14,7 +14,7 @@ TASK_MODE = "prediction"  # 'prediction' (preictal vs interictal) or 'detection'
 PREICTAL_WINDOW = 40 * 60  # 40 minutes before seizure (zone starts at -40min)
 PREICTAL_ONSET_BUFFER = 10 * 60  # 10 minutes before seizure (zone ends at -10min)
                                   # Effective preictal zone: [-40min, -10min]
-INTERICTAL_BUFFER = 1 * 60 * 60  # 1 hour buffer around seizures
+INTERICTAL_BUFFER = 5 * 60  # 5 minute buffer around seizures
 
 # =============================================================================
 # Dataset Configuration

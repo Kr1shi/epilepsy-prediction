@@ -140,10 +140,10 @@ def create_sequences_from_file(
     positive_regions = identify_positive_regions(all_seizures_global)
 
     # Calculate how many sequences we can extract
-    if file_duration < sequence_duration + (2 * SAFETY_MARGIN):
-        return (
-            sequences  # File too short for even one sequence (including safety margins)
-        )
+    # Allow files shorter than full sequence if they have positive regions (will be zero-padded)
+    min_useful_duration = SEGMENT_DURATION + (2 * SAFETY_MARGIN)  # At least one segment
+    if file_duration < min_useful_duration:
+        return sequences
 
     # Helper function to check if a position is in a positive region
     def is_in_positive_region(start_global, end_global):
@@ -154,7 +154,15 @@ def create_sequences_from_file(
         return False
 
     # Generate sequence start times using adaptive sliding window
+    # Allow sequences to start before file data (zero-padded) so seizures
+    # early in files can still produce preictal sequences.
+    # Earliest possible start: enough so the LAST segment ends within the file
+    earliest_start = SAFETY_MARGIN - (sequence_duration - SEGMENT_DURATION)
+    # But we only use early starts for positive regions — check below
     sequence_start_local = SAFETY_MARGIN
+    padded_sequence_start = earliest_start  # Track padded candidates separately
+
+    # First pass: normal sequences (no padding needed)
     while sequence_start_local + sequence_duration + SAFETY_MARGIN <= file_duration:
         sequence_end_local = sequence_start_local + sequence_duration
 
@@ -334,6 +342,100 @@ def create_sequences_from_file(
             sequence_start_local += (
                 non_overlapping_stride  # 150s: 0% overlap for interictal
             )
+
+    # Second pass: generate zero-padded sequences for positive regions
+    # that start before the file data. This allows seizures early in files
+    # to produce preictal sequences by padding missing early segments with zeros.
+    padded_count = 0
+    pad_start = padded_sequence_start
+    while pad_start < SAFETY_MARGIN:
+        # This sequence would start before file data
+        sequence_end_local = pad_start + sequence_duration
+
+        # The last segment must still be within the file
+        last_seg_start = pad_start + (SEQUENCE_LENGTH - 1) * SEGMENT_DURATION
+        if last_seg_start + SEGMENT_DURATION + SAFETY_MARGIN > file_duration:
+            pad_start += overlapping_stride
+            continue
+
+        # Convert to global timeline
+        sequence_start_global = file_offset + pad_start
+        sequence_end_global = file_offset + sequence_end_local
+
+        # Only create padded sequences for positive regions
+        if not is_in_positive_region(sequence_start_global, sequence_end_global):
+            pad_start += overlapping_stride
+            continue
+
+        # Generate segment starts: -1 for segments before file data, real time otherwise
+        segment_starts = []
+        num_padded = 0
+        for i in range(SEQUENCE_LENGTH):
+            seg_start = pad_start + (i * SEGMENT_DURATION)
+            if seg_start < SAFETY_MARGIN:
+                segment_starts.append(-1)  # Sentinel: will be zero-padded
+                num_padded += 1
+            else:
+                segment_starts.append(seg_start)
+
+        # Label using the LAST segment (same logic as main loop)
+        last_segment_start_local = segment_starts[-1]
+        last_segment_end_local = last_segment_start_local + SEGMENT_DURATION
+        last_segment_start_global = file_offset + last_segment_start_local
+        last_segment_end_global = file_offset + last_segment_end_local
+
+        sequence_type = "interictal"
+        time_to_seizure = None
+        matched_seizure_id = None
+
+        if TASK_MODE == "prediction":
+            for seizure in all_seizures_global:
+                seizure_start_global = seizure["start_sec_global"]
+                preictal_window_start_global = max(
+                    0, seizure_start_global - PREICTAL_WINDOW
+                )
+                preictal_zone_end = seizure_start_global - PREICTAL_ONSET_BUFFER
+
+                if (
+                    preictal_window_start_global <= last_segment_start_global
+                    and last_segment_end_global <= preictal_zone_end
+                ):
+                    sequence_type = "preictal"
+                    time_to_seizure = seizure_start_global - last_segment_end_global
+                    matched_seizure_id = seizure.get("seizure_id")
+                    break
+
+        # Only keep if it's actually preictal (the whole point of padding)
+        if sequence_type != "preictal":
+            pad_start += overlapping_stride
+            continue
+
+        sequence = {
+            "patient_id": patient_id,
+            "file": filename,
+            "sequence_start_sec": pad_start,
+            "sequence_end_sec": sequence_end_local,
+            "sequence_duration_sec": sequence_duration,
+            "segment_starts": segment_starts,
+            "num_segments": SEQUENCE_LENGTH,
+            "num_padded_segments": num_padded,
+            "type": sequence_type,
+            "task_mode": TASK_MODE,
+            "time_to_seizure": time_to_seizure,
+        }
+        if matched_seizure_id is not None:
+            sequence["seizure_id"] = matched_seizure_id
+        else:
+            sequence["seizure_id"] = None
+
+        sequences.append(sequence)
+        padded_count += 1
+        pad_start += overlapping_stride
+
+    if padded_count > 0:
+        print(
+            f"  {filename}: Created {padded_count} zero-padded preictal sequences"
+        )
 
     # Log skipped sequences if verbose warnings enabled
     if VERBOSE_WARNINGS and skipped_boundary_sequences > 0:

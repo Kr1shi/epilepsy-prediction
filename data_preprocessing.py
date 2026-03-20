@@ -180,10 +180,10 @@ class EEGPreprocessor:
         3. Reassemble sequences from pre-computed segments.
         """
         try:
-            # 1. Collect all unique segment start times
+            # 1. Collect all unique segment start times (skip -1 padding sentinels)
             unique_starts = set()
             for seq in sequences:
-                unique_starts.update(seq["segment_starts"])
+                unique_starts.update(s for s in seq["segment_starts"] if s >= 0)
             sorted_starts = sorted(list(unique_starts))
 
             # 2. Load Raw Data
@@ -244,7 +244,19 @@ class EEGPreprocessor:
                 valid = True
 
                 for start in seq["segment_starts"]:
-                    if start in segment_cache:
+                    if start == -1:
+                        # Zero-padded segment (sequence extends before file data)
+                        if spec_list:
+                            # Use shape from a real segment
+                            pad_shape = spec_list[-1].shape
+                        elif segment_cache:
+                            # Use shape from any cached segment
+                            pad_shape = next(iter(segment_cache.values()))["spectrogram"].shape
+                        else:
+                            valid = False
+                            break
+                        spec_list.append(np.zeros(pad_shape, dtype=np.float32))
+                    elif start in segment_cache:
                         spec_list.append(segment_cache[start]["spectrogram"])
                     else:
                         valid = False

@@ -214,11 +214,20 @@ def get_loso_fold_splits(master_h5_path, test_seizure_id, random_seed=42):
                 continue
         non_test_indices.append(i)
 
-    # --- Train/Val split: mix remaining sequences, split 90/10 at sequence level ---
-    # Separate by class for stratified split
+    # --- Ensure test has both classes ---
+    # If no interictal was associated with the test seizure, pull some from remaining
     remaining_positive = [i for i in non_test_indices if labels[i] == 1]
     remaining_interictal = [i for i in non_test_indices if labels[i] == 0]
 
+    if len(test_interictal) == 0 and len(test_positive) > 0 and len(remaining_interictal) > 0:
+        # Give test set interictal equal to number of test positives (balanced test)
+        rng_test = random.Random(random_seed + 999)
+        rng_test.shuffle(remaining_interictal)
+        n_test_inter = min(len(test_positive), len(remaining_interictal))
+        test_interictal = remaining_interictal[:n_test_inter]
+        remaining_interictal = remaining_interictal[n_test_inter:]
+
+    # --- Train/Val split: mix remaining sequences, split 90/10 at sequence level ---
     rng.shuffle(remaining_positive)
     rng.shuffle(remaining_interictal)
 

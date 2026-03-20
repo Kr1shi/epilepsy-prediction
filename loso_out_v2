@@ -1,0 +1,9 @@
+Device: mps
+Pretrained encoder: model/pretrained_encoder.pth
+
+============================================================
+LOSO-CV: chb01 — 7 seizures: [0, 1, 2, 3, 4, 5, 6]
+============================================================
+
+  --- Fold 1/7 (test seizure 0) ---
+  Fold seizure 0: train=116, val=14, test=27

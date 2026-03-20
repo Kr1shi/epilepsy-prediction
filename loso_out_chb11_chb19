@@ -1,0 +1,46 @@
+Device: mps
+Pretrained encoder: model/pretrained_encoder.pth
+
+============================================================
+LOSO-CV: chb19 — 2 seizures: [1, 2]
+============================================================
+
+  --- Fold 1/2 (test seizure 1) ---
+  Fold seizure 1: train=2, val=1, test=73
+    Trainable: 841,410/947,944 params (transformer + head)
+    WARNING: NaN in val probs at epoch 0, stopping training
+    WARNING: NaN in test probs, replacing with 0.5
+    AUC=0.5000  Acc=0.4795  F1=0.6481  Detected=1
+
+  --- Fold 2/2 (test seizure 2) ---
+  Fold seizure 2: train=62, val=8, test=6
+    Trainable: 841,410/947,944 params (transformer + head)
+    Ep  1/30  loss=0.6731  val_auc=0.8750  best=0.8750 *
+    Ep  2/30  loss=0.4720  val_auc=1.0000  best=1.0000 *
+    Ep  3/30  loss=0.3629  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4268  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4043  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.3435  val_auc=1.0000  best=1.0000
+    Ep  7/30  loss=0.2703  val_auc=1.0000  best=1.0000
+    AUC=0.8889  Acc=0.5000  F1=0.0000  Detected=0
+
+  chb19 LOSO-CV Summary:
+    Mean AUC: 0.6944 (+/- 0.1944)
+    Mean Acc: 0.4897
+    Mean F1:  0.3241
+    Seizure Detection: 50.00%
+
+============================================================
+OVERALL LOSO-CV SUMMARY (1 patients)
+============================================================
+Mean AUC (across patients): 0.6944 (+/- 0.0000)
+Mean AUC (across all folds): 0.6944 (+/- 0.1944)
+Total folds evaluated: 2
+Mean Seizure Detection Rate: 50.00%
+
+Patient    Folds   Mean AUC    Std AUC  Detection
+--------------------------------------------------
+chb19          2     0.6944     0.1944     50.0%
+
+Results saved to model/loso_cv/loso_cv_results.json
+Total time: 1.2 min

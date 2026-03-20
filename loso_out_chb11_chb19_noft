@@ -1,0 +1,46 @@
+Device: mps
+Pretrained encoder: model/pretrained_encoder.pth
+Mode: pretrained-only (no fine-tuning)
+
+============================================================
+LOSO-CV: chb11 — 3 seizures: [0, 1, 2]
+============================================================
+
+  --- Fold 1/3 (test seizure 0) ---
+  Fold seizure 0: train=8, val=1, test=79
+    AUC=0.9630  Acc=0.9114  F1=0.8889  Detected=1
+
+  --- Fold 2/3 (test seizure 1) ---
+  Fold seizure 1: train=68, val=8, test=12
+    AUC=1.0000  Acc=0.5833  F1=0.2857  Detected=1
+
+  --- Fold 3/3 (test seizure 2) ---
+  Fold seizure 2: train=74, val=8, test=6
+    AUC=0.3333  Acc=0.5000  F1=0.0000  Detected=0
+
+  chb11 LOSO-CV Summary:
+    Mean AUC: 0.7654 (+/- 0.3059)
+    Mean Acc: 0.6649
+    Mean F1:  0.3915
+    Seizure Detection: 66.67%
+
+============================================================
+OVERALL LOSO-CV SUMMARY (1 patients)
+============================================================
+Mean AUC (across patients): 0.7654 (+/- 0.0000)
+Mean AUC (across all folds): 0.7654 (+/- 0.3059)
+Total folds evaluated: 3
+Mean Seizure Detection Rate: 66.67%
+
+Patient    Folds   Mean AUC    Std AUC  Detection
+--------------------------------------------------
+chb11          3     0.7654     0.3059     66.7%
+
+Results saved to model/loso_cv/loso_cv_results.json
+Total time: 0.8 min
+lds   Mean AUC    Std AUC  Detection
+--------------------------------------------------
+chb19          2     0.9181     0.0292     50.0%
+
+Results saved to model/loso_cv/loso_cv_results.json
+Total time: 0.4 min

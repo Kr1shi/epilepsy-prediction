@@ -160,6 +160,10 @@ def compute_fold_stats(master_h5_path, train_indices):
 def get_loso_fold_splits(master_h5_path, test_seizure_id, random_seed=42):
     """Split master HDF5 indices into train/val/test for a given test seizure.
 
+    Test: all sequences from the held-out seizure (positive + associated interictal).
+    Remaining sequences are mixed and split 90/10 at the sequence level for train/val.
+    Train is class-balanced; val is kept unbalanced (needs both classes for AUC).
+
     Returns dict with keys 'train', 'val', 'test', each a list of HDF5 indices.
     """
     rng = random.Random(random_seed)
@@ -172,95 +176,82 @@ def get_loso_fold_splits(master_h5_path, test_seizure_id, random_seed=42):
     n = len(labels)
     all_seizure_ids = sorted(set(int(s) for s in seizure_ids if s >= 0))
 
-    # Separate positive and interictal indices
-    positive_indices = [i for i in range(n) if labels[i] == 1]
-    interictal_indices = [i for i in range(n) if labels[i] == 0]
+    # --- Test split: all sequences from the test seizure + nearby interictal ---
+    test_positive = [i for i in range(n) if labels[i] == 1 and seizure_ids[i] == test_seizure_id]
 
-    # Test: all positive samples from the test seizure
-    test_positive = [i for i in positive_indices if seizure_ids[i] == test_seizure_id]
-    remaining_seizures = [s for s in all_seizure_ids if s != test_seizure_id]
-
-    # Split remaining seizures into train/val at the seizure level
-    rng.shuffle(remaining_seizures)
-    if len(remaining_seizures) <= 1:
-        # Only 1 seizure left — all non-test data goes to train, val reuses train
-        train_seizure_set = set(remaining_seizures)
-        val_seizure_set = set()  # handled below — val will be a subset of train
-    else:
-        n_val_seizures = max(1, round(len(remaining_seizures) * 0.1 / 0.9))
-        # Ensure at least 1 seizure remains for train
-        n_val_seizures = min(n_val_seizures, len(remaining_seizures) - 1)
-        val_seizure_set = set(remaining_seizures[:n_val_seizures])
-        train_seizure_set = set(remaining_seizures[n_val_seizures:])
-
-    train_positive = [i for i in positive_indices if seizure_ids[i] in train_seizure_set]
-    val_positive = [i for i in positive_indices if seizure_ids[i] in val_seizure_set]
-
-    # Associate interictal with nearest following seizure (by global time)
+    # Associate interictal with nearest seizure (for test split only)
     seizure_anchors = {}
-    for i in positive_indices:
-        sid = int(seizure_ids[i])
-        t = global_starts[i]
-        if sid not in seizure_anchors or t < seizure_anchors[sid]:
-            seizure_anchors[sid] = t
+    for i in range(n):
+        if labels[i] == 1:
+            sid = int(seizure_ids[i])
+            t = global_starts[i]
+            if sid not in seizure_anchors or t < seizure_anchors[sid]:
+                seizure_anchors[sid] = t
 
-    # Sort interictal by global time and assign to nearest following seizure
-    sorted_interictal = sorted(interictal_indices, key=lambda i: global_starts[i])
     sorted_anchors = sorted(
         [(sid, seizure_anchors[sid]) for sid in all_seizure_ids if sid in seizure_anchors],
         key=lambda x: x[1],
     )
 
     test_interictal = []
-    val_interictal = []
-    train_interictal = []
+    non_test_indices = []
+    for i in range(n):
+        if labels[i] == 1 and seizure_ids[i] == test_seizure_id:
+            continue  # already in test_positive
+        if labels[i] == 0:
+            # Assign interictal to nearest following seizure
+            t = global_starts[i]
+            assigned_sid = None
+            for sid, anchor_t in sorted_anchors:
+                if anchor_t > t:
+                    assigned_sid = sid
+                    break
+            if assigned_sid is None:
+                assigned_sid = min(sorted_anchors, key=lambda x: abs(x[1] - t))[0]
 
-    for idx in sorted_interictal:
-        t = global_starts[idx]
-        # Find nearest following seizure
-        assigned_sid = None
-        for sid, anchor_t in sorted_anchors:
-            if anchor_t > t:
-                assigned_sid = sid
-                break
-        if assigned_sid is None:
-            # After all seizures — assign to nearest by distance
-            assigned_sid = min(sorted_anchors, key=lambda x: abs(x[1] - t))[0]
+            if assigned_sid == test_seizure_id:
+                test_interictal.append(i)
+                continue
+        non_test_indices.append(i)
 
-        if assigned_sid == test_seizure_id:
-            test_interictal.append(idx)
-        elif assigned_sid in val_seizure_set:
-            val_interictal.append(idx)
-        else:
-            train_interictal.append(idx)
+    # --- Train/Val split: mix remaining sequences, split 90/10 at sequence level ---
+    # Separate by class for stratified split
+    remaining_positive = [i for i in non_test_indices if labels[i] == 1]
+    remaining_interictal = [i for i in non_test_indices if labels[i] == 0]
 
-    # Balance each split (downsample majority class to match minority)
+    rng.shuffle(remaining_positive)
+    rng.shuffle(remaining_interictal)
+
+    # 10% of each class goes to val (stratified)
+    n_val_pos = max(1, round(len(remaining_positive) * 0.1))
+    n_val_inter = max(1, round(len(remaining_interictal) * 0.1))
+
+    val_positive = remaining_positive[:n_val_pos]
+    val_interictal = remaining_interictal[:n_val_inter]
+    train_positive = remaining_positive[n_val_pos:]
+    train_interictal = remaining_interictal[n_val_inter:]
+
+    # Balance train (downsample majority class)
     def balance(pos_idx, inter_idx):
         if not pos_idx or not inter_idx:
             return pos_idx + inter_idx
         rng_bal = random.Random(random_seed + len(pos_idx))
-        rng_bal.shuffle(pos_idx)
         rng_bal.shuffle(inter_idx)
         if len(inter_idx) >= len(pos_idx):
             target = min(int(len(pos_idx) * INTERICTAL_TO_PREICTAL_RATIO), len(inter_idx))
             return pos_idx + inter_idx[:target]
         else:
+            rng_bal.shuffle(pos_idx)
             target = min(int(len(inter_idx) / INTERICTAL_TO_PREICTAL_RATIO), len(pos_idx))
             return pos_idx[:target] + inter_idx
 
     train_balanced = balance(train_positive, train_interictal)
-
-    # Val: keep ALL samples unbalanced — needs both classes for AUC
     val_all = val_positive + val_interictal
-
-    # If val is empty (e.g., 2-seizure patient), reuse train for val
-    if not val_all:
-        val_all = list(train_balanced)
 
     return {
         "train": train_balanced,
         "val": val_all,
-        "test": test_positive + test_interictal,  # Don't balance test
+        "test": test_positive + test_interictal,
     }
 
 
@@ -284,6 +275,7 @@ def train_fold(
     pretrained_path,
     device,
     random_seed=42,
+    no_finetune=False,
 ):
     """Train a model for one LOSO fold. Returns test metrics dict."""
     set_seed(random_seed)
@@ -305,11 +297,9 @@ def train_fold(
     mean, std = compute_fold_stats(master_h5_path, splits["train"])
 
     # 3. Create datasets
-    train_ds = FoldDataset(master_h5_path, splits["train"], mean, std, augment=True)
     val_ds = FoldDataset(master_h5_path, splits["val"], mean, std, augment=False)
     test_ds = FoldDataset(master_h5_path, splits["test"], mean, std, augment=False)
 
-    train_loader = DataLoader(train_ds, batch_size=SEQUENCE_BATCH_SIZE, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=SEQUENCE_BATCH_SIZE, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=SEQUENCE_BATCH_SIZE, shuffle=False, num_workers=0)
 
@@ -330,103 +320,117 @@ def train_fold(
         model.load_state_dict(
             torch.load(pretrained_path, map_location=device, weights_only=False)
         )
+
+    model.to(device)
+    model.eval()
+
+    # 5. Compute val predictions (for threshold tuning)
+    val_labels_np = np.array([])
+    val_probs_np = np.array([])
+
+    val_probs, val_labels = [], []
+    with torch.no_grad():
+        for x, labels in val_loader:
+            x, labels = x.to(device), labels.to(device)
+            outputs = model(x)
+            probs = torch.softmax(outputs, dim=1)[:, 1]
+            val_probs.extend(probs.cpu().numpy())
+            val_labels.extend(labels.cpu().numpy())
+    val_labels_np = np.array(val_labels)
+    val_probs_np = np.array(val_probs)
+
+    if not no_finetune:
         # Freeze conv tower during fine-tuning
         for param in model.conv_tower.parameters():
             param.requires_grad = False
 
-    model.to(device)
+        # Loss, optimizer
+        train_ds = FoldDataset(master_h5_path, splits["train"], mean, std, augment=True)
+        train_loader = DataLoader(train_ds, batch_size=SEQUENCE_BATCH_SIZE, shuffle=True, num_workers=0)
 
-    # 5. Loss, optimizer
-    train_labels = train_ds.labels
-    counts = torch.bincount(train_labels).float()
-    if len(counts) < 2:
-        counts = torch.tensor([1.0, 1.0])
-    class_weights = counts.sum() / (len(counts) * counts)
-    criterion = nn.CrossEntropyLoss(
-        weight=class_weights.to(device), label_smoothing=0.05
-    )
+        train_labels = train_ds.labels
+        counts = torch.bincount(train_labels).float()
+        if len(counts) < 2:
+            counts = torch.tensor([1.0, 1.0])
+        class_weights = counts.sum() / (len(counts) * counts)
+        criterion = nn.CrossEntropyLoss(
+            weight=class_weights.to(device), label_smoothing=0.05
+        )
 
-    optimizer = optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=FINETUNING_LEARNING_RATE,
-        weight_decay=WEIGHT_DECAY,
-    )
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=3, min_lr=1e-6
-    )
+        optimizer = optim.Adam(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=FINETUNING_LEARNING_RATE,
+            weight_decay=WEIGHT_DECAY,
+        )
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="max", factor=0.5, patience=3, min_lr=1e-6
+        )
 
-    # 6. Training loop
-    best_val_auc = 0.0
-    best_state = None
-    epochs_no_improve = 0
-    val_labels_np = np.array([])
-    val_probs_np = np.array([])
+        # Training loop
+        best_val_auc = 0.0
+        best_state = None
+        epochs_no_improve = 0
 
-    for epoch in range(TRAINING_EPOCHS):
-        # Train
-        model.train()
-        total_loss = 0.0
-        for x, labels in train_loader:
-            x, labels = x.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(x)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            total_loss += loss.item()
-
-        # Check for NaN loss — stop early if training diverged
-        if np.isnan(total_loss):
-            print(f"    WARNING: NaN loss at epoch {epoch}, stopping training")
-            break
-
-        # Validate
-        model.eval()
-        val_probs, val_labels = [], []
-        with torch.no_grad():
-            for x, labels in val_loader:
+        for epoch in range(TRAINING_EPOCHS):
+            model.train()
+            total_loss = 0.0
+            for x, labels in train_loader:
                 x, labels = x.to(device), labels.to(device)
+                optimizer.zero_grad()
                 outputs = model(x)
-                probs = torch.softmax(outputs, dim=1)[:, 1]
-                val_probs.extend(probs.cpu().numpy())
-                val_labels.extend(labels.cpu().numpy())
+                loss = criterion(outputs, labels)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                total_loss += loss.item()
 
-        val_labels_np = np.array(val_labels)
-        val_probs_np = np.array(val_probs)
+            if np.isnan(total_loss):
+                print(f"    WARNING: NaN loss at epoch {epoch}, stopping training", flush=True)
+                break
 
-        # Guard against NaN in validation probabilities
-        if np.any(np.isnan(val_probs_np)):
-            print(f"    WARNING: NaN in val probs at epoch {epoch}, stopping training")
-            break
+            model.eval()
+            val_probs, val_labels = [], []
+            with torch.no_grad():
+                for x, labels in val_loader:
+                    x, labels = x.to(device), labels.to(device)
+                    outputs = model(x)
+                    probs = torch.softmax(outputs, dim=1)[:, 1]
+                    val_probs.extend(probs.cpu().numpy())
+                    val_labels.extend(labels.cpu().numpy())
 
-        if len(np.unique(val_labels_np)) > 1:
-            val_auc = roc_auc_score(val_labels_np, val_probs_np)
-        else:
-            val_auc = 0.5
+            val_labels_np = np.array(val_labels)
+            val_probs_np = np.array(val_probs)
 
-        scheduler.step(val_auc)
+            if np.any(np.isnan(val_probs_np)):
+                print(f"    WARNING: NaN in val probs at epoch {epoch}, stopping training", flush=True)
+                break
 
-        avg_loss = total_loss / max(len(train_loader), 1)
-        marker = ""
-        if val_auc > best_val_auc:
-            best_val_auc = val_auc
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-            epochs_no_improve = 0
-            marker = " *"
-        else:
-            epochs_no_improve += 1
+            if len(np.unique(val_labels_np)) > 1:
+                val_auc = roc_auc_score(val_labels_np, val_probs_np)
+            else:
+                val_auc = 0.5
 
-        print(f"    Ep {epoch+1:>2}/{TRAINING_EPOCHS}  loss={avg_loss:.4f}  val_auc={val_auc:.4f}  best={best_val_auc:.4f}{marker}", flush=True)
+            scheduler.step(val_auc)
 
-        if epochs_no_improve >= 5:
-            break
+            avg_loss = total_loss / max(len(train_loader), 1)
+            marker = ""
+            if val_auc > best_val_auc:
+                best_val_auc = val_auc
+                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                epochs_no_improve = 0
+                marker = " *"
+            else:
+                epochs_no_improve += 1
 
-    # 7. Evaluate on test set with best model
-    if best_state is not None:
-        model.load_state_dict(best_state)
-    model.to(device)
-    model.eval()
+            print(f"    Ep {epoch+1:>2}/{TRAINING_EPOCHS}  loss={avg_loss:.4f}  val_auc={val_auc:.4f}  best={best_val_auc:.4f}{marker}", flush=True)
+
+            if epochs_no_improve >= 5:
+                break
+
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        model.to(device)
+        model.eval()
 
     test_probs, test_labels = [], []
     with torch.no_grad():
@@ -469,7 +473,7 @@ def train_fold(
         "recall": float(recall_score(test_labels_np, test_preds, zero_division=0)),
         "f1": float(f1_score(test_labels_np, test_preds, zero_division=0)),
         "threshold": threshold,
-        "best_val_auc": float(best_val_auc),
+        "best_val_auc": float(best_val_auc) if not no_finetune else -1,
         "n_train": n_train,
         "n_val": n_val,
         "n_test": n_test,
@@ -496,7 +500,7 @@ def train_fold(
 # =============================================================================
 
 
-def run_patient_loso_cv(patient_id, pretrained_path, device):
+def run_patient_loso_cv(patient_id, pretrained_path, device, no_finetune=False):
     """Run full LOSO-CV for one patient. Returns list of per-fold metrics."""
     master_h5 = Path("preprocessing") / "data" / patient_id / "master_unnormalized.h5"
     if not master_h5.exists():
@@ -526,6 +530,7 @@ def run_patient_loso_cv(patient_id, pretrained_path, device):
             pretrained_path=pretrained_path,
             device=device,
             random_seed=42 + fold_idx,
+            no_finetune=no_finetune,
         )
         if metrics is not None:
             fold_results.append(metrics)
@@ -539,11 +544,15 @@ def main():
                         help="Run for a single patient (e.g., chb01)")
     parser.add_argument("--pretrained", type=str, default="model/pretrained_encoder.pth",
                         help="Path to pretrained encoder weights")
+    parser.add_argument("--no-finetune", action="store_true",
+                        help="Skip fine-tuning, evaluate pretrained model directly")
     args = parser.parse_args()
 
     device = get_device()
     print(f"Device: {device}")
     print(f"Pretrained encoder: {args.pretrained}")
+    if args.no_finetune:
+        print("Mode: pretrained-only (no fine-tuning)")
     start_time = time.time()
 
     if args.patient:
@@ -557,7 +566,7 @@ def main():
     all_fold_aucs = []
 
     for patient_id in patients:
-        fold_results = run_patient_loso_cv(patient_id, args.pretrained, device)
+        fold_results = run_patient_loso_cv(patient_id, args.pretrained, device, args.no_finetune)
         if fold_results is None or len(fold_results) == 0:
             continue
 

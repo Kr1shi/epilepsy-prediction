@@ -1,0 +1,93 @@
+Device: mps
+Pretrained encoder: model/pretrained_encoder.pth
+
+============================================================
+LOSO-CV: chb01 — 7 seizures: [0, 1, 2, 3, 4, 5, 6]
+============================================================
+
+  --- Fold 1/7 (test seizure 0) ---
+  Fold seizure 0: train=46, val=8, test=7
+    Ep  1/30  loss=0.4617  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4760  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4273  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4067  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.3441  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.3219  val_auc=1.0000  best=1.0000
+    AUC=1.0000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 2/7 (test seizure 1) ---
+  Fold seizure 1: train=48, val=9, test=3
+    Ep  1/30  loss=0.4739  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4136  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4270  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4078  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.3587  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.4213  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 3/7 (test seizure 2) ---
+  Fold seizure 2: train=34, val=8, test=12
+    Ep  1/30  loss=0.4038  val_auc=0.9167  best=0.9167 *
+    Ep  2/30  loss=0.4662  val_auc=1.0000  best=1.0000 *
+    Ep  3/30  loss=0.4425  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.3727  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4393  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.3018  val_auc=1.0000  best=1.0000
+    Ep  7/30  loss=0.4731  val_auc=1.0000  best=1.0000
+    AUC=1.0000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 4/7 (test seizure 3) ---
+  Fold seizure 3: train=48, val=9, test=7
+    Ep  1/30  loss=0.4149  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4058  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.3060  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4334  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4173  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.3088  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=1.0000  F1=1.0000  Detected=1
+
+  --- Fold 5/7 (test seizure 4) ---
+  Fold seizure 4: train=48, val=9, test=6
+    Ep  1/30  loss=0.4958  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4519  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.5613  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.4269  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.4369  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.4207  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 6/7 (test seizure 5) ---
+  Fold seizure 5: train=48, val=6, test=35
+    Ep  1/30  loss=0.3890  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.3592  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.2885  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.3360  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.2312  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.2463  val_auc=1.0000  best=1.0000
+    AUC=0.5000  Acc=0.0000  F1=0.0000  Detected=0
+
+  --- Fold 7/7 (test seizure 6) ---
+  Fold seizure 6: train=18, val=7, test=19
+    Ep  1/30  loss=0.3811  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.4685  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.4594  val_auc=1.0000  best=1.0000
+    Ep  4/30  loss=0.2869  val_auc=1.0000  best=1.0000
+    Ep  5/30  loss=0.2791  val_auc=1.0000  best=1.0000
+    Ep  6/30  loss=0.2590  val_auc=1.0000  best=1.0000
+    AUC=1.0000  Acc=0.1053  F1=0.1905  Detected=1
+
+  chb01 LOSO-CV Summary:
+    Mean AUC: 0.7143 (+/- 0.2474)
+    Mean Acc: 0.5865
+    Mean F1:  0.5986
+    Seizure Detection: 71.43%
+
+============================================================
+LOSO-CV: chb02 — 2 seizures: [1, 2]
+============================================================
+
+  --- Fold 1/2 (test seizure 1) ---
+  Fold seizure 1: train=30, val=4, test=30
+    Ep  1/30  loss=0.8024  val_auc=1.0000  best=1.0000 *
+    Ep  2/30  loss=0.6472  val_auc=1.0000  best=1.0000
+    Ep  3/30  loss=0.6104  val_auc=1.0000  best=1.0000

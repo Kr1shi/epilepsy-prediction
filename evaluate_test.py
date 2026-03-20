@@ -24,6 +24,7 @@ from sklearn.metrics import (
 from tqdm import tqdm
 import json
 import argparse
+import shutil
 import matplotlib.pyplot as plt
 
 # Import from train.py
@@ -641,6 +642,42 @@ def main():
             json.dump(batch_summary, f, indent=2)
 
         print(f"\n  Batch results saved to model/batch_test_results.json")
+
+        # Compare against best_model and replace if current is better
+        best_dir = Path("best_model")
+        best_auc_file = best_dir / "best_auc.json"
+        current_auc = float(np.mean(auc_rocs))
+
+        prev_best = -1.0
+        if best_auc_file.exists():
+            with open(best_auc_file) as f:
+                prev_best = json.load(f).get("mean_auc", -1.0)
+
+        print(f"\n  Current Mean AUC: {current_auc:.4f}  |  Best: {prev_best:.4f}")
+
+        if current_auc > prev_best:
+            print(f"  NEW BEST! Saving models to {best_dir}/")
+            if best_dir.exists():
+                shutil.rmtree(best_dir)
+            best_dir.mkdir(parents=True)
+
+            # Copy pretrained encoder + config
+            model_dir = Path("model")
+            for fname in ["pretrained_encoder.pth", "pretrained_config.json", "batch_test_results.json"]:
+                src = model_dir / fname
+                if src.exists():
+                    shutil.copy2(src, best_dir / fname)
+
+            # Copy each patient folder
+            for pid in PATIENTS:
+                src = model_dir / pid
+                if src.exists():
+                    shutil.copytree(src, best_dir / pid)
+
+            with open(best_auc_file, "w") as f_out:
+                json.dump({"mean_auc": current_auc}, f_out, indent=2)
+        else:
+            print(f"  No improvement, best_model/ unchanged")
 
 
 if __name__ == "__main__":

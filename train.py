@@ -347,6 +347,8 @@ def optimize_running_average(predictions, labels, max_window=30):
     for window_size in range(5, max_window + 1):
         kernel = np.ones(window_size)
         smoothed_sums = np.convolve(preds_np, kernel, mode="same")
+        # Ensure convolution output matches label length
+        smoothed_sums = smoothed_sums[:min_len]
 
         for count_threshold in range(1, window_size + 1):
             final_preds = (smoothed_sums >= count_threshold).astype(int)
@@ -631,6 +633,10 @@ class EEGTrainer:
 
         all_probs = np.array(tracker.probabilities)
         all_labels = np.array(tracker.true_labels)
+        # Safety: ensure same length
+        n = min(len(all_probs), len(all_labels))
+        all_probs = all_probs[:n]
+        all_labels = all_labels[:n]
         optimized_preds = (all_probs >= optimal_threshold).astype(int)
         best_window, best_count = optimize_running_average(optimized_preds, all_labels)
 
